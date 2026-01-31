@@ -2301,6 +2301,345 @@ impl From<(u16, u16, u16, u16)> for Sides {
 }
 ```
 
+### 11.3 Panel Component
+
+```rust
+/// Bordered container with optional title
+pub struct Panel<C: Renderable> {
+    content: C,
+    border: BorderStyle,
+    border_fg: Option<Color>,
+    title: Option<String>,
+    title_align: HAlign,
+    style: Style,
+}
+
+impl<C: Renderable> Panel<C> {
+    pub fn new(content: C) -> Self {
+        Self {
+            content,
+            border: BorderStyle::Rounded,
+            border_fg: None,
+            title: None,
+            title_align: HAlign::Left,
+            style: Style::default(),
+        }
+    }
+
+    pub fn border(mut self, style: BorderStyle) -> Self {
+        self.border = style;
+        self
+    }
+
+    pub fn border_fg(mut self, color: impl Into<Color>) -> Self {
+        self.border_fg = Some(color.into());
+        self
+    }
+
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    pub fn title_align(mut self, align: HAlign) -> Self {
+        self.title_align = align;
+        self
+    }
+
+    pub fn style(mut self, style: Style) -> Self {
+        self.style = style;
+        self
+    }
+}
+
+impl<C: Renderable> Renderable for Panel<C> {
+    fn measure(&self, ctx: &RenderContext) -> Measurement {
+        let inner = self.content.measure(ctx);
+        let border_w = if matches!(self.border, BorderStyle::None) { 0 } else { 2 };
+        let padding_w = self.style.padding.horizontal() as usize;
+
+        Measurement {
+            minimum: inner.minimum + border_w + padding_w,
+            maximum: inner.maximum + border_w + padding_w,
+        }
+    }
+
+    fn render(&self, ctx: &RenderContext, area: Rect, buf: &mut Buffer) {
+        let border = match self.border {
+            BorderStyle::None => return self.content.render(ctx, area, buf),
+            BorderStyle::Rounded => Border::rounded(),
+            BorderStyle::Square => Border::square(),
+            BorderStyle::Double => Border::double(),
+            BorderStyle::Heavy => Border::heavy(),
+            BorderStyle::Ascii => Border::ascii(),
+            BorderStyle::Hidden => Border::hidden(),
+            BorderStyle::Custom(ref b) => b.clone(),
+        };
+
+        let fg = self.border_fg.as_ref()
+            .map(|c| c.resolve(&ctx.theme))
+            .unwrap_or(ctx.theme.foreground());
+
+        // Draw corners
+        buf.set(area.x, area.y, Cell::char(border.top_left).fg(fg));
+        buf.set(area.x + area.width - 1, area.y, Cell::char(border.top_right).fg(fg));
+        buf.set(area.x, area.y + area.height - 1, Cell::char(border.bottom_left).fg(fg));
+        buf.set(area.x + area.width - 1, area.y + area.height - 1, Cell::char(border.bottom_right).fg(fg));
+
+        // Draw edges and optional title
+        for x in 1..(area.width - 1) {
+            buf.set(area.x + x, area.y, Cell::char(border.top).fg(fg));
+            buf.set(area.x + x, area.y + area.height - 1, Cell::char(border.bottom).fg(fg));
+        }
+        for y in 1..(area.height - 1) {
+            buf.set(area.x, area.y + y, Cell::char(border.left).fg(fg));
+            buf.set(area.x + area.width - 1, area.y + y, Cell::char(border.right).fg(fg));
+        }
+
+        // Title overlay on top edge
+        if let Some(ref title) = self.title {
+            let title_x = match self.title_align {
+                HAlign::Left => area.x + 2,
+                HAlign::Center => area.x + (area.width - title.len() as u16) / 2,
+                HAlign::Right => area.x + area.width - title.len() as u16 - 2,
+            };
+            for (i, c) in title.chars().enumerate() {
+                buf.set(title_x + i as u16, area.y, Cell::char(c).fg(fg));
+            }
+        }
+
+        // Render content in inner area
+        let inner = area.inner(Sides { top: 1, right: 1, bottom: 1, left: 1 });
+        buf.push_scissor(inner);
+        self.content.render(ctx, inner, buf);
+        buf.pop_scissor();
+    }
+}
+```
+
+### 11.4 Spinner Component
+
+```rust
+use std::time::{Duration, Instant};
+
+pub struct Spinner {
+    style: SpinnerStyle,
+    message: String,
+    frame: usize,
+    last_tick: Instant,
+    fg: Option<Color>,
+}
+
+#[derive(Clone)]
+pub enum SpinnerStyle {
+    Dots,
+    Line,
+    Braille,
+    Bounce,
+    Custom(Vec<&'static str>),
+}
+
+impl SpinnerStyle {
+    fn frames(&self) -> &[&str] {
+        match self {
+            Self::Dots => &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+            Self::Line => &["-", "\\", "|", "/"],
+            Self::Braille => &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
+            Self::Bounce => &["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈"],
+            Self::Custom(frames) => frames,
+        }
+    }
+
+    fn frame_duration(&self) -> Duration {
+        match self {
+            Self::Dots | Self::Braille => Duration::from_millis(80),
+            Self::Line => Duration::from_millis(100),
+            Self::Bounce => Duration::from_millis(120),
+            Self::Custom(_) => Duration::from_millis(80),
+        }
+    }
+}
+
+impl Spinner {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            style: SpinnerStyle::Dots,
+            message: message.into(),
+            frame: 0,
+            last_tick: Instant::now(),
+            fg: None,
+        }
+    }
+
+    pub fn style(mut self, style: SpinnerStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    pub fn fg(mut self, color: impl Into<Color>) -> Self {
+        self.fg = Some(color.into());
+        self
+    }
+
+    /// Advance animation frame if enough time has passed
+    /// Returns true if frame changed (needs redraw)
+    pub fn tick(&mut self) -> bool {
+        if self.last_tick.elapsed() >= self.style.frame_duration() {
+            self.frame = (self.frame + 1) % self.style.frames().len();
+            self.last_tick = Instant::now();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Renderable for Spinner {
+    fn measure(&self, _ctx: &RenderContext) -> Measurement {
+        let frame_width = 2;
+        let msg_width = unicode_width::UnicodeWidthStr::width(self.message.as_str());
+        Measurement {
+            min_width: (frame_width + 1 + msg_width) as u16,
+            min_height: 1,
+            max_width: Some((frame_width + 1 + msg_width) as u16),
+            max_height: Some(1),
+        }
+    }
+
+    fn render(&self, ctx: &RenderContext, area: Rect, buf: &mut Buffer) {
+        let frame = self.style.frames()[self.frame];
+        let fg = self.fg.as_ref()
+            .map(|c| c.resolve(&ctx.theme))
+            .unwrap_or(ctx.theme.primary());
+
+        // Draw spinner frame
+        for (i, c) in frame.chars().enumerate() {
+            if area.x + i as u16 >= area.x + area.width { break; }
+            buf.set(area.x + i as u16, area.y, Cell::char(c).fg(fg));
+        }
+
+        // Draw message
+        let msg_x = area.x + 2;
+        for (i, c) in self.message.chars().enumerate() {
+            let x = msg_x + i as u16;
+            if x >= area.x + area.width { break; }
+            buf.set(x, area.y, Cell::char(c));
+        }
+    }
+}
+```
+
+### 11.5 Progress Bar
+
+```rust
+pub struct Progress {
+    value: f32,
+    label: Option<String>,
+    filled_char: char,
+    empty_char: char,
+    filled_fg: Option<Color>,
+    empty_fg: Option<Color>,
+    show_percentage: bool,
+}
+
+impl Progress {
+    pub fn new(value: f32) -> Self {
+        Self {
+            value: value.clamp(0.0, 1.0),
+            label: None,
+            filled_char: '█',
+            empty_char: '░',
+            filled_fg: None,
+            empty_fg: None,
+            show_percentage: true,
+        }
+    }
+
+    pub fn value(mut self, v: f32) -> Self {
+        self.value = v.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    pub fn show_percentage(mut self, show: bool) -> Self {
+        self.show_percentage = show;
+        self
+    }
+
+    pub fn filled_fg(mut self, color: impl Into<Color>) -> Self {
+        self.filled_fg = Some(color.into());
+        self
+    }
+
+    pub fn set(&mut self, value: f32) {
+        self.value = value.clamp(0.0, 1.0);
+    }
+}
+
+impl Renderable for Progress {
+    fn measure(&self, _ctx: &RenderContext) -> Measurement {
+        let label_w = self.label.as_ref().map(|l| l.len() + 1).unwrap_or(0);
+        let pct_w = if self.show_percentage { 5 } else { 0 };
+        Measurement {
+            min_width: (label_w + 10 + pct_w) as u16,
+            min_height: 1,
+            max_width: Some((label_w + 50 + pct_w) as u16),
+            max_height: Some(1),
+        }
+    }
+
+    fn render(&self, ctx: &RenderContext, area: Rect, buf: &mut Buffer) {
+        let mut x = area.x;
+
+        // Label
+        if let Some(ref label) = self.label {
+            for c in label.chars() {
+                if x >= area.x + area.width { break; }
+                buf.set(x, area.y, Cell::char(c));
+                x += 1;
+            }
+            x += 1;
+        }
+
+        // Bar
+        let pct_width = if self.show_percentage { 5 } else { 0 };
+        let bar_width = (area.width as usize).saturating_sub((x - area.x) as usize + pct_width);
+        let filled_width = ((bar_width as f32) * self.value) as usize;
+
+        let filled_fg = self.filled_fg.as_ref()
+            .map(|c| c.resolve(&ctx.theme))
+            .unwrap_or(ctx.theme.primary());
+        let empty_fg = self.empty_fg.as_ref()
+            .map(|c| c.resolve(&ctx.theme))
+            .unwrap_or(ctx.theme.muted());
+
+        for i in 0..bar_width {
+            let (ch, fg) = if i < filled_width {
+                (self.filled_char, filled_fg)
+            } else {
+                (self.empty_char, empty_fg)
+            };
+            buf.set(x, area.y, Cell::char(ch).fg(fg));
+            x += 1;
+        }
+
+        // Percentage
+        if self.show_percentage {
+            let pct = format!(" {:>3}%", (self.value * 100.0) as u8);
+            for c in pct.chars() {
+                if x >= area.x + area.width { break; }
+                buf.set(x, area.y, Cell::char(c));
+                x += 1;
+            }
+        }
+    }
+}
+```
+
 ---
 
 ## Chapter 12: Runtime + Agent Harness API
@@ -2811,6 +3150,697 @@ Inline mode notes:
 
 6) **Interleaved stdout writes from user code**
    - Mitigation: provide a `TerminalSession`/`TerminalWriter` API and recommend exclusive ownership patterns.
+
+---
+
+## Appendix D: Extracted Library Implementations
+
+This appendix contains detailed code extractions from the three source libraries that form the basis of FrankenTUI's design.
+
+### D.1 From rich_rust: Segment System
+
+The Segment is the atomic unit of styled text. Key insight: use `Cow<str>` to avoid allocation when borrowing.
+
+```rust
+/// Atomic rendering unit - styled text slice
+/// From rich_rust/src/segment.rs
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Segment<'a> {
+    pub text: Cow<'a, str>,              // Borrowed when possible
+    pub style: Option<Style>,
+    pub control: Option<SmallVec<[ControlCode; 2]>>,  // Stack-allocated for 0-2 codes
+}
+
+/// Control codes for cursor/screen manipulation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum ControlType {
+    Bell = 1,
+    CarriageReturn = 2,
+    Home = 3,
+    Clear = 4,
+    ShowCursor = 5,
+    HideCursor = 6,
+    EnableAltScreen = 7,
+    DisableAltScreen = 8,
+    CursorUp = 9,
+    CursorDown = 10,
+    CursorForward = 11,
+    CursorBack = 12,
+    CursorNextLine = 13,
+    CursorPrevLine = 14,
+    EraseLine = 15,
+    SetTitle = 16,
+}
+
+impl<'a> Segment<'a> {
+    /// Split segment at cell position (not byte position!)
+    /// Critical for correct text wrapping with wide chars
+    pub fn split_at_cell(&self, cell_pos: usize) -> (Self, Self) {
+        if self.is_control() {
+            return (self.clone(), Self::default());
+        }
+
+        let mut width = 0;
+        let mut byte_pos = 0;
+
+        for (i, c) in self.text.char_indices() {
+            let char_width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+            if width + char_width > cell_pos {
+                break;
+            }
+            width += char_width;
+            byte_pos = i + c.len_utf8();
+        }
+
+        // Optimized split using Cow to avoid unnecessary allocation
+        let (left, right) = match &self.text {
+            Cow::Borrowed(s) => {
+                let (l, r) = s.split_at(byte_pos);
+                (Cow::Borrowed(l), Cow::Borrowed(r))
+            }
+            Cow::Owned(s) => {
+                let (l, r) = s.split_at(byte_pos);
+                (Cow::Owned(l.to_string()), Cow::Owned(r.to_string()))
+            }
+        };
+
+        (
+            Self::new(left, self.style.clone()),
+            Self::new(right, self.style.clone()),
+        )
+    }
+
+    /// Cell width (display width, not byte length)
+    pub fn cell_length(&self) -> usize {
+        if self.is_control() { return 0; }
+        unicode_width::UnicodeWidthStr::width(self.text.as_ref())
+    }
+}
+```
+
+### D.2 From rich_rust: Markup Parser
+
+Regex-based parser for Rich-style markup like `[bold red]text[/]`.
+
+```rust
+use std::sync::LazyLock;
+use regex::Regex;
+
+/// Markup tag pattern: [style] or [/style] or [/]
+static TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(\\*)\[([A-Za-z#/@][^\[\]]*?)\]").expect("invalid regex")
+});
+
+/// Parsed tag from markup
+#[derive(Debug, Clone)]
+pub struct Tag {
+    pub name: String,
+    pub parameters: Option<String>,
+}
+
+impl Tag {
+    pub fn is_closing(&self) -> bool {
+        self.name.starts_with('/')
+    }
+
+    pub fn base_name(&self) -> &str {
+        self.name.trim_start_matches('/')
+    }
+}
+
+/// Parse markup with style stack for nesting
+/// Handles escape sequences: \\[ becomes literal [
+pub fn parse_markup<'a>(markup: &'a str, base_style: Style) -> Vec<Segment<'a>> {
+    // Fast path: no markup tags
+    if !markup.contains('[') {
+        return vec![Segment::new(Cow::Borrowed(markup), Some(base_style))];
+    }
+
+    let mut segments = Vec::new();
+    let mut style_stack: Vec<(usize, Style)> = vec![(0, base_style.clone())];
+    let mut current_text = String::new();
+    let mut last_end = 0;
+
+    for cap in TAG_PATTERN.captures_iter(markup) {
+        let full_match = cap.get(0).unwrap();
+        let backslashes = cap.get(1).map_or("", |m| m.as_str());
+        let tag_content = cap.get(2).map_or("", |m| m.as_str());
+        let match_start = full_match.start();
+
+        // Text before this match
+        if match_start > last_end {
+            current_text.push_str(&markup[last_end..match_start]);
+        }
+
+        // Handle escape sequences
+        let num_backslashes = backslashes.len();
+        let escaped = num_backslashes % 2 == 1;
+
+        // Add literal backslashes (pairs become singles)
+        if num_backslashes > 0 {
+            current_text.push_str(&"\\".repeat(num_backslashes / 2));
+        }
+
+        if escaped {
+            // Escaped bracket: literal text
+            current_text.push('[');
+            current_text.push_str(tag_content);
+            current_text.push(']');
+        } else {
+            // Emit accumulated text with current style
+            if !current_text.is_empty() {
+                let style = style_stack.last().map(|(_, s)| s.clone());
+                segments.push(Segment::new(
+                    Cow::Owned(std::mem::take(&mut current_text)),
+                    style,
+                ));
+            }
+
+            // Process tag
+            let tag = parse_tag(tag_content);
+            if tag.is_closing() {
+                // Pop matching style from stack
+                if style_stack.len() > 1 {
+                    style_stack.pop();
+                }
+            } else {
+                // Opening tag: push new style
+                let new_style = parse_style_tag(&tag, style_stack.last().map(|(_, s)| s));
+                style_stack.push((segments.len(), new_style));
+            }
+        }
+
+        last_end = full_match.end();
+    }
+
+    // Remaining text
+    if last_end < markup.len() {
+        current_text.push_str(&markup[last_end..]);
+    }
+    if !current_text.is_empty() {
+        let style = style_stack.last().map(|(_, s)| s.clone());
+        segments.push(Segment::new(Cow::Owned(current_text), style));
+    }
+
+    segments
+}
+```
+
+### D.3 From rich_rust: Measurement Protocol
+
+```rust
+/// Measurement for layout negotiation
+/// Tracks minimum (tightest) and maximum (ideal) widths
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TextMeasurement {
+    pub minimum: usize,  // Minimum cells required (tightest compression)
+    pub maximum: usize,  // Maximum cells required (ideal unconstrained)
+}
+
+impl TextMeasurement {
+    pub const ZERO: Self = Self { minimum: 0, maximum: 0 };
+
+    /// Union: take max of both bounds (for side-by-side layout)
+    pub fn union(self, other: Self) -> Self {
+        Self {
+            minimum: self.minimum.max(other.minimum),
+            maximum: self.maximum.max(other.maximum),
+        }
+    }
+
+    /// Stack: add both bounds (for vertical stacking)
+    pub fn stack(self, other: Self) -> Self {
+        Self {
+            minimum: self.minimum + other.minimum,
+            maximum: self.maximum + other.maximum,
+        }
+    }
+
+    /// Clamp to constraints
+    pub fn clamp(self, min_width: Option<usize>, max_width: Option<usize>) -> Self {
+        let mut result = self;
+        if let Some(min_w) = min_width {
+            result.minimum = result.minimum.max(min_w);
+            result.maximum = result.maximum.max(min_w);
+        }
+        if let Some(max_w) = max_width {
+            result.minimum = result.minimum.min(max_w);
+            result.maximum = result.maximum.min(max_w);
+        }
+        result
+    }
+}
+```
+
+### D.4 From charmed_rust: Style with Bitflags Property Tracking
+
+```rust
+use bitflags::bitflags;
+
+bitflags! {
+    /// Tracks which properties have been explicitly set
+    /// Enables proper inheritance: unset properties inherit from parent
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Props: u64 {
+        const BOLD = 1 << 0;
+        const ITALIC = 1 << 1;
+        const UNDERLINE = 1 << 2;
+        const STRIKETHROUGH = 1 << 3;
+        const BLINK = 1 << 4;
+        const REVERSE = 1 << 5;
+        const DIM = 1 << 6;
+        const HIDDEN = 1 << 7;
+
+        const FG_COLOR = 1 << 8;
+        const BG_COLOR = 1 << 9;
+
+        const WIDTH = 1 << 10;
+        const HEIGHT = 1 << 11;
+        const MAX_WIDTH = 1 << 12;
+        const MAX_HEIGHT = 1 << 13;
+
+        const PADDING_TOP = 1 << 14;
+        const PADDING_RIGHT = 1 << 15;
+        const PADDING_BOTTOM = 1 << 16;
+        const PADDING_LEFT = 1 << 17;
+
+        const MARGIN_TOP = 1 << 18;
+        const MARGIN_RIGHT = 1 << 19;
+        const MARGIN_BOTTOM = 1 << 20;
+        const MARGIN_LEFT = 1 << 21;
+
+        const BORDER_STYLE = 1 << 22;
+        const BORDER_TOP = 1 << 23;
+        const BORDER_RIGHT = 1 << 24;
+        const BORDER_BOTTOM = 1 << 25;
+        const BORDER_LEFT = 1 << 26;
+
+        const ALIGN_H = 1 << 27;
+        const ALIGN_V = 1 << 28;
+
+        const LINK = 1 << 29;
+        const TAB_WIDTH = 1 << 30;
+    }
+}
+
+/// Full style with all properties and explicit tracking
+#[derive(Clone, Default)]
+pub struct FullStyle {
+    props: Props,              // Which properties are explicitly set
+    attrs: StyleFlags,         // Boolean attributes
+    fg_color: Option<Color>,
+    bg_color: Option<Color>,
+    width: u16,
+    height: u16,
+    max_width: u16,
+    max_height: u16,
+    padding: Sides<u16>,
+    margin: Sides<u16>,
+    border_style: BorderStyle,
+    align_h: HAlign,
+    align_v: VAlign,
+    link: Option<String>,
+}
+
+impl FullStyle {
+    pub fn new() -> Self { Self::default() }
+
+    // Fluent builders that track which properties are set
+
+    pub fn fg(mut self, color: impl Into<Color>) -> Self {
+        self.fg_color = Some(color.into());
+        self.props |= Props::FG_COLOR;
+        self
+    }
+
+    pub fn bg(mut self, color: impl Into<Color>) -> Self {
+        self.bg_color = Some(color.into());
+        self.props |= Props::BG_COLOR;
+        self
+    }
+
+    pub fn bold(mut self) -> Self {
+        self.attrs |= StyleFlags::BOLD;
+        self.props |= Props::BOLD;
+        self
+    }
+
+    pub fn italic(mut self) -> Self {
+        self.attrs |= StyleFlags::ITALIC;
+        self.props |= Props::ITALIC;
+        self
+    }
+
+    pub fn padding<E: Into<Sides<u16>>>(mut self, edges: E) -> Self {
+        self.padding = edges.into();
+        self.props |= Props::PADDING_TOP | Props::PADDING_RIGHT |
+                      Props::PADDING_BOTTOM | Props::PADDING_LEFT;
+        self
+    }
+
+    /// Inherit unset properties from parent
+    pub fn inherit(mut self, parent: &FullStyle) -> Self {
+        let unset = !self.props;
+
+        if unset.contains(Props::FG_COLOR) {
+            self.fg_color = parent.fg_color.clone();
+        }
+        if unset.contains(Props::BG_COLOR) {
+            self.bg_color = parent.bg_color.clone();
+        }
+        // Merge attributes for unset flags
+        self.attrs |= parent.attrs & StyleFlags::from_bits_truncate(unset.bits() as u8);
+
+        self
+    }
+}
+```
+
+### D.5 From charmed_rust: Border System
+
+```rust
+/// Complete border definition with all corners and edges
+#[derive(Clone, Debug)]
+pub struct Border {
+    pub top: char,
+    pub bottom: char,
+    pub left: char,
+    pub right: char,
+    pub top_left: char,
+    pub top_right: char,
+    pub bottom_left: char,
+    pub bottom_right: char,
+    // For tables with internal dividers
+    pub middle_left: char,
+    pub middle_right: char,
+    pub middle: char,
+    pub middle_top: char,
+    pub middle_bottom: char,
+}
+
+impl Border {
+    pub fn rounded() -> Self {
+        Self {
+            top: '─', bottom: '─', left: '│', right: '│',
+            top_left: '╭', top_right: '╮',
+            bottom_left: '╰', bottom_right: '╯',
+            middle_left: '├', middle_right: '┤',
+            middle: '┼', middle_top: '┬', middle_bottom: '┴',
+        }
+    }
+
+    pub fn square() -> Self {
+        Self {
+            top: '─', bottom: '─', left: '│', right: '│',
+            top_left: '┌', top_right: '┐',
+            bottom_left: '└', bottom_right: '┘',
+            middle_left: '├', middle_right: '┤',
+            middle: '┼', middle_top: '┬', middle_bottom: '┴',
+        }
+    }
+
+    pub fn double() -> Self {
+        Self {
+            top: '═', bottom: '═', left: '║', right: '║',
+            top_left: '╔', top_right: '╗',
+            bottom_left: '╚', bottom_right: '╝',
+            middle_left: '╠', middle_right: '╣',
+            middle: '╬', middle_top: '╦', middle_bottom: '╩',
+        }
+    }
+
+    pub fn heavy() -> Self {
+        Self {
+            top: '━', bottom: '━', left: '┃', right: '┃',
+            top_left: '┏', top_right: '┓',
+            bottom_left: '┗', bottom_right: '┛',
+            middle_left: '┣', middle_right: '┫',
+            middle: '╋', middle_top: '┳', middle_bottom: '┻',
+        }
+    }
+
+    pub fn ascii() -> Self {
+        Self {
+            top: '-', bottom: '-', left: '|', right: '|',
+            top_left: '+', top_right: '+',
+            bottom_left: '+', bottom_right: '+',
+            middle_left: '+', middle_right: '+',
+            middle: '+', middle_top: '+', middle_bottom: '+',
+        }
+    }
+
+    pub fn hidden() -> Self {
+        Self {
+            top: ' ', bottom: ' ', left: ' ', right: ' ',
+            top_left: ' ', top_right: ' ',
+            bottom_left: ' ', bottom_right: ' ',
+            middle_left: ' ', middle_right: ' ',
+            middle: ' ', middle_top: ' ', middle_bottom: ' ',
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub enum BorderStyle {
+    #[default]
+    None,
+    Rounded,
+    Square,
+    Double,
+    Heavy,
+    Ascii,
+    Hidden,
+    Custom(Border),
+}
+```
+
+### D.6 From charmed_rust: Color System with Profile Detection
+
+```rust
+/// Color profile (terminal capability level)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ColorProfile {
+    Ascii,      // No color (1-bit)
+    Ansi,       // 16 colors (4-bit)
+    Ansi256,    // 256 colors (8-bit)
+    TrueColor,  // 16 million colors (24-bit)
+}
+
+impl ColorProfile {
+    /// Detect from environment
+    pub fn detect() -> Self {
+        // Check NO_COLOR first (standard for disabling color)
+        if std::env::var("NO_COLOR").is_ok() {
+            return Self::Ascii;
+        }
+
+        // Check COLORTERM for true color
+        if let Ok(colorterm) = std::env::var("COLORTERM") {
+            if colorterm == "truecolor" || colorterm == "24bit" {
+                return Self::TrueColor;
+            }
+        }
+
+        // Check TERM
+        if let Ok(term) = std::env::var("TERM") {
+            if term.contains("kitty") || term.contains("wezterm") ||
+               term.contains("alacritty") || term.contains("ghostty") {
+                return Self::TrueColor;
+            }
+            if term.contains("256color") {
+                return Self::Ansi256;
+            }
+            if term.contains("color") || term.starts_with("xterm") {
+                return Self::Ansi;
+            }
+            if term == "dumb" {
+                return Self::Ascii;
+            }
+        }
+
+        // Conservative default
+        Self::TrueColor
+    }
+}
+
+/// Color that can be resolved against a profile
+#[derive(Clone, Debug)]
+pub enum AdaptiveColor {
+    /// Direct RGB value
+    Rgb(u8, u8, u8),
+    /// ANSI color index (0-255)
+    Ansi(u8),
+    /// Named color (resolved from theme)
+    Named(String),
+    /// Adaptive color (different for light/dark)
+    Adaptive { light: Box<AdaptiveColor>, dark: Box<AdaptiveColor> },
+}
+
+impl AdaptiveColor {
+    /// Parse from string: "#RGB", "#RRGGBB", "red", "123" (ANSI)
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim();
+
+        // Hex color
+        if s.starts_with('#') {
+            let hex = &s[1..];
+            return match hex.len() {
+                3 => {
+                    let r = u8::from_str_radix(&hex[0..1], 16).ok()? * 17;
+                    let g = u8::from_str_radix(&hex[1..2], 16).ok()? * 17;
+                    let b = u8::from_str_radix(&hex[2..3], 16).ok()? * 17;
+                    Some(Self::Rgb(r, g, b))
+                }
+                6 => {
+                    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+                    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+                    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+                    Some(Self::Rgb(r, g, b))
+                }
+                _ => None,
+            };
+        }
+
+        // ANSI index
+        if let Ok(n) = s.parse::<u8>() {
+            return Some(Self::Ansi(n));
+        }
+
+        // Named color
+        Some(Self::Named(s.to_string()))
+    }
+}
+
+/// Convert RGB to 256-color palette index
+fn rgb_to_256(r: u8, g: u8, b: u8) -> u8 {
+    // Check grayscale first (more accurate for grays)
+    if r == g && g == b {
+        if r < 8 { return 16; }
+        if r > 248 { return 231; }
+        return 232 + ((r - 8) / 10).min(23);
+    }
+
+    // 6×6×6 color cube
+    let r6 = (r as u16 * 6 / 256) as u8;
+    let g6 = (g as u16 * 6 / 256) as u8;
+    let b6 = (b as u16 * 6 / 256) as u8;
+    16 + 36 * r6 + 6 * g6 + b6
+}
+
+/// Convert RGB to 16-color ANSI index
+fn rgb_to_16(r: u8, g: u8, b: u8) -> u8 {
+    let brightness = ((r as u16 + g as u16 + b as u16) / 3) as u8;
+    let bright = brightness > 127;
+
+    let base = match (r > 127, g > 127, b > 127) {
+        (false, false, false) => 0,
+        (true, false, false) => 1,
+        (false, true, false) => 2,
+        (true, true, false) => 3,
+        (false, false, true) => 4,
+        (true, false, true) => 5,
+        (false, true, true) => 6,
+        (true, true, true) => 7,
+    };
+
+    if bright { base + 8 } else { base }
+}
+```
+
+---
+
+## Appendix E: Performance Benchmarks
+
+### E.1 Target Metrics
+
+| Operation | Target | Justification |
+|-----------|--------|---------------|
+| Cell comparison | < 1ns | Bitwise u128 compare |
+| Buffer diff (80×24) | < 500µs | Sequential scan, SIMD |
+| Frame render | < 1ms | Required for 60 FPS |
+| Input parse | < 20µs/event | State machine |
+| Style parse | < 8µs (cached) | From rich_rust benchmarks |
+| Color blend | < 10ns | Single Porter-Duff op |
+| Grapheme intern (hit) | < 100ns | Hash lookup |
+| Grapheme intern (miss) | < 1µs | Hash + alloc + width |
+
+### E.2 Benchmark Framework
+
+```rust
+#[cfg(test)]
+mod benchmarks {
+    use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+    fn bench_cell_comparison(c: &mut Criterion) {
+        let cell_a = Cell::new('A', Style::default());
+        let cell_b = Cell::new('B', Style::default());
+
+        c.bench_function("cell_bits_eq", |b| {
+            b.iter(|| black_box(cell_a.bits_eq(&cell_b)))
+        });
+    }
+
+    fn bench_buffer_diff(c: &mut Criterion) {
+        let buf1 = Buffer::new(80, 24);
+        let mut buf2 = Buffer::new(80, 24);
+
+        // 5% cells changed
+        for i in 0..96 {
+            buf2.cells[i * 20] = Cell::new('X', Style::default());
+        }
+
+        c.bench_function("buffer_diff_5pct", |b| {
+            b.iter(|| black_box(BufferDiff::compute(&buf1, &buf2)))
+        });
+    }
+
+    fn bench_grapheme_pool(c: &mut Criterion) {
+        let mut pool = GraphemePool::new();
+
+        // Pre-populate
+        pool.intern("hello");
+        pool.intern("world");
+        pool.intern("👨‍👩‍👧");
+
+        c.bench_function("grapheme_intern_hit", |b| {
+            b.iter(|| black_box(pool.intern("hello")))
+        });
+
+        c.bench_function("grapheme_intern_miss", |b| {
+            let mut i = 0;
+            b.iter(|| {
+                let s = format!("new_grapheme_{}", i);
+                i += 1;
+                black_box(pool.intern(&s))
+            })
+        });
+    }
+
+    fn bench_presenter_emit(c: &mut Criterion) {
+        let buf = Buffer::new(80, 24);
+        let pool = GraphemePool::new();
+        let links = LinkRegistry::new();
+        let caps = TerminalCapabilities::detect();
+
+        c.bench_function("presenter_full_frame", |b| {
+            b.iter(|| {
+                let mut output = Vec::with_capacity(64 * 1024);
+                let mut presenter = Presenter::new(&mut output, caps.clone());
+                black_box(presenter.present_full(&buf, &pool, &links))
+            })
+        });
+    }
+
+    criterion_group!(benches,
+        bench_cell_comparison,
+        bench_buffer_diff,
+        bench_grapheme_pool,
+        bench_presenter_emit
+    );
+    criterion_main!(benches);
+}
+```
 
 ---
 
