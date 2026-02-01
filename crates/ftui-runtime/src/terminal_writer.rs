@@ -781,4 +781,122 @@ mod tests {
         assert!(output_str.contains('i'));
         assert!(output_str.contains('!'));
     }
+
+    #[test]
+    fn resize_reanchors_ui_region() {
+        let output = Vec::new();
+        let mut writer = TerminalWriter::new(
+            output,
+            ScreenMode::Inline { ui_height: 10 },
+            UiAnchor::Bottom,
+            basic_caps(),
+        );
+
+        // Initial size: 80x24, UI at row 14 (24 - 10)
+        writer.set_size(80, 24);
+        assert_eq!(writer.ui_start_row(), 14);
+
+        // After resize to 80x40, UI should be at row 30 (40 - 10)
+        writer.set_size(80, 40);
+        assert_eq!(writer.ui_start_row(), 30);
+
+        // After resize to smaller 80x15, UI at row 5 (15 - 10)
+        writer.set_size(80, 15);
+        assert_eq!(writer.ui_start_row(), 5);
+    }
+
+    #[test]
+    fn resize_with_top_anchor_stays_at_zero() {
+        let output = Vec::new();
+        let mut writer = TerminalWriter::new(
+            output,
+            ScreenMode::Inline { ui_height: 10 },
+            UiAnchor::Top,
+            basic_caps(),
+        );
+
+        writer.set_size(80, 24);
+        assert_eq!(writer.ui_start_row(), 0);
+
+        writer.set_size(80, 40);
+        assert_eq!(writer.ui_start_row(), 0);
+    }
+
+    #[test]
+    fn inline_mode_never_clears_full_screen() {
+        let mut output = Vec::new();
+        {
+            let mut writer = TerminalWriter::new(
+                &mut output,
+                ScreenMode::Inline { ui_height: 5 },
+                UiAnchor::Bottom,
+                basic_caps(),
+            );
+            writer.set_size(10, 10);
+
+            let buffer = Buffer::new(10, 5);
+            writer.present_ui(&buffer).unwrap();
+        }
+
+        // Should NOT contain full screen clear (ED2 = "\x1b[2J")
+        let has_ed2 = output.windows(4).any(|w| w == b"\x1b[2J");
+        assert!(!has_ed2, "Inline mode should never use full screen clear");
+
+        // Should contain individual line clears (EL = "\x1b[2K")
+        assert!(output.windows(ERASE_LINE.len()).any(|w| w == ERASE_LINE));
+    }
+
+    #[test]
+    fn present_after_log_maintains_cursor_position() {
+        let mut output = Vec::new();
+        {
+            let mut writer = TerminalWriter::new(
+                &mut output,
+                ScreenMode::Inline { ui_height: 5 },
+                UiAnchor::Bottom,
+                basic_caps(),
+            );
+            writer.set_size(10, 10);
+
+            // Present UI first
+            let buffer = Buffer::new(10, 5);
+            writer.present_ui(&buffer).unwrap();
+
+            // Write a log
+            writer.write_log("log line\n").unwrap();
+
+            // Present UI again
+            writer.present_ui(&buffer).unwrap();
+        }
+
+        // Should have cursor save before each UI present
+        let save_count = output.windows(CURSOR_SAVE.len())
+            .filter(|w| *w == CURSOR_SAVE)
+            .count();
+        assert_eq!(save_count, 2, "Should have saved cursor twice");
+
+        // Should have cursor restore after each UI present
+        let restore_count = output.windows(CURSOR_RESTORE.len())
+            .filter(|w| *w == CURSOR_RESTORE)
+            .count();
+        // At least 2 from presents, plus 1 from drop cleanup = 3
+        assert!(restore_count >= 2, "Should have restored cursor at least twice");
+    }
+
+    #[test]
+    fn ui_height_bounds_check() {
+        let output = Vec::new();
+        let mut writer = TerminalWriter::new(
+            output,
+            ScreenMode::Inline { ui_height: 100 },
+            UiAnchor::Bottom,
+            basic_caps(),
+        );
+
+        // Terminal smaller than UI height
+        writer.set_size(80, 10);
+
+        // Should saturate to 0, not underflow
+        assert_eq!(writer.ui_start_row(), 0);
+    }
 }
