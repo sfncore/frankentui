@@ -11,7 +11,6 @@
 use ftui_core::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use ftui_core::geometry::Rect;
 use ftui_layout::{Constraint, Flex};
-use ftui_render::cell::PackedRgba;
 use ftui_render::frame::Frame;
 use ftui_runtime::Cmd;
 use ftui_style::Style;
@@ -112,14 +111,16 @@ impl Performance {
             }
 
             let style = if idx == self.selected {
-                Style::new().fg(theme::fg::PRIMARY).bg(theme::bg::HIGHLIGHT)
+                Style::new()
+                    .fg(theme::fg::PRIMARY)
+                    .bg(theme::alpha::HIGHLIGHT)
             } else {
                 let severity_color = match idx % 5 {
-                    0 => theme::fg::PRIMARY,             // INFO
-                    1 => theme::fg::MUTED,               // DEBUG
-                    2 => PackedRgba::rgb(255, 200, 80),  // WARN
-                    3 => PackedRgba::rgb(255, 100, 100), // ERROR
-                    _ => theme::fg::DISABLED,            // TRACE
+                    0 => theme::fg::PRIMARY,     // INFO
+                    1 => theme::fg::MUTED,       // DEBUG
+                    2 => theme::accent::WARNING, // WARN
+                    3 => theme::accent::ERROR,   // ERROR
+                    _ => theme::fg::DISABLED,    // TRACE
                 };
                 Style::new().fg(severity_color)
             };
@@ -295,7 +296,7 @@ impl Screen for Performance {
             self.items.len()
         );
         Paragraph::new(&*status)
-            .style(Style::new().fg(theme::fg::MUTED).bg(theme::bg::SURFACE))
+            .style(Style::new().fg(theme::fg::MUTED).bg(theme::alpha::SURFACE))
             .render(main[1], frame);
     }
 

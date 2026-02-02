@@ -15,7 +15,6 @@ use ftui_core::geometry::Rect;
 use ftui_extras::timer::{DisplayFormat, Timer};
 use ftui_extras::traceback::{Traceback, TracebackFrame};
 use ftui_layout::{Constraint, Flex};
-use ftui_render::cell::PackedRgba;
 use ftui_render::frame::Frame;
 use ftui_runtime::Cmd;
 use ftui_style::Style;
@@ -220,7 +219,7 @@ impl AdvancedFeatures {
                 .collect();
             let label = format!("Progress: {bar}");
             Paragraph::new(&*label)
-                .style(Style::new().fg(PackedRgba::rgb(100, 220, 140)))
+                .style(Style::new().fg(theme::accent::SUCCESS))
                 .render(rows[7], frame);
         }
     }
@@ -401,7 +400,7 @@ impl Screen for AdvancedFeatures {
             self.tick_count
         );
         Paragraph::new(&*status)
-            .style(Style::new().fg(theme::fg::MUTED).bg(theme::bg::SURFACE))
+            .style(Style::new().fg(theme::fg::MUTED).bg(theme::alpha::SURFACE))
             .render(main[1], frame);
     }
 

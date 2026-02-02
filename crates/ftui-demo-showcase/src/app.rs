@@ -13,6 +13,7 @@ use std::time::Duration;
 use ftui_core::event::{Event, KeyCode, KeyEvent, KeyEventKind, Modifiers};
 use ftui_core::geometry::Rect;
 use ftui_layout::{Constraint, Flex};
+use ftui_render::cell::Cell;
 use ftui_render::frame::Frame;
 use ftui_runtime::{Cmd, Every, Model, Subscription};
 use ftui_style::Style;
@@ -54,6 +55,8 @@ pub enum ScreenId {
     Performance,
     /// Markdown rendering and typography.
     MarkdownRichText,
+    /// Mind-blowing visual effects with braille.
+    VisualEffects,
 }
 
 impl ScreenId {
@@ -70,6 +73,7 @@ impl ScreenId {
         Self::AdvancedFeatures,
         Self::Performance,
         Self::MarkdownRichText,
+        Self::VisualEffects,
     ];
 
     /// 0-based index in the ALL array.
@@ -103,6 +107,7 @@ impl ScreenId {
             Self::AdvancedFeatures => "Advanced",
             Self::Performance => "Performance",
             Self::MarkdownRichText => "Markdown",
+            Self::VisualEffects => "Visual Effects",
         }
     }
 
@@ -120,6 +125,7 @@ impl ScreenId {
             Self::AdvancedFeatures => "Adv",
             Self::Performance => "Perf",
             Self::MarkdownRichText => "MD",
+            Self::VisualEffects => "VFX",
         }
     }
 
@@ -137,6 +143,7 @@ impl ScreenId {
             Self::AdvancedFeatures => "AdvancedFeatures",
             Self::Performance => "Performance",
             Self::MarkdownRichText => "MarkdownRichText",
+            Self::VisualEffects => "VisualEffects",
         }
     }
 
@@ -180,9 +187,11 @@ pub struct ScreenStates {
     pub performance: screens::performance::Performance,
     /// Markdown and rich text screen state.
     pub markdown_rich_text: screens::markdown_rich_text::MarkdownRichText,
+    /// Visual effects screen state.
+    pub visual_effects: screens::visual_effects::VisualEffectsScreen,
     /// Tracks whether each screen has errored during rendering.
     /// Indexed by `ScreenId::index()`.
-    screen_errors: [Option<String>; 11],
+    screen_errors: [Option<String>; 12],
 }
 
 impl ScreenStates {
@@ -223,6 +232,9 @@ impl ScreenStates {
             ScreenId::MarkdownRichText => {
                 self.markdown_rich_text.update(event);
             }
+            ScreenId::VisualEffects => {
+                self.visual_effects.update(event);
+            }
         }
     }
 
@@ -240,6 +252,15 @@ impl ScreenStates {
         self.advanced_features.tick(tick_count);
         self.performance.tick(tick_count);
         self.markdown_rich_text.tick(tick_count);
+        self.visual_effects.tick(tick_count);
+    }
+
+    fn apply_theme(&mut self) {
+        self.file_browser.apply_theme();
+        self.code_explorer.apply_theme();
+        self.forms_input.apply_theme();
+        self.shakespeare.apply_theme();
+        self.markdown_rich_text.apply_theme();
     }
 
     /// Render the screen identified by `id` into the given area.
@@ -270,6 +291,7 @@ impl ScreenStates {
                 ScreenId::AdvancedFeatures => self.advanced_features.view(frame, area),
                 ScreenId::Performance => self.performance.view(frame, area),
                 ScreenId::MarkdownRichText => self.markdown_rich_text.view(frame, area),
+                ScreenId::VisualEffects => self.visual_effects.view(frame, area),
             }
         }));
 
@@ -317,6 +339,8 @@ pub enum AppMsg {
     ToggleHelp,
     /// Toggle the debug overlay.
     ToggleDebug,
+    /// Cycle the active color theme.
+    CycleTheme,
     /// Periodic tick for animations and data updates.
     Tick,
     /// Terminal resize.
@@ -348,6 +372,8 @@ impl From<Event> for AppMsg {
                 (KeyCode::Char('?'), _) => return Self::ToggleHelp,
                 // Debug
                 (KeyCode::F(12), _) => return Self::ToggleDebug,
+                // Theme cycling
+                (KeyCode::Char('t'), Modifiers::CTRL) => return Self::CycleTheme,
                 // Tab cycling
                 (KeyCode::Tab, Modifiers::NONE) => return Self::NextScreen,
                 (KeyCode::BackTab, _) => return Self::PrevScreen,
@@ -409,6 +435,7 @@ impl Default for AppModel {
 impl AppModel {
     /// Create a new application model with default state.
     pub fn new() -> Self {
+        theme::set_theme(theme::ThemeId::CyberpunkAurora);
         Self {
             current_screen: ScreenId::Dashboard,
             screens: ScreenStates::default(),
@@ -467,6 +494,12 @@ impl Model for AppModel {
                 Cmd::None
             }
 
+            AppMsg::CycleTheme => {
+                theme::cycle_theme();
+                self.screens.apply_theme();
+                Cmd::None
+            }
+
             AppMsg::Tick => {
                 self.tick_count += 1;
                 self.screens.tick(self.tick_count);
@@ -499,6 +532,10 @@ impl Model for AppModel {
 
     fn view(&self, frame: &mut Frame) {
         let area = Rect::from_size(frame.buffer.width(), frame.buffer.height());
+
+        frame
+            .buffer
+            .fill(area, Cell::default().with_bg(theme::bg::DEEP.into()));
 
         // Top-level layout: tab bar (1 row) + content + status bar (1 row)
         let chunks = Flex::vertical()
@@ -546,6 +583,7 @@ impl Model for AppModel {
             frame_count: self.frame_count,
             terminal_width: self.terminal_width,
             terminal_height: self.terminal_height,
+            theme_name: theme::current_theme_name(),
         };
         crate::chrome::render_status_bar(&status_state, frame, chunks[2]);
     }
@@ -573,6 +611,7 @@ impl AppModel {
             ScreenId::AdvancedFeatures => self.screens.advanced_features.keybindings(),
             ScreenId::Performance => self.screens.performance.keybindings(),
             ScreenId::MarkdownRichText => self.screens.markdown_rich_text.keybindings(),
+            ScreenId::VisualEffects => self.screens.visual_effects.keybindings(),
         };
         // Convert screens::HelpEntry to chrome::HelpEntry (same struct, different module).
         entries
@@ -655,7 +694,7 @@ mod tests {
         assert_eq!(app.current_screen, ScreenId::Dashboard);
 
         app.update(AppMsg::PrevScreen);
-        assert_eq!(app.current_screen, ScreenId::MarkdownRichText);
+        assert_eq!(app.current_screen, ScreenId::VisualEffects);
     }
 
     #[test]
@@ -732,8 +771,8 @@ mod tests {
     #[test]
     fn screen_next_prev_wraps() {
         assert_eq!(ScreenId::Dashboard.next(), ScreenId::Shakespeare);
-        assert_eq!(ScreenId::MarkdownRichText.next(), ScreenId::Dashboard);
-        assert_eq!(ScreenId::Dashboard.prev(), ScreenId::MarkdownRichText);
+        assert_eq!(ScreenId::VisualEffects.next(), ScreenId::Dashboard);
+        assert_eq!(ScreenId::Dashboard.prev(), ScreenId::VisualEffects);
         assert_eq!(ScreenId::Shakespeare.prev(), ScreenId::Dashboard);
     }
 
@@ -906,6 +945,6 @@ mod tests {
     /// Verify all screens have the expected count.
     #[test]
     fn all_screens_count() {
-        assert_eq!(ScreenId::ALL.len(), 11);
+        assert_eq!(ScreenId::ALL.len(), 12);
     }
 }

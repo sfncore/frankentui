@@ -634,7 +634,7 @@ impl WidgetGallery {
                 .ratio(ratio)
                 .label(&label)
                 .style(Style::new().fg(theme::fg::MUTED))
-                .gauge_style(Style::new().fg(color).bg(theme::bg::SURFACE))
+                .gauge_style(Style::new().fg(color).bg(theme::alpha::SURFACE))
                 .render(bar_rows[i], frame);
         }
     }

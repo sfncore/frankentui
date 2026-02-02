@@ -15,6 +15,7 @@ pub mod layout_lab;
 pub mod markdown_rich_text;
 pub mod performance;
 pub mod shakespeare;
+pub mod visual_effects;
 pub mod widget_gallery;
 
 use ftui_core::event::Event;

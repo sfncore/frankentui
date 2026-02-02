@@ -231,7 +231,31 @@ impl Default for MarkdownRichText {
 
 impl MarkdownRichText {
     pub fn new() -> Self {
-        let md_theme = MarkdownTheme {
+        let md_theme = Self::build_theme();
+        let renderer = MarkdownRenderer::new(md_theme.clone()).rule_width(36);
+        let rendered_md = renderer.render(SAMPLE_MARKDOWN);
+
+        Self {
+            md_scroll: 0,
+            rendered_md,
+            wrap_index: 1, // Start at Word
+            align_index: 0,
+            // Streaming starts active
+            stream_position: 0,
+            stream_paused: false,
+            stream_scroll: 0,
+            md_theme,
+        }
+    }
+
+    pub fn apply_theme(&mut self) {
+        self.md_theme = Self::build_theme();
+        let renderer = MarkdownRenderer::new(self.md_theme.clone()).rule_width(36);
+        self.rendered_md = renderer.render(SAMPLE_MARKDOWN);
+    }
+
+    fn build_theme() -> MarkdownTheme {
+        MarkdownTheme {
             h1: Style::new().fg(theme::fg::PRIMARY).bold(),
             h2: Style::new().fg(theme::accent::PRIMARY).bold(),
             h3: Style::new().fg(theme::accent::SECONDARY).bold(),
@@ -240,8 +264,10 @@ impl MarkdownRichText {
             h6: Style::new().fg(theme::fg::SECONDARY).bold(),
             code_inline: Style::new()
                 .fg(theme::accent::WARNING)
-                .bg(theme::bg::SURFACE),
-            code_block: Style::new().fg(theme::fg::SECONDARY).bg(theme::bg::SURFACE),
+                .bg(theme::alpha::SURFACE),
+            code_block: Style::new()
+                .fg(theme::fg::SECONDARY)
+                .bg(theme::alpha::SURFACE),
             blockquote: Style::new().fg(theme::fg::MUTED).italic(),
             link: Style::new().fg(theme::accent::LINK).underline(),
             emphasis: Style::new().italic(),
@@ -261,20 +287,6 @@ impl MarkdownRichText {
             admonition_important: Style::new().fg(theme::accent::SECONDARY).bold(),
             admonition_warning: Style::new().fg(theme::accent::WARNING).bold(),
             admonition_caution: Style::new().fg(theme::accent::ERROR).bold(),
-        };
-        let renderer = MarkdownRenderer::new(md_theme.clone()).rule_width(36);
-        let rendered_md = renderer.render(SAMPLE_MARKDOWN);
-
-        Self {
-            md_scroll: 0,
-            rendered_md,
-            wrap_index: 1, // Start at Word
-            align_index: 0,
-            // Streaming starts active
-            stream_position: 0,
-            stream_paused: false,
-            stream_scroll: 0,
-            md_theme,
         }
     }
 
@@ -585,11 +597,6 @@ impl Screen for MarkdownRichText {
     type Message = Event;
 
     fn update(&mut self, event: &Event) -> Cmd<Self::Message> {
-        // Handle tick events for streaming
-        if let Event::Tick = event {
-            self.tick_stream();
-        }
-
         if let Event::Key(KeyEvent {
             code,
             kind: KeyEventKind::Press,
@@ -713,6 +720,11 @@ impl Screen for MarkdownRichText {
 
     fn tab_label(&self) -> &'static str {
         "Markdown"
+    }
+
+    fn tick(&mut self, _tick_count: u64) {
+        // Advance streaming simulation on each tick
+        self.tick_stream();
     }
 }
 

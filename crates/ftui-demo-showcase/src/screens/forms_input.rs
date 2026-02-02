@@ -94,11 +94,7 @@ impl FormsInput {
             ),
             FormField::number_bounded("Age", 25, 0, 120),
             FormField::checkbox("Accept Terms", false),
-        ])
-        .style(Style::new().fg(theme::fg::PRIMARY))
-        .label_style(Style::new().fg(theme::fg::SECONDARY))
-        .focused_style(Style::new().fg(theme::accent::PRIMARY))
-        .error_style(Style::new().fg(theme::accent::ERROR));
+        ]);
 
         let search_input = TextInput::new()
             .with_placeholder("Search...")
@@ -127,7 +123,7 @@ impl FormsInput {
             .with_style(Style::new().fg(theme::fg::PRIMARY))
             .with_focus(false);
 
-        Self {
+        let mut state = Self {
             focus: FocusPanel::Form,
             form,
             form_state: RefCell::new(FormState::default()),
@@ -135,7 +131,48 @@ impl FormsInput {
             password_input,
             textarea,
             status_text: "Ctrl+\u{2190}/\u{2192}: switch panels | Form: Tab/\u{2191}/\u{2193} navigate, Space toggle, Enter submit".into(),
-        }
+        };
+        state.apply_theme();
+        state
+    }
+
+    pub fn apply_theme(&mut self) {
+        self.form.set_style(Style::new().fg(theme::fg::PRIMARY));
+        self.form
+            .set_label_style(Style::new().fg(theme::fg::SECONDARY));
+        self.form
+            .set_focused_style(Style::new().fg(theme::accent::PRIMARY));
+        self.form
+            .set_error_style(Style::new().fg(theme::accent::ERROR));
+
+        let input_style = Style::new()
+            .fg(theme::fg::PRIMARY)
+            .bg(theme::alpha::SURFACE);
+        let placeholder_style = Style::new().fg(theme::fg::MUTED);
+        self.search_input = self
+            .search_input
+            .clone()
+            .with_style(input_style)
+            .with_placeholder_style(placeholder_style);
+        self.password_input = self
+            .password_input
+            .clone()
+            .with_style(input_style)
+            .with_placeholder_style(placeholder_style);
+        self.textarea = self
+            .textarea
+            .clone()
+            .with_style(
+                Style::new()
+                    .fg(theme::fg::PRIMARY)
+                    .bg(theme::alpha::SURFACE),
+            )
+            .with_cursor_line_style(Style::new().bg(theme::alpha::HIGHLIGHT))
+            .with_selection_style(
+                Style::new()
+                    .bg(theme::alpha::HIGHLIGHT)
+                    .fg(theme::fg::PRIMARY),
+            );
     }
 
     fn update_focus_states(&mut self) {
@@ -394,7 +431,7 @@ impl Screen for FormsInput {
         self.render_editor_panel(frame, right_chunks[1]);
 
         Paragraph::new(&*self.status_text)
-            .style(Style::new().fg(theme::fg::MUTED).bg(theme::bg::SURFACE))
+            .style(Style::new().fg(theme::fg::MUTED).bg(theme::alpha::SURFACE))
             .render(main_chunks[1], frame);
     }
 

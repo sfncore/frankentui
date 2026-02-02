@@ -93,15 +93,17 @@ const ALIGNMENTS: [FlexAlignment; 5] = [
 
 const ALIGNMENT_NAMES: [&str; 5] = ["Start", "Center", "End", "SpaceBetween", "SpaceAround"];
 
-/// Colors for layout regions.
-const REGION_COLORS: [PackedRgba; 6] = [
-    PackedRgba::rgb(70, 130, 180),  // Steel blue
-    PackedRgba::rgb(180, 100, 70),  // Terracotta
-    PackedRgba::rgb(100, 180, 100), // Green
-    PackedRgba::rgb(180, 160, 60),  // Yellow-green
-    PackedRgba::rgb(150, 100, 180), // Purple
-    PackedRgba::rgb(100, 170, 170), // Teal
-];
+/// Colors for layout regions (theme-aware accents).
+fn region_colors() -> [PackedRgba; 6] {
+    [
+        theme::accent::ACCENT_1.into(),
+        theme::accent::ACCENT_2.into(),
+        theme::accent::ACCENT_3.into(),
+        theme::accent::ACCENT_4.into(),
+        theme::accent::ACCENT_5.into(),
+        theme::accent::ACCENT_6.into(),
+    ]
+}
 
 impl Default for LayoutLab {
     fn default() -> Self {
@@ -538,10 +540,11 @@ impl LayoutLab {
         if rect.width == 0 || rect.height == 0 {
             return;
         }
-        let color = REGION_COLORS[idx % REGION_COLORS.len()];
+        let colors = region_colors();
+        let color = colors[idx % colors.len()];
         let label = Self::constraint_label(constraint);
 
-        let style = Style::new().fg(PackedRgba::rgb(240, 240, 240)).bg(color);
+        let style = Style::new().fg(theme::fg::PRIMARY).bg(color);
         let block = Block::new()
             .borders(Borders::ALL)
             .border_type(BorderType::Square)
@@ -701,12 +704,10 @@ impl LayoutLab {
     }
 
     fn render_columns_demo(&self, frame: &mut Frame, area: Rect) {
-        let col_a =
-            Paragraph::new("A").style(Style::new().fg(REGION_COLORS[0]).attrs(StyleFlags::BOLD));
-        let col_b =
-            Paragraph::new("B").style(Style::new().fg(REGION_COLORS[1]).attrs(StyleFlags::BOLD));
-        let col_c =
-            Paragraph::new("C").style(Style::new().fg(REGION_COLORS[2]).attrs(StyleFlags::BOLD));
+        let colors = region_colors();
+        let col_a = Paragraph::new("A").style(Style::new().fg(colors[0]).attrs(StyleFlags::BOLD));
+        let col_b = Paragraph::new("B").style(Style::new().fg(colors[1]).attrs(StyleFlags::BOLD));
+        let col_c = Paragraph::new("C").style(Style::new().fg(colors[2]).attrs(StyleFlags::BOLD));
 
         let columns = Columns::new()
             .gap(1)

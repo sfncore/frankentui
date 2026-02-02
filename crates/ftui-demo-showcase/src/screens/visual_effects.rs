@@ -1,0 +1,2579 @@
+#![forbid(unsafe_code)]
+
+//! Mind-blowing visual effects screen.
+//!
+//! Showcases advanced rendering techniques using Braille characters:
+//! - Metaballs with organic glow and color mixing
+//! - 3D rotating wireframes with depth and starfield
+//! - Psychedelic plasma with multiple palettes
+//! - Particle fireworks with explosions and trails
+//! - Matrix digital rain
+//! - Tunnel zoom effect
+//! - Fire simulation
+
+use std::collections::VecDeque;
+use std::f64::consts::TAU;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
+
+use ftui_core::event::{Event, KeyCode, KeyEvent, KeyEventKind};
+use ftui_core::geometry::Rect;
+use ftui_extras::canvas::{Canvas, Mode, Painter};
+use ftui_extras::text_effects::{ColorGradient, TransitionState};
+use ftui_render::cell::PackedRgba;
+use ftui_render::frame::Frame;
+use ftui_runtime::Cmd;
+use ftui_style::Style;
+use ftui_widgets::Widget;
+use ftui_widgets::paragraph::Paragraph;
+
+use super::{HelpEntry, Screen};
+
+/// Visual effects demo screen.
+pub struct VisualEffectsScreen {
+    /// Current effect being displayed.
+    effect: EffectType,
+    /// Animation frame counter.
+    frame: u64,
+    /// Global time for animations.
+    time: f64,
+    /// Metaballs state.
+    metaballs: MetaballsState,
+    /// 3D shape state.
+    shape3d: Shape3DState,
+    /// Plasma state.
+    plasma: PlasmaState,
+    /// Particle system state.
+    particles: ParticleState,
+    /// Matrix rain state.
+    matrix: MatrixState,
+    /// Tunnel state.
+    tunnel: TunnelState,
+    /// Fire state.
+    fire: FireState,
+    /// Reaction-diffusion (Gray-Scott) state.
+    reaction_diffusion: ReactionDiffusionState,
+    /// Strange attractor state.
+    attractor: AttractorState,
+    /// Mandelbrot zoom state.
+    mandelbrot: MandelbrotState,
+    /// Lissajous/harmonograph state.
+    lissajous: LissajousState,
+    /// Flow field particle state.
+    flow_field: FlowFieldState,
+    /// Julia set state.
+    julia: JuliaState,
+    /// Wave interference state.
+    wave_interference: WaveInterferenceState,
+    /// Spiral galaxy/vortex state.
+    spiral: SpiralState,
+    /// Spin lattice state.
+    spin_lattice: SpinLatticeState,
+    // FPS tracking
+    /// Frame times for FPS calculation (microseconds).
+    frame_times: VecDeque<u64>,
+    /// Last frame instant.
+    last_frame: Option<Instant>,
+    /// Current FPS.
+    fps: f64,
+    /// Average frame time in microseconds.
+    avg_frame_time_us: f64,
+    /// Min frame time (best case).
+    min_frame_time_us: f64,
+    /// Max frame time (worst case).
+    max_frame_time_us: f64,
+    /// Transition overlay state for effect changes.
+    transition: TransitionState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EffectType {
+    Metaballs,
+    Shape3D,
+    Plasma,
+    Particles,
+    Matrix,
+    Tunnel,
+    Fire,
+    // Mathematical effects
+    ReactionDiffusion,
+    StrangeAttractor,
+    Mandelbrot,
+    Lissajous,
+    FlowField,
+    Julia,
+    WaveInterference,
+    Spiral,
+    SpinLattice,
+}
+
+impl EffectType {
+    const ALL: &[Self] = &[
+        Self::Metaballs,
+        Self::Shape3D,
+        Self::Plasma,
+        Self::Particles,
+        Self::Matrix,
+        Self::Tunnel,
+        Self::Fire,
+        Self::ReactionDiffusion,
+        Self::StrangeAttractor,
+        Self::Mandelbrot,
+        Self::Lissajous,
+        Self::FlowField,
+        Self::Julia,
+        Self::WaveInterference,
+        Self::Spiral,
+        Self::SpinLattice,
+    ];
+
+    fn next(self) -> Self {
+        let idx = Self::ALL.iter().position(|&e| e == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    fn prev(self) -> Self {
+        let idx = Self::ALL.iter().position(|&e| e == self).unwrap_or(0);
+        Self::ALL[(idx + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Metaballs => "⬤ Metaballs",
+            Self::Shape3D => "◇ 3D Shapes",
+            Self::Plasma => "≋ Plasma",
+            Self::Particles => "✦ Fireworks",
+            Self::Matrix => "▓ Matrix Rain",
+            Self::Tunnel => "◎ Tunnel",
+            Self::Fire => "🔥 Fire",
+            Self::ReactionDiffusion => "◉ Gray-Scott",
+            Self::StrangeAttractor => "∞ Attractor",
+            Self::Mandelbrot => "❋ Mandelbrot",
+            Self::Lissajous => "∿ Lissajous",
+            Self::FlowField => "〰 Flow Field",
+            Self::Julia => "❂ Julia Set",
+            Self::WaveInterference => "≈ Wave Interference",
+            Self::Spiral => "✦ Spiral Galaxy",
+            Self::SpinLattice => "◈ Spin Lattice",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::Metaballs => "Organic blobs with implicit surface rendering and color mixing",
+            Self::Shape3D => "Rotating wireframe geometry with perspective projection",
+            Self::Plasma => "Psychedelic sine wave interference patterns",
+            Self::Particles => "Explosive particle systems with gravity and trails",
+            Self::Matrix => "Classic digital rain cascading down the screen",
+            Self::Tunnel => "Flying through an infinite vortex tunnel",
+            Self::Fire => "Cellular automaton fire simulation rising upward",
+            Self::ReactionDiffusion => "Gray-Scott Turing patterns: morphogenesis simulation",
+            Self::StrangeAttractor => "Clifford attractor: deterministic chaos with beauty",
+            Self::Mandelbrot => "Deep zoom into the infinite fractal boundary",
+            Self::Lissajous => "Harmonograph curves from overlapping oscillations",
+            Self::FlowField => "Particles dancing through Perlin noise vector fields",
+            Self::Julia => "The Mandelbrot's companion with morphing c parameter",
+            Self::WaveInterference => "Multiple wave sources creating interference patterns",
+            Self::Spiral => "Logarithmic spiral galaxy with rotating star field",
+            Self::SpinLattice => "Landau-Lifshitz spin dynamics on a magnetic lattice",
+        }
+    }
+}
+
+// =============================================================================
+// Color Palettes - Beautiful gradients for effects
+// =============================================================================
+
+fn palette_sunset(t: f64) -> PackedRgba {
+    let t = t.clamp(0.0, 1.0);
+    // Deep purple -> hot pink -> orange -> yellow
+    let (r, g, b) = if t < 0.33 {
+        let s = t / 0.33;
+        lerp_rgb((80, 20, 120), (255, 50, 120), s)
+    } else if t < 0.66 {
+        let s = (t - 0.33) / 0.33;
+        lerp_rgb((255, 50, 120), (255, 150, 50), s)
+    } else {
+        let s = (t - 0.66) / 0.34;
+        lerp_rgb((255, 150, 50), (255, 255, 150), s)
+    };
+    PackedRgba::rgb(r, g, b)
+}
+
+fn palette_ocean(t: f64) -> PackedRgba {
+    let t = t.clamp(0.0, 1.0);
+    // Deep blue -> cyan -> turquoise -> seafoam
+    let (r, g, b) = if t < 0.5 {
+        let s = t / 0.5;
+        lerp_rgb((10, 30, 100), (30, 180, 220), s)
+    } else {
+        let s = (t - 0.5) / 0.5;
+        lerp_rgb((30, 180, 220), (150, 255, 200), s)
+    };
+    PackedRgba::rgb(r, g, b)
+}
+
+fn palette_fire(t: f64) -> PackedRgba {
+    let t = t.clamp(0.0, 1.0);
+    // Black -> dark red -> orange -> yellow -> white
+    let (r, g, b) = if t < 0.2 {
+        let s = t / 0.2;
+        lerp_rgb((0, 0, 0), (80, 10, 0), s)
+    } else if t < 0.4 {
+        let s = (t - 0.2) / 0.2;
+        lerp_rgb((80, 10, 0), (200, 50, 0), s)
+    } else if t < 0.6 {
+        let s = (t - 0.4) / 0.2;
+        lerp_rgb((200, 50, 0), (255, 150, 20), s)
+    } else if t < 0.8 {
+        let s = (t - 0.6) / 0.2;
+        lerp_rgb((255, 150, 20), (255, 230, 100), s)
+    } else {
+        let s = (t - 0.8) / 0.2;
+        lerp_rgb((255, 230, 100), (255, 255, 220), s)
+    };
+    PackedRgba::rgb(r, g, b)
+}
+
+fn palette_neon(t: f64) -> PackedRgba {
+    let t = t.clamp(0.0, 1.0);
+    // Cycling through neon colors
+    let hue = t * 360.0;
+    let (r, g, b) = hsv_to_rgb(hue, 1.0, 1.0);
+    PackedRgba::rgb(r, g, b)
+}
+
+fn palette_cyberpunk(t: f64) -> PackedRgba {
+    let t = t.clamp(0.0, 1.0);
+    // Hot pink -> cyan with purple undertones
+    let (r, g, b) = if t < 0.5 {
+        let s = t / 0.5;
+        lerp_rgb((255, 20, 150), (150, 50, 200), s)
+    } else {
+        let s = (t - 0.5) / 0.5;
+        lerp_rgb((150, 50, 200), (50, 220, 255), s)
+    };
+    PackedRgba::rgb(r, g, b)
+}
+
+fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f64) -> (u8, u8, u8) {
+    (
+        (a.0 as f64 + (b.0 as f64 - a.0 as f64) * t) as u8,
+        (a.1 as f64 + (b.1 as f64 - a.1 as f64) * t) as u8,
+        (a.2 as f64 + (b.2 as f64 - a.2 as f64) * t) as u8,
+    )
+}
+
+fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
+    let h = h % 360.0;
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = v - c;
+
+    let (r, g, b) = match (h / 60.0) as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+
+    (
+        ((r + m) * 255.0) as u8,
+        ((g + m) * 255.0) as u8,
+        ((b + m) * 255.0) as u8,
+    )
+}
+
+// =============================================================================
+// Metaballs - Organic blobs with beautiful color mixing
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct Metaball {
+    x: f64,
+    y: f64,
+    vx: f64,
+    vy: f64,
+    radius: f64,
+    hue: f64,
+    phase: f64,
+}
+
+#[derive(Debug, Clone)]
+struct MetaballsState {
+    balls: Vec<Metaball>,
+}
+
+impl Default for MetaballsState {
+    fn default() -> Self {
+        Self {
+            balls: vec![
+                Metaball {
+                    x: 0.3,
+                    y: 0.4,
+                    vx: 0.008,
+                    vy: 0.006,
+                    radius: 0.18,
+                    hue: 0.0,
+                    phase: 0.0,
+                },
+                Metaball {
+                    x: 0.7,
+                    y: 0.6,
+                    vx: -0.007,
+                    vy: 0.009,
+                    radius: 0.15,
+                    hue: 0.2,
+                    phase: 1.0,
+                },
+                Metaball {
+                    x: 0.5,
+                    y: 0.3,
+                    vx: 0.006,
+                    vy: -0.008,
+                    radius: 0.20,
+                    hue: 0.4,
+                    phase: 2.0,
+                },
+                Metaball {
+                    x: 0.2,
+                    y: 0.7,
+                    vx: -0.009,
+                    vy: -0.005,
+                    radius: 0.12,
+                    hue: 0.6,
+                    phase: 3.0,
+                },
+                Metaball {
+                    x: 0.8,
+                    y: 0.2,
+                    vx: 0.005,
+                    vy: 0.007,
+                    radius: 0.16,
+                    hue: 0.8,
+                    phase: 4.0,
+                },
+                Metaball {
+                    x: 0.4,
+                    y: 0.8,
+                    vx: -0.006,
+                    vy: -0.007,
+                    radius: 0.14,
+                    hue: 0.1,
+                    phase: 5.0,
+                },
+                Metaball {
+                    x: 0.6,
+                    y: 0.5,
+                    vx: 0.007,
+                    vy: -0.006,
+                    radius: 0.17,
+                    hue: 0.5,
+                    phase: 6.0,
+                },
+            ],
+        }
+    }
+}
+
+impl MetaballsState {
+    fn update(&mut self, time: f64) {
+        for ball in &mut self.balls {
+            // Pulsating radius
+            let pulse = 1.0 + 0.15 * (time * 2.0 + ball.phase).sin();
+            ball.radius = ball.radius.clamp(0.08, 0.25);
+
+            ball.x += ball.vx * pulse;
+            ball.y += ball.vy * pulse;
+
+            // Soft bounce with slight randomization
+            if ball.x < 0.05 || ball.x > 0.95 {
+                ball.vx = -ball.vx * 0.98;
+                ball.x = ball.x.clamp(0.05, 0.95);
+            }
+            if ball.y < 0.05 || ball.y > 0.95 {
+                ball.vy = -ball.vy * 0.98;
+                ball.y = ball.y.clamp(0.05, 0.95);
+            }
+
+            // Slowly shift hue for color cycling
+            ball.hue = (ball.hue + 0.002) % 1.0;
+        }
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16, time: f64) {
+        let threshold = 1.0;
+        let glow_threshold = 0.6;
+
+        for py in 0..height as i32 {
+            for px in 0..width as i32 {
+                let x = px as f64 / width as f64;
+                let y = py as f64 / height as f64;
+
+                let mut sum = 0.0;
+                let mut weighted_hue = 0.0;
+                let mut total_weight = 0.0;
+
+                for ball in &self.balls {
+                    let dx = x - ball.x;
+                    let dy = y - ball.y;
+                    let dist_sq = dx * dx + dy * dy;
+                    let pulse = 1.0 + 0.15 * (time * 2.0 + ball.phase).sin();
+                    let r = ball.radius * pulse;
+
+                    if dist_sq > 0.0001 {
+                        let contribution = (r * r) / dist_sq;
+                        sum += contribution;
+                        weighted_hue += ball.hue * contribution;
+                        total_weight += contribution;
+                    } else {
+                        sum += 100.0;
+                        weighted_hue += ball.hue * 100.0;
+                        total_weight += 100.0;
+                    }
+                }
+
+                if sum > glow_threshold {
+                    let avg_hue = if total_weight > 0.0 {
+                        weighted_hue / total_weight
+                    } else {
+                        0.0
+                    };
+
+                    let intensity = if sum > threshold {
+                        1.0
+                    } else {
+                        (sum - glow_threshold) / (threshold - glow_threshold)
+                    };
+
+                    // Beautiful gradient based on field intensity
+                    let saturation = 0.7 + 0.3 * intensity;
+                    let value = 0.3 + 0.7 * intensity;
+                    let (r, g, b) = hsv_to_rgb(avg_hue * 360.0, saturation, value);
+
+                    painter.point_colored(px, py, PackedRgba::rgb(r, g, b));
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// 3D Wireframe - Multiple shapes with starfield background
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct Star {
+    x: f64,
+    y: f64,
+    z: f64,
+    brightness: f64,
+}
+
+#[derive(Debug, Clone)]
+struct Shape3DState {
+    rotation_x: f64,
+    rotation_y: f64,
+    rotation_z: f64,
+    shape: Shape3DType,
+    stars: Vec<Star>,
+    camera_z: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shape3DType {
+    Cube,
+    Octahedron,
+    Icosahedron,
+    Torus,
+}
+
+impl Shape3DType {
+    fn next(self) -> Self {
+        match self {
+            Self::Cube => Self::Octahedron,
+            Self::Octahedron => Self::Icosahedron,
+            Self::Icosahedron => Self::Torus,
+            Self::Torus => Self::Cube,
+        }
+    }
+}
+
+impl Default for Shape3DState {
+    fn default() -> Self {
+        let mut stars = Vec::with_capacity(200);
+        for _ in 0..200 {
+            stars.push(Star {
+                x: rand_simple() * 2.0 - 1.0,
+                y: rand_simple() * 2.0 - 1.0,
+                z: rand_simple() * 5.0 + 1.0,
+                brightness: rand_simple() * 0.5 + 0.5,
+            });
+        }
+        Self {
+            rotation_x: 0.0,
+            rotation_y: 0.0,
+            rotation_z: 0.0,
+            shape: Shape3DType::Cube,
+            stars,
+            camera_z: 0.0,
+        }
+    }
+}
+
+impl Shape3DState {
+    fn update(&mut self) {
+        self.rotation_x += 0.015;
+        self.rotation_y += 0.025;
+        self.rotation_z += 0.008;
+        self.camera_z += 0.05;
+
+        // Move stars towards camera (warp effect)
+        for star in &mut self.stars {
+            star.z -= 0.03;
+            if star.z < 0.1 {
+                star.z = 5.0 + rand_simple();
+                star.x = rand_simple() * 2.0 - 1.0;
+                star.y = rand_simple() * 2.0 - 1.0;
+            }
+        }
+    }
+
+    fn project(&self, x: f64, y: f64, z: f64, width: f64, height: f64) -> (i32, i32, f64) {
+        // Rotate around X
+        let (y1, z1) = (
+            y * self.rotation_x.cos() - z * self.rotation_x.sin(),
+            y * self.rotation_x.sin() + z * self.rotation_x.cos(),
+        );
+        // Rotate around Y
+        let (x2, z2) = (
+            x * self.rotation_y.cos() + z1 * self.rotation_y.sin(),
+            -x * self.rotation_y.sin() + z1 * self.rotation_y.cos(),
+        );
+        // Rotate around Z
+        let (x3, y3) = (
+            x2 * self.rotation_z.cos() - y1 * self.rotation_z.sin(),
+            x2 * self.rotation_z.sin() + y1 * self.rotation_z.cos(),
+        );
+
+        // Perspective projection
+        let fov = 2.0;
+        let z_offset = 4.0;
+        let scale = fov / (z2 + z_offset);
+
+        let screen_x = (width / 2.0 + x3 * scale * width * 0.4) as i32;
+        let screen_y = (height / 2.0 + y3 * scale * height * 0.4) as i32;
+
+        (screen_x, screen_y, z2)
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16, time: f64) {
+        let w = width as f64;
+        let h = height as f64;
+
+        // Render starfield first
+        for star in &self.stars {
+            let scale = 1.0 / star.z;
+            let sx = (w / 2.0 + star.x * scale * w * 0.5) as i32;
+            let sy = (h / 2.0 + star.y * scale * h * 0.5) as i32;
+
+            let brightness = (star.brightness * (1.0 - star.z / 6.0) * 255.0) as u8;
+            let twinkle = (1.0 + 0.3 * (time * 5.0 + star.x * 10.0).sin()) / 1.3;
+            let b = (brightness as f64 * twinkle) as u8;
+
+            if sx >= 0 && sx < width as i32 && sy >= 0 && sy < height as i32 {
+                painter.point_colored(sx, sy, PackedRgba::rgb(b, b, b.saturating_add(30)));
+            }
+        }
+
+        // Render shape
+        match self.shape {
+            Shape3DType::Cube => self.render_cube(painter, w, h, time),
+            Shape3DType::Octahedron => self.render_octahedron(painter, w, h, time),
+            Shape3DType::Icosahedron => self.render_icosahedron(painter, w, h, time),
+            Shape3DType::Torus => self.render_torus(painter, w, h, time),
+        }
+    }
+
+    fn render_cube(&self, painter: &mut Painter, w: f64, h: f64, time: f64) {
+        let vertices = [
+            (-1.0, -1.0, -1.0),
+            (1.0, -1.0, -1.0),
+            (1.0, 1.0, -1.0),
+            (-1.0, 1.0, -1.0),
+            (-1.0, -1.0, 1.0),
+            (1.0, -1.0, 1.0),
+            (1.0, 1.0, 1.0),
+            (-1.0, 1.0, 1.0),
+        ];
+        let edges = [
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 4),
+            (0, 4),
+            (1, 5),
+            (2, 6),
+            (3, 7),
+        ];
+
+        let projected: Vec<_> = vertices
+            .iter()
+            .map(|&(x, y, z)| self.project(x, y, z, w, h))
+            .collect();
+
+        for (i, &(a, b)) in edges.iter().enumerate() {
+            let (x0, y0, z0) = projected[a];
+            let (x1, y1, z1) = projected[b];
+            let avg_z = (z0 + z1) / 2.0;
+            let brightness = (1.0 - avg_z / 4.0).clamp(0.3, 1.0);
+
+            let hue = (i as f64 / edges.len() as f64 + time * 0.1) % 1.0;
+            let (r, g, b) = hsv_to_rgb(hue * 360.0, 0.8, brightness);
+
+            painter.line_colored(x0, y0, x1, y1, Some(PackedRgba::rgb(r, g, b)));
+        }
+    }
+
+    fn render_octahedron(&self, painter: &mut Painter, w: f64, h: f64, time: f64) {
+        let s = 1.5;
+        let vertices = [
+            (0.0, -s, 0.0),
+            (0.0, s, 0.0),
+            (s, 0.0, 0.0),
+            (-s, 0.0, 0.0),
+            (0.0, 0.0, s),
+            (0.0, 0.0, -s),
+        ];
+        let edges = [
+            (0, 2),
+            (0, 3),
+            (0, 4),
+            (0, 5),
+            (1, 2),
+            (1, 3),
+            (1, 4),
+            (1, 5),
+            (2, 4),
+            (4, 3),
+            (3, 5),
+            (5, 2),
+        ];
+
+        let projected: Vec<_> = vertices
+            .iter()
+            .map(|&(x, y, z)| self.project(x, y, z, w, h))
+            .collect();
+
+        for (i, &(a, b)) in edges.iter().enumerate() {
+            let (x0, y0, z0) = projected[a];
+            let (x1, y1, z1) = projected[b];
+            let avg_z = (z0 + z1) / 2.0;
+            let brightness = (1.0 - avg_z / 4.0).clamp(0.3, 1.0);
+
+            let color = palette_ocean((i as f64 / edges.len() as f64 + time * 0.05) % 1.0);
+            let (r, g, b_val) = (
+                (color.r() as f64 * brightness) as u8,
+                (color.g() as f64 * brightness) as u8,
+                (color.b() as f64 * brightness) as u8,
+            );
+
+            painter.line_colored(x0, y0, x1, y1, Some(PackedRgba::rgb(r, g, b_val)));
+        }
+    }
+
+    fn render_icosahedron(&self, painter: &mut Painter, w: f64, h: f64, time: f64) {
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let vertices = [
+            (-1.0, phi, 0.0),
+            (1.0, phi, 0.0),
+            (-1.0, -phi, 0.0),
+            (1.0, -phi, 0.0),
+            (0.0, -1.0, phi),
+            (0.0, 1.0, phi),
+            (0.0, -1.0, -phi),
+            (0.0, 1.0, -phi),
+            (phi, 0.0, -1.0),
+            (phi, 0.0, 1.0),
+            (-phi, 0.0, -1.0),
+            (-phi, 0.0, 1.0),
+        ];
+        let edges = [
+            (0, 1),
+            (0, 5),
+            (0, 7),
+            (0, 10),
+            (0, 11),
+            (1, 5),
+            (1, 7),
+            (1, 8),
+            (1, 9),
+            (2, 3),
+            (2, 4),
+            (2, 6),
+            (2, 10),
+            (2, 11),
+            (3, 4),
+            (3, 6),
+            (3, 8),
+            (3, 9),
+            (4, 5),
+            (4, 9),
+            (4, 11),
+            (5, 9),
+            (5, 11),
+            (6, 7),
+            (6, 8),
+            (6, 10),
+            (7, 8),
+            (7, 10),
+            (8, 9),
+            (10, 11),
+        ];
+
+        let projected: Vec<_> = vertices
+            .iter()
+            .map(|&(x, y, z)| self.project(x, y, z, w, h))
+            .collect();
+
+        for (i, &(a, b)) in edges.iter().enumerate() {
+            let (x0, y0, z0) = projected[a];
+            let (x1, y1, z1) = projected[b];
+            let avg_z = (z0 + z1) / 2.0;
+            let brightness = (1.0 - avg_z / 5.0).clamp(0.3, 1.0);
+
+            let color = palette_sunset((i as f64 / edges.len() as f64 + time * 0.03) % 1.0);
+            let (r, g, b_val) = (
+                (color.r() as f64 * brightness) as u8,
+                (color.g() as f64 * brightness) as u8,
+                (color.b() as f64 * brightness) as u8,
+            );
+
+            painter.line_colored(x0, y0, x1, y1, Some(PackedRgba::rgb(r, g, b_val)));
+        }
+    }
+
+    fn render_torus(&self, painter: &mut Painter, w: f64, h: f64, time: f64) {
+        let major_r = 1.2;
+        let minor_r = 0.5;
+        let u_steps = 24;
+        let v_steps = 12;
+
+        let mut points = Vec::new();
+        for u in 0..u_steps {
+            for v in 0..v_steps {
+                let u_angle = (u as f64 / u_steps as f64) * TAU;
+                let v_angle = (v as f64 / v_steps as f64) * TAU;
+
+                let x = (major_r + minor_r * v_angle.cos()) * u_angle.cos();
+                let y = (major_r + minor_r * v_angle.cos()) * u_angle.sin();
+                let z = minor_r * v_angle.sin();
+
+                points.push((u, v, self.project(x, y, z, w, h)));
+            }
+        }
+
+        // Draw rings
+        for u in 0..u_steps {
+            for v in 0..v_steps {
+                let idx = u * v_steps + v;
+                let next_v = u * v_steps + (v + 1) % v_steps;
+                let next_u = ((u + 1) % u_steps) * v_steps + v;
+
+                let (_, _, (x0, y0, z0)) = points[idx];
+                let (_, _, (x1, y1, _z1)) = points[next_v];
+                let (_, _, (x2, y2, _z2)) = points[next_u];
+
+                let brightness1 = (1.0 - z0 / 4.0).clamp(0.3, 1.0);
+                let hue = (u as f64 / u_steps as f64 + time * 0.05) % 1.0;
+                let color = palette_cyberpunk(hue);
+                let (r, g, b) = (
+                    (color.r() as f64 * brightness1) as u8,
+                    (color.g() as f64 * brightness1) as u8,
+                    (color.b() as f64 * brightness1) as u8,
+                );
+
+                painter.line_colored(x0, y0, x1, y1, Some(PackedRgba::rgb(r, g, b)));
+                painter.line_colored(x0, y0, x2, y2, Some(PackedRgba::rgb(r, g, b)));
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Plasma - Psychedelic patterns with palette switching
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct PlasmaState {
+    time: f64,
+    palette: usize,
+}
+
+impl Default for PlasmaState {
+    fn default() -> Self {
+        Self {
+            time: 0.0,
+            palette: 0,
+        }
+    }
+}
+
+impl PlasmaState {
+    fn update(&mut self) {
+        self.time += 0.06;
+    }
+
+    fn cycle_palette(&mut self) {
+        self.palette = (self.palette + 1) % 5;
+    }
+
+    fn get_color(&self, t: f64) -> PackedRgba {
+        match self.palette {
+            0 => palette_sunset(t),
+            1 => palette_ocean(t),
+            2 => palette_fire(t),
+            3 => palette_neon(t),
+            _ => palette_cyberpunk(t),
+        }
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        for py in 0..height as i32 {
+            for px in 0..width as i32 {
+                let x = px as f64 / width as f64 * 6.0;
+                let y = py as f64 / height as f64 * 6.0;
+
+                // Complex plasma function with multiple wave patterns
+                let v1 = (x * 1.5 + self.time).sin();
+                let v2 = (y * 1.8 + self.time * 0.8).sin();
+                let v3 = ((x + y) * 1.2 + self.time * 0.6).sin();
+                let v4 = ((x * x + y * y).sqrt() * 2.0 - self.time * 1.2).sin();
+                let v5 = (((x - 3.0).powi(2) + (y - 3.0).powi(2)).sqrt() * 1.8 + self.time).cos();
+                let v6 = ((x * 2.0).sin() * (y * 2.0).cos() + self.time * 0.5).sin();
+
+                let value = (v1 + v2 + v3 + v4 + v5 + v6) / 6.0;
+                let normalized = (value + 1.0) / 2.0;
+
+                let color = self.get_color(normalized);
+                painter.point_colored(px, py, color);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Particle Fireworks - Explosions with trails
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct Particle {
+    x: f64,
+    y: f64,
+    vx: f64,
+    vy: f64,
+    life: f64,
+    max_life: f64,
+    hue: f64,
+    is_rocket: bool,
+    trail: Vec<(f64, f64)>,
+}
+
+#[derive(Debug, Clone)]
+struct ParticleState {
+    particles: Vec<Particle>,
+    spawn_timer: f64,
+}
+
+impl Default for ParticleState {
+    fn default() -> Self {
+        Self {
+            particles: Vec::with_capacity(2000),
+            spawn_timer: 0.0,
+        }
+    }
+}
+
+impl ParticleState {
+    fn update(&mut self) {
+        self.spawn_timer += 1.0;
+
+        // Launch rockets periodically
+        if self.spawn_timer >= 30.0 {
+            self.spawn_timer = 0.0;
+            let x = 0.2 + rand_simple() * 0.6;
+            self.particles.push(Particle {
+                x,
+                y: 1.0,
+                vx: (rand_simple() - 0.5) * 0.01,
+                vy: -0.025 - rand_simple() * 0.015,
+                life: 1.0,
+                max_life: 1.0,
+                hue: rand_simple(),
+                is_rocket: true,
+                trail: Vec::new(),
+            });
+        }
+
+        // Update particles
+        let mut new_particles = Vec::new();
+
+        for p in &mut self.particles {
+            // Store trail position
+            if p.trail.len() < 8 {
+                p.trail.push((p.x, p.y));
+            } else {
+                p.trail.remove(0);
+                p.trail.push((p.x, p.y));
+            }
+
+            p.x += p.vx;
+            p.y += p.vy;
+
+            if p.is_rocket {
+                p.vy += 0.0005; // Less gravity for rockets
+                p.life -= 0.015;
+
+                // Explode when rocket dies or reaches apex
+                if p.life <= 0.0 || p.vy > 0.0 {
+                    // Create explosion
+                    let num_particles = 60 + (rand_simple() * 40.0) as usize;
+                    for _ in 0..num_particles {
+                        let angle = rand_simple() * TAU;
+                        let speed = 0.01 + rand_simple() * 0.02;
+                        let hue_variation = p.hue + (rand_simple() - 0.5) * 0.1;
+                        new_particles.push(Particle {
+                            x: p.x,
+                            y: p.y,
+                            vx: angle.cos() * speed,
+                            vy: angle.sin() * speed,
+                            life: 1.0,
+                            max_life: 1.0,
+                            hue: hue_variation.rem_euclid(1.0),
+                            is_rocket: false,
+                            trail: Vec::new(),
+                        });
+                    }
+                    p.life = 0.0;
+                }
+            } else {
+                p.vy += 0.0006; // Gravity
+                p.life -= 0.012;
+                p.vx *= 0.99; // Air resistance
+                p.vy *= 0.99;
+            }
+        }
+
+        // Remove dead particles and add new ones
+        self.particles.retain(|p| p.life > 0.0);
+        self.particles.extend(new_particles);
+
+        // Limit total particles
+        if self.particles.len() > 1500 {
+            self.particles.drain(0..500);
+        }
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        for p in &self.particles {
+            // Draw trail
+            for (i, &(tx, ty)) in p.trail.iter().enumerate() {
+                let trail_life = i as f64 / p.trail.len() as f64 * p.life;
+                if trail_life > 0.1 {
+                    let px = (tx * width as f64) as i32;
+                    let py = (ty * height as f64) as i32;
+                    let (r, g, b) = hsv_to_rgb(p.hue * 360.0, 0.8, trail_life * 0.5);
+                    painter.point_colored(px, py, PackedRgba::rgb(r, g, b));
+                }
+            }
+
+            // Draw particle
+            let px = (p.x * width as f64) as i32;
+            let py = (p.y * height as f64) as i32;
+
+            let brightness = p.life / p.max_life;
+            let saturation = if p.is_rocket { 0.3 } else { 0.9 };
+            let (r, g, b) = hsv_to_rgb(p.hue * 360.0, saturation, brightness);
+
+            painter.point_colored(px, py, PackedRgba::rgb(r, g, b));
+
+            // Glow for bright particles
+            if brightness > 0.7 && !p.is_rocket {
+                let glow_b = (brightness * 0.5 * 255.0) as u8;
+                painter.point_colored(px + 1, py, PackedRgba::rgb(glow_b, glow_b, glow_b));
+                painter.point_colored(px - 1, py, PackedRgba::rgb(glow_b, glow_b, glow_b));
+                painter.point_colored(px, py + 1, PackedRgba::rgb(glow_b, glow_b, glow_b));
+                painter.point_colored(px, py - 1, PackedRgba::rgb(glow_b, glow_b, glow_b));
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Matrix Rain - Digital rain effect
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct MatrixDrop {
+    x: usize,
+    y: f64,
+    speed: f64,
+    length: usize,
+    chars: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MatrixState {
+    drops: Vec<MatrixDrop>,
+    width: usize,
+    initialized: bool,
+}
+
+impl MatrixState {
+    fn init(&mut self, width: usize) {
+        if self.initialized && self.width == width {
+            return;
+        }
+        self.width = width;
+        self.drops.clear();
+
+        // Create drops for each column
+        for x in 0..width {
+            if rand_simple() < 0.7 {
+                self.spawn_drop(x);
+            }
+        }
+        self.initialized = true;
+    }
+
+    fn spawn_drop(&mut self, x: usize) {
+        let length = 8 + (rand_simple() * 20.0) as usize;
+        let mut chars = Vec::with_capacity(length);
+        for _ in 0..length {
+            chars.push((rand_simple() * 94.0 + 33.0) as u8); // Printable ASCII
+        }
+        self.drops.push(MatrixDrop {
+            x,
+            y: -(rand_simple() * 20.0),
+            speed: 0.3 + rand_simple() * 0.4,
+            length,
+            chars,
+        });
+    }
+
+    fn update(&mut self, height: usize) {
+        if !self.initialized {
+            return;
+        }
+
+        for drop in &mut self.drops {
+            drop.y += drop.speed;
+
+            // Randomly change characters
+            if rand_simple() < 0.1 {
+                let idx = (rand_simple() * drop.chars.len() as f64) as usize;
+                if idx < drop.chars.len() {
+                    drop.chars[idx] = (rand_simple() * 94.0 + 33.0) as u8;
+                }
+            }
+        }
+
+        // Remove drops that are off screen and spawn new ones
+        self.drops
+            .retain(|d| (d.y as i32 - d.length as i32) < height as i32);
+
+        for x in 0..self.width {
+            if !self.drops.iter().any(|d| d.x == x) && rand_simple() < 0.03 {
+                self.spawn_drop(x);
+            }
+        }
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        if !self.initialized {
+            return;
+        }
+
+        // Scale from character columns to pixel columns
+        let char_width = width as usize / self.width.max(1);
+
+        for drop in &self.drops {
+            let px = (drop.x * char_width.max(1)) as i32;
+
+            for (i, &_ch) in drop.chars.iter().enumerate() {
+                let char_y = drop.y as i32 - i as i32;
+                if char_y < 0 || char_y >= height as i32 {
+                    continue;
+                }
+
+                // Calculate brightness - head is brightest
+                let brightness = if i == 0 {
+                    1.0
+                } else {
+                    1.0 - (i as f64 / drop.length as f64)
+                };
+
+                let (r, g, b) = if i == 0 {
+                    (200, 255, 200) // White-green head
+                } else {
+                    let g = (brightness * 200.0) as u8;
+                    (0, g, (g / 4).min(50))
+                };
+
+                // Draw the "character" as a small cluster of braille dots
+                for dy in 0..2 {
+                    for dx in 0..char_width.min(2) as i32 {
+                        painter.point_colored(px + dx, char_y * 2 + dy, PackedRgba::rgb(r, g, b));
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Tunnel - Flying through a tunnel effect
+// =============================================================================
+
+#[derive(Debug, Clone, Default)]
+struct TunnelState {
+    offset: f64,
+}
+
+impl TunnelState {
+    fn update(&mut self) {
+        self.offset += 0.08;
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        let cx = width as f64 / 2.0;
+        let cy = height as f64 / 2.0;
+        let max_dist = (cx * cx + cy * cy).sqrt();
+
+        for py in 0..height as i32 {
+            for px in 0..width as i32 {
+                let dx = px as f64 - cx;
+                let dy = py as f64 - cy;
+                let dist = (dx * dx + dy * dy).sqrt();
+                let angle = dy.atan2(dx);
+
+                if dist < 2.0 {
+                    continue; // Center void
+                }
+
+                // Tunnel depth based on distance from center
+                let depth = max_dist / dist;
+                let u = angle / TAU + 0.5;
+                let v = depth * 0.5 + self.offset;
+
+                // Create tunnel rings pattern
+                let ring = ((v * 8.0).floor() as i32).rem_euclid(2) as f64;
+                let segment = ((u * 16.0).floor() as i32).rem_euclid(2) as f64;
+                let checker = (ring + segment).rem_euclid(2.0);
+
+                // Color based on depth and pattern
+                let depth_fade = (1.0 - 1.0 / depth.max(1.0)).clamp(0.0, 1.0);
+                let base_brightness = 0.2 + 0.6 * checker;
+                let brightness = base_brightness * depth_fade;
+
+                let hue = (u + self.offset * 0.1) % 1.0;
+                let color = palette_cyberpunk(hue);
+                let r = (color.r() as f64 * brightness) as u8;
+                let g = (color.g() as f64 * brightness) as u8;
+                let b = (color.b() as f64 * brightness) as u8;
+
+                painter.point_colored(px, py, PackedRgba::rgb(r, g, b));
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Fire - Realistic fire simulation
+// =============================================================================
+
+#[derive(Debug, Clone, Default)]
+struct FireState {
+    buffer: Vec<f64>,
+    width: usize,
+    height: usize,
+    initialized: bool,
+}
+
+impl FireState {
+    fn init(&mut self, width: usize, height: usize) {
+        if self.initialized && self.width == width && self.height == height {
+            return;
+        }
+        self.width = width;
+        self.height = height;
+        self.buffer = vec![0.0; width * height];
+        self.initialized = true;
+    }
+
+    fn update(&mut self) {
+        if !self.initialized || self.width == 0 || self.height == 0 {
+            return;
+        }
+
+        // Set fire source at bottom
+        let bottom = self.height - 1;
+        for x in 0..self.width {
+            self.buffer[bottom * self.width + x] = 0.8 + rand_simple() * 0.2;
+        }
+
+        // Propagate fire upward with cooling
+        for y in 0..self.height - 1 {
+            for x in 0..self.width {
+                let below = (y + 1) * self.width + x;
+                let left = if x > 0 {
+                    (y + 1) * self.width + x - 1
+                } else {
+                    below
+                };
+                let right = if x < self.width - 1 {
+                    (y + 1) * self.width + x + 1
+                } else {
+                    below
+                };
+                let below2 = if y + 2 < self.height {
+                    (y + 2) * self.width + x
+                } else {
+                    below
+                };
+
+                // Average with neighbors and cool down
+                let avg = (self.buffer[below]
+                    + self.buffer[left]
+                    + self.buffer[right]
+                    + self.buffer[below2])
+                    / 4.0;
+
+                // Random cooling factor
+                let cooling = 0.02 + rand_simple() * 0.03;
+                let new_val = (avg - cooling).max(0.0);
+
+                // Add some turbulence
+                let turbulence = if rand_simple() < 0.1 {
+                    (rand_simple() - 0.5) * 0.1
+                } else {
+                    0.0
+                };
+
+                self.buffer[y * self.width + x] = (new_val + turbulence).clamp(0.0, 1.0);
+            }
+        }
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        if !self.initialized || self.width == 0 || self.height == 0 || width == 0 || height == 0 {
+            return;
+        }
+
+        let scale_x = self.width as f64 / width as f64;
+        let scale_y = self.height as f64 / height as f64;
+
+        for py in 0..height as i32 {
+            for px in 0..width as i32 {
+                let gx = ((px as f64 * scale_x) as usize).min(self.width - 1);
+                let gy = ((py as f64 * scale_y) as usize).min(self.height - 1);
+                let val = self.buffer[gy * self.width + gx];
+
+                if val > 0.01 {
+                    let color = palette_fire(val);
+                    painter.point_colored(px, py, color);
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Reaction-Diffusion (Gray-Scott) - Turing pattern morphogenesis
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct ReactionDiffusionState {
+    // Chemical concentrations: U (activator) and V (inhibitor)
+    u: Vec<f64>,
+    v: Vec<f64>,
+    width: usize,
+    height: usize,
+    initialized: bool,
+    // Gray-Scott parameters - these create beautiful organic patterns
+    feed: f64, // Feed rate (F)
+    kill: f64, // Kill rate (k)
+    du: f64,   // Diffusion rate of U
+    dv: f64,   // Diffusion rate of V
+}
+
+impl Default for ReactionDiffusionState {
+    fn default() -> Self {
+        Self {
+            u: Vec::new(),
+            v: Vec::new(),
+            width: 0,
+            height: 0,
+            initialized: false,
+            // Classic coral/maze pattern parameters
+            feed: 0.055,
+            kill: 0.062,
+            du: 1.0,
+            dv: 0.5,
+        }
+    }
+}
+
+impl ReactionDiffusionState {
+    fn init(&mut self, width: usize, height: usize) {
+        if self.initialized && self.width == width && self.height == height {
+            return;
+        }
+        self.width = width;
+        self.height = height;
+        let size = width * height;
+        self.u = vec![1.0; size];
+        self.v = vec![0.0; size];
+
+        // Seed with random spots of V
+        for _ in 0..15 {
+            let cx = (rand_simple() * width as f64) as usize;
+            let cy = (rand_simple() * height as f64) as usize;
+            let r = 3 + (rand_simple() * 5.0) as usize;
+            for dy in 0..r * 2 {
+                for dx in 0..r * 2 {
+                    let x = (cx + dx).saturating_sub(r);
+                    let y = (cy + dy).saturating_sub(r);
+                    if x < width && y < height {
+                        let dist =
+                            ((dx as i32 - r as i32).pow(2) + (dy as i32 - r as i32).pow(2)) as f64;
+                        if dist < (r * r) as f64 {
+                            let idx = y * width + x;
+                            self.u[idx] = 0.5;
+                            self.v[idx] = 0.25;
+                        }
+                    }
+                }
+            }
+        }
+        self.initialized = true;
+    }
+
+    fn update(&mut self) {
+        if !self.initialized || self.width < 3 || self.height < 3 {
+            return;
+        }
+
+        let w = self.width;
+        let h = self.height;
+        let mut new_u = self.u.clone();
+        let mut new_v = self.v.clone();
+
+        // Gray-Scott reaction-diffusion equations
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let idx = y * w + x;
+                let u = self.u[idx];
+                let v = self.v[idx];
+
+                // Laplacian (5-point stencil)
+                let lap_u =
+                    self.u[idx - 1] + self.u[idx + 1] + self.u[idx - w] + self.u[idx + w] - 4.0 * u;
+                let lap_v =
+                    self.v[idx - 1] + self.v[idx + 1] + self.v[idx - w] + self.v[idx + w] - 4.0 * v;
+
+                // Reaction terms
+                let uvv = u * v * v;
+                let du_dt = self.du * lap_u - uvv + self.feed * (1.0 - u);
+                let dv_dt = self.dv * lap_v + uvv - (self.feed + self.kill) * v;
+
+                // Euler integration with dt = 1.0
+                new_u[idx] = (u + du_dt).clamp(0.0, 1.0);
+                new_v[idx] = (v + dv_dt).clamp(0.0, 1.0);
+            }
+        }
+
+        self.u = new_u;
+        self.v = new_v;
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        if !self.initialized || self.width == 0 || self.height == 0 {
+            return;
+        }
+
+        let scale_x = self.width as f64 / width as f64;
+        let scale_y = self.height as f64 / height as f64;
+
+        for py in 0..height as i32 {
+            for px in 0..width as i32 {
+                let gx = ((px as f64 * scale_x) as usize).min(self.width - 1);
+                let gy = ((py as f64 * scale_y) as usize).min(self.height - 1);
+                let idx = gy * self.width + gx;
+
+                let v = self.v[idx];
+                if v > 0.05 {
+                    // Beautiful organic palette based on concentration
+                    let color = palette_ocean(v * 1.5);
+                    painter.point_colored(px, py, color);
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Strange Attractor - Clifford attractor with beautiful chaos
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct AttractorPoint {
+    x: f64,
+    y: f64,
+    age: f64,
+    hue: f64,
+}
+
+#[derive(Debug, Clone)]
+struct AttractorState {
+    points: Vec<AttractorPoint>,
+    // Clifford attractor parameters: x' = sin(a*y) + c*cos(a*x), y' = sin(b*x) + d*cos(b*y)
+    a: f64,
+    b: f64,
+    c: f64,
+    d: f64,
+    time: f64,
+}
+
+impl Default for AttractorState {
+    fn default() -> Self {
+        Self {
+            points: Vec::new(),
+            // Beautiful swirling parameters
+            a: -1.4,
+            b: 1.6,
+            c: 1.0,
+            d: 0.7,
+            time: 0.0,
+        }
+    }
+}
+
+impl AttractorState {
+    fn update(&mut self) {
+        self.time += 0.002;
+
+        // Slowly evolve parameters for morphing patterns
+        let t = self.time;
+        self.a = -1.4 + 0.3 * (t * 0.7).sin();
+        self.b = 1.6 + 0.2 * (t * 0.5).cos();
+        self.c = 1.0 + 0.3 * (t * 0.3).sin();
+        self.d = 0.7 + 0.2 * (t * 0.4).cos();
+
+        // Spawn new points
+        if self.points.len() < 5000 {
+            for _ in 0..50 {
+                self.points.push(AttractorPoint {
+                    x: rand_simple() * 4.0 - 2.0,
+                    y: rand_simple() * 4.0 - 2.0,
+                    age: 0.0,
+                    hue: rand_simple(),
+                });
+            }
+        }
+
+        // Update points using Clifford attractor equations
+        for p in &mut self.points {
+            let new_x = (self.a * p.y).sin() + self.c * (self.a * p.x).cos();
+            let new_y = (self.b * p.x).sin() + self.d * (self.b * p.y).cos();
+            p.x = new_x;
+            p.y = new_y;
+            p.age += 0.01;
+            p.hue = (p.hue + 0.001) % 1.0;
+        }
+
+        // Remove old points
+        self.points.retain(|p| p.age < 2.0);
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        let w = width as f64;
+        let h = height as f64;
+        let scale = (w.min(h) / 5.0).max(1.0);
+        let cx = w / 2.0;
+        let cy = h / 2.0;
+
+        for p in &self.points {
+            let sx = (cx + p.x * scale) as i32;
+            let sy = (cy + p.y * scale) as i32;
+
+            if sx >= 0 && sx < width as i32 && sy >= 0 && sy < height as i32 {
+                let brightness = 1.0 - (p.age / 2.0).min(1.0);
+                let (r, g, b) = hsv_to_rgb(p.hue * 360.0, 0.9, brightness);
+                painter.point_colored(sx, sy, PackedRgba::rgb(r, g, b));
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Mandelbrot - Deep zoom into the fractal with smooth coloring
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct MandelbrotState {
+    center_x: f64,
+    center_y: f64,
+    zoom: f64,
+    max_iter: u32,
+    time: f64,
+}
+
+impl Default for MandelbrotState {
+    fn default() -> Self {
+        Self {
+            // Interesting zoom target near the "seahorse valley"
+            center_x: -0.743643887037151,
+            center_y: 0.131825904205330,
+            zoom: 1.0,
+            max_iter: 100,
+            time: 0.0,
+        }
+    }
+}
+
+impl MandelbrotState {
+    fn update(&mut self) {
+        self.time += 0.02;
+        // Continuous zoom with periodic reset
+        self.zoom *= 1.015;
+        if self.zoom > 1e8 {
+            self.zoom = 1.0;
+            // Pick a new interesting location
+            let locations = [
+                (-0.743643887037151, 0.131825904205330), // Seahorse valley
+                (-0.16, 1.0405),                         // Branch tip
+                (-1.25066, 0.02012),                     // Mini Mandelbrot
+                (-0.77568377, 0.13646737),               // Spiral
+            ];
+            let idx = (rand_simple() * locations.len() as f64) as usize;
+            let loc = locations[idx.min(locations.len() - 1)];
+            self.center_x = loc.0;
+            self.center_y = loc.1;
+        }
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        let w = width as f64;
+        let h = height as f64;
+        let scale = 3.5 / (self.zoom * w.min(h));
+
+        for py in 0..height as i32 {
+            for px in 0..width as i32 {
+                // Map pixel to complex plane
+                let x0 = self.center_x + (px as f64 - w / 2.0) * scale;
+                let y0 = self.center_y + (py as f64 - h / 2.0) * scale;
+
+                // Mandelbrot iteration with smooth coloring
+                let mut x = 0.0;
+                let mut y = 0.0;
+                let mut iter = 0u32;
+
+                while x * x + y * y <= 256.0 && iter < self.max_iter {
+                    let xtemp = x * x - y * y + x0;
+                    y = 2.0 * x * y + y0;
+                    x = xtemp;
+                    iter += 1;
+                }
+
+                if iter < self.max_iter {
+                    // Smooth coloring using escape-time algorithm
+                    let log_zn = (x * x + y * y).ln() / 2.0;
+                    let nu = (log_zn / 2.0_f64.ln()).ln() / 2.0_f64.ln();
+                    let smooth_iter = iter as f64 + 1.0 - nu;
+
+                    // Color based on iteration count with time-shifting hue
+                    let t = (smooth_iter / 50.0 + self.time * 0.1) % 1.0;
+                    let color = palette_sunset(t);
+                    painter.point_colored(px, py, color);
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Lissajous - Harmonograph-style overlapping harmonic curves
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct LissajousCurve {
+    freq_x: f64,
+    freq_y: f64,
+    phase_x: f64,
+    phase_y: f64,
+    decay: f64,
+    hue: f64,
+}
+
+#[derive(Debug, Clone)]
+struct LissajousState {
+    curves: Vec<LissajousCurve>,
+    time: f64,
+    trail_buffer: Vec<(i32, i32, f64, f64)>, // x, y, age, hue
+}
+
+impl Default for LissajousState {
+    fn default() -> Self {
+        // Create multiple overlapping harmonograph curves
+        let curves = vec![
+            LissajousCurve {
+                freq_x: 3.0,
+                freq_y: 2.0,
+                phase_x: 0.0,
+                phase_y: TAU / 4.0,
+                decay: 0.002,
+                hue: 0.0,
+            },
+            LissajousCurve {
+                freq_x: 5.0,
+                freq_y: 4.0,
+                phase_x: TAU / 3.0,
+                phase_y: 0.0,
+                decay: 0.003,
+                hue: 0.33,
+            },
+            LissajousCurve {
+                freq_x: 7.0,
+                freq_y: 6.0,
+                phase_x: TAU / 6.0,
+                phase_y: TAU / 2.0,
+                decay: 0.001,
+                hue: 0.66,
+            },
+        ];
+        Self {
+            curves,
+            time: 0.0,
+            trail_buffer: Vec::with_capacity(10000),
+        }
+    }
+}
+
+impl LissajousState {
+    fn update(&mut self) {
+        self.time += 0.05;
+
+        // Age and remove old trail points
+        for point in &mut self.trail_buffer {
+            point.2 += 0.02; // age
+        }
+        self.trail_buffer.retain(|p| p.2 < 1.5);
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        let w = width as f64;
+        let h = height as f64;
+        let cx = w / 2.0;
+        let cy = h / 2.0;
+        let scale = (w.min(h) * 0.4).max(1.0);
+
+        // Draw trail buffer
+        for &(px, py, age, hue) in &self.trail_buffer {
+            if px >= 0 && px < width as i32 && py >= 0 && py < height as i32 {
+                let brightness = (1.0 - age / 1.5).max(0.0);
+                let (r, g, b) = hsv_to_rgb(hue * 360.0, 0.8, brightness);
+                painter.point_colored(px, py, PackedRgba::rgb(r, g, b));
+            }
+        }
+
+        // Draw each curve with many sample points
+        let t = self.time;
+        for curve in &self.curves {
+            let decay_factor = (-curve.decay * t).exp();
+            for i in 0..500 {
+                let ti = t - i as f64 * 0.02;
+                if ti < 0.0 {
+                    continue;
+                }
+                let d = (-curve.decay * ti).exp();
+
+                let x = (curve.freq_x * ti + curve.phase_x).sin() * d;
+                let y = (curve.freq_y * ti + curve.phase_y).sin() * d;
+
+                let sx = (cx + x * scale) as i32;
+                let sy = (cy + y * scale) as i32;
+
+                if sx >= 0 && sx < width as i32 && sy >= 0 && sy < height as i32 {
+                    let brightness = (d / decay_factor).min(1.0) * (1.0 - i as f64 / 500.0);
+                    let hue = (curve.hue + ti * 0.01) % 1.0;
+                    let (r, g, b) = hsv_to_rgb(hue * 360.0, 0.9, brightness);
+                    painter.point_colored(sx, sy, PackedRgba::rgb(r, g, b));
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Flow Field - Particles following Perlin noise vector field
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct FlowParticle {
+    x: f64,
+    y: f64,
+    prev_x: f64,
+    prev_y: f64,
+    hue: f64,
+    age: f64,
+}
+
+#[derive(Debug, Clone)]
+struct FlowFieldState {
+    particles: Vec<FlowParticle>,
+    time: f64,
+    noise_scale: f64,
+}
+
+impl Default for FlowFieldState {
+    fn default() -> Self {
+        Self {
+            particles: Vec::with_capacity(2000),
+            time: 0.0,
+            noise_scale: 0.008,
+        }
+    }
+}
+
+impl FlowFieldState {
+    fn update(&mut self) {
+        self.time += 0.03;
+
+        // Spawn new particles
+        while self.particles.len() < 1500 {
+            let x = rand_simple();
+            let y = rand_simple();
+            self.particles.push(FlowParticle {
+                x,
+                y,
+                prev_x: x,
+                prev_y: y,
+                hue: rand_simple(),
+                age: 0.0,
+            });
+        }
+
+        // Update particles following the flow field
+        let time = self.time;
+        let noise_scale = self.noise_scale;
+        for p in &mut self.particles {
+            p.prev_x = p.x;
+            p.prev_y = p.y;
+
+            // Sample noise field to get flow direction (inline to avoid borrow issues)
+            let nx = p.x / noise_scale + time;
+            let ny = p.y / noise_scale;
+            let n1 = (nx * 1.0 + ny * 1.7).sin();
+            let n2 = (nx * 2.3 - ny * 1.2 + time * 0.5).sin() * 0.5;
+            let n3 = (nx * 4.1 + ny * 3.7 - time * 0.3).sin() * 0.25;
+            let n4 = ((nx + ny) * 0.7 + time * 0.2).cos() * 0.3;
+            let noise = (n1 + n2 + n3 + n4) / 2.05;
+            let angle = noise * TAU * 2.0;
+
+            // Move particle along flow
+            let speed = 0.005;
+            p.x += angle.cos() * speed;
+            p.y += angle.sin() * speed;
+            p.age += 0.01;
+            p.hue = (p.hue + 0.001) % 1.0;
+
+            // Wrap around edges
+            if p.x < 0.0 {
+                p.x = 1.0;
+                p.prev_x = 1.0;
+            }
+            if p.x > 1.0 {
+                p.x = 0.0;
+                p.prev_x = 0.0;
+            }
+            if p.y < 0.0 {
+                p.y = 1.0;
+                p.prev_y = 1.0;
+            }
+            if p.y > 1.0 {
+                p.y = 0.0;
+                p.prev_y = 0.0;
+            }
+        }
+
+        // Remove old particles
+        self.particles.retain(|p| p.age < 3.0);
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        let w = width as f64;
+        let h = height as f64;
+
+        for p in &self.particles {
+            let sx = (p.x * w) as i32;
+            let sy = (p.y * h) as i32;
+            let px = (p.prev_x * w) as i32;
+            let py = (p.prev_y * h) as i32;
+
+            // Only draw if within bounds and not wrapping
+            let dx = (sx - px).abs();
+            let dy = (sy - py).abs();
+            if dx < width as i32 / 2 && dy < height as i32 / 2 {
+                let brightness = (1.0 - p.age / 3.0).max(0.0);
+                let (r, g, b) = hsv_to_rgb(p.hue * 360.0, 0.85, brightness);
+                let color = PackedRgba::rgb(r, g, b);
+
+                // Draw line from previous to current position
+                painter.line_colored(px, py, sx, sy, Some(color));
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Julia Set - Animated companion to Mandelbrot with morphing c parameter
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct JuliaState {
+    // Complex c parameter that animates around interesting values
+    c_real: f64,
+    c_imag: f64,
+    time: f64,
+    max_iter: u32,
+    zoom: f64,
+}
+
+impl Default for JuliaState {
+    fn default() -> Self {
+        Self {
+            c_real: -0.7269,
+            c_imag: 0.1889,
+            time: 0.0,
+            max_iter: 80,
+            zoom: 1.0,
+        }
+    }
+}
+
+impl JuliaState {
+    fn update(&mut self) {
+        self.time += 0.015;
+        // Animate c along a lemniscate (figure-8 curve) for beautiful morphing
+        let t = self.time;
+        self.c_real = 0.7885 * (t * 0.4).cos();
+        self.c_imag = 0.7885 * (t * 0.4).sin() * (2.0 * t * 0.4).cos();
+        // Gentle zoom oscillation
+        self.zoom = 1.0 + 0.3 * (t * 0.2).sin();
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        let w = width as f64;
+        let h = height as f64;
+        let scale = 3.0 / (self.zoom * w.min(h));
+
+        for py in 0..height as i32 {
+            for px in 0..width as i32 {
+                // Map pixel to complex plane centered at origin
+                let mut x = (px as f64 - w / 2.0) * scale;
+                let mut y = (py as f64 - h / 2.0) * scale;
+
+                let mut iter = 0u32;
+                while x * x + y * y <= 256.0 && iter < self.max_iter {
+                    let xtemp = x * x - y * y + self.c_real;
+                    y = 2.0 * x * y + self.c_imag;
+                    x = xtemp;
+                    iter += 1;
+                }
+
+                if iter < self.max_iter {
+                    // Smooth coloring
+                    let log_zn = (x * x + y * y).ln() / 2.0;
+                    let nu = (log_zn / 2.0_f64.ln()).ln() / 2.0_f64.ln();
+                    let smooth_iter = iter as f64 + 1.0 - nu;
+                    let t = (smooth_iter / 40.0 + self.time * 0.05) % 1.0;
+                    let color = palette_cyberpunk(t);
+                    painter.point_colored(px, py, color);
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Wave Interference - Multiple wave sources creating interference patterns
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct WaveSource {
+    x: f64,
+    y: f64,
+    freq: f64,
+    phase: f64,
+    amplitude: f64,
+}
+
+#[derive(Debug, Clone)]
+struct WaveInterferenceState {
+    sources: Vec<WaveSource>,
+    time: f64,
+}
+
+impl Default for WaveInterferenceState {
+    fn default() -> Self {
+        Self {
+            sources: vec![
+                WaveSource {
+                    x: 0.25,
+                    y: 0.5,
+                    freq: 15.0,
+                    phase: 0.0,
+                    amplitude: 1.0,
+                },
+                WaveSource {
+                    x: 0.75,
+                    y: 0.5,
+                    freq: 15.0,
+                    phase: 0.0,
+                    amplitude: 1.0,
+                },
+                WaveSource {
+                    x: 0.5,
+                    y: 0.25,
+                    freq: 12.0,
+                    phase: TAU / 3.0,
+                    amplitude: 0.8,
+                },
+                WaveSource {
+                    x: 0.5,
+                    y: 0.75,
+                    freq: 12.0,
+                    phase: TAU / 3.0,
+                    amplitude: 0.8,
+                },
+            ],
+            time: 0.0,
+        }
+    }
+}
+
+impl WaveInterferenceState {
+    fn update(&mut self) {
+        self.time += 0.08;
+        // Slowly move sources in circular patterns
+        let t = self.time * 0.1;
+        self.sources[0].x = 0.25 + 0.1 * t.cos();
+        self.sources[0].y = 0.5 + 0.1 * t.sin();
+        self.sources[1].x = 0.75 + 0.1 * (t + TAU / 2.0).cos();
+        self.sources[1].y = 0.5 + 0.1 * (t + TAU / 2.0).sin();
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        let w = width as f64;
+        let h = height as f64;
+
+        for py in 0..height as i32 {
+            for px in 0..width as i32 {
+                let x = px as f64 / w;
+                let y = py as f64 / h;
+
+                // Sum waves from all sources (superposition principle)
+                let mut sum = 0.0;
+                for source in &self.sources {
+                    let dx = x - source.x;
+                    let dy = y - source.y;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    // Wave equation: A * sin(k*r - omega*t + phi)
+                    let wave =
+                        source.amplitude * (source.freq * dist - self.time + source.phase).sin();
+                    sum += wave;
+                }
+
+                // Normalize and map to color
+                let normalized = (sum / self.sources.len() as f64 + 1.0) / 2.0;
+                let color = palette_ocean(normalized);
+                painter.point_colored(px, py, color);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Spiral Galaxy - Logarithmic spirals with rotating star field
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct SpiralStar {
+    angle: f64, // Position along spiral
+    arm: usize, // Which spiral arm
+    radial_offset: f64,
+    brightness: f64,
+    hue_offset: f64,
+}
+
+#[derive(Debug, Clone)]
+struct SpiralState {
+    stars: Vec<SpiralStar>,
+    rotation: f64,
+    num_arms: usize,
+    spiral_tightness: f64,
+}
+
+impl Default for SpiralState {
+    fn default() -> Self {
+        let num_arms = 4;
+        let mut stars = Vec::with_capacity(3000);
+
+        for _ in 0..3000 {
+            stars.push(SpiralStar {
+                angle: rand_simple() * TAU * 3.0, // Multiple rotations
+                arm: (rand_simple() * num_arms as f64) as usize,
+                radial_offset: (rand_simple() - 0.5) * 0.15,
+                brightness: 0.3 + rand_simple() * 0.7,
+                hue_offset: rand_simple() * 0.1,
+            });
+        }
+
+        Self {
+            stars,
+            rotation: 0.0,
+            num_arms,
+            spiral_tightness: 0.3,
+        }
+    }
+}
+
+impl SpiralState {
+    fn update(&mut self) {
+        self.rotation += 0.008;
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        let w = width as f64;
+        let h = height as f64;
+        let cx = w / 2.0;
+        let cy = h / 2.0;
+        let scale = w.min(h) * 0.4;
+
+        for star in &self.stars {
+            // Logarithmic spiral: r = a * e^(b*theta)
+            let arm_angle = (star.arm as f64 / self.num_arms as f64) * TAU;
+            let theta = star.angle + arm_angle + self.rotation;
+            let r = 0.05 * (self.spiral_tightness * star.angle).exp() + star.radial_offset;
+
+            // Clamp radius
+            if r > 1.0 {
+                continue;
+            }
+
+            let sx = cx + r * scale * theta.cos();
+            let sy = cy + r * scale * theta.sin();
+
+            let px = sx as i32;
+            let py = sy as i32;
+
+            if px >= 0 && px < width as i32 && py >= 0 && py < height as i32 {
+                // Color based on radius and arm
+                let hue = (r + star.hue_offset + self.rotation * 0.1) % 1.0;
+                let brightness = star.brightness * (1.0 - r * 0.5);
+                let (red, g, b) = hsv_to_rgb(hue * 360.0 * 0.3 + 200.0, 0.6, brightness);
+                painter.point_colored(px, py, PackedRgba::rgb(red, g, b));
+            }
+        }
+
+        // Draw bright galactic core
+        for dy in -3..=3 {
+            for dx in -3..=3 {
+                let dist = ((dx * dx + dy * dy) as f64).sqrt();
+                if dist < 3.0 {
+                    let brightness = (1.0 - dist / 3.0) * 255.0;
+                    let b = brightness as u8;
+                    let px = (cx as i32 + dx).clamp(0, width as i32 - 1);
+                    let py = (cy as i32 + dy).clamp(0, height as i32 - 1);
+                    painter.point_colored(px, py, PackedRgba::rgb(255, b.saturating_add(100), b));
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Spin Lattice - Landau-Lifshitz spin dynamics on a 2D lattice
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct SpinLatticeState {
+    // Spin vectors stored as (theta, phi) spherical coordinates
+    theta: Vec<f64>, // Polar angle
+    phi: Vec<f64>,   // Azimuthal angle
+    width: usize,
+    height: usize,
+    initialized: bool,
+    // Physical parameters
+    exchange_j: f64,   // Exchange coupling
+    anisotropy_k: f64, // Uniaxial anisotropy
+    damping: f64,      // Gilbert damping
+    temperature: f64,  // Thermal noise
+    time: f64,
+}
+
+impl Default for SpinLatticeState {
+    fn default() -> Self {
+        Self {
+            theta: Vec::new(),
+            phi: Vec::new(),
+            width: 0,
+            height: 0,
+            initialized: false,
+            exchange_j: 1.0,
+            anisotropy_k: 0.3,
+            damping: 0.1,
+            temperature: 0.05,
+            time: 0.0,
+        }
+    }
+}
+
+impl SpinLatticeState {
+    fn init(&mut self, width: usize, height: usize) {
+        if self.initialized && self.width == width && self.height == height {
+            return;
+        }
+        self.width = width;
+        self.height = height;
+        let size = width * height;
+
+        // Initialize with slightly perturbed ferromagnetic state + domain walls
+        self.theta = vec![0.0; size];
+        self.phi = vec![0.0; size];
+
+        for y in 0..height {
+            for x in 0..width {
+                let idx = y * width + x;
+                // Create initial domain structure
+                let domain = ((x / 10) + (y / 10)) % 2;
+                self.theta[idx] = if domain == 0 { 0.2 } else { TAU / 2.0 - 0.2 };
+                self.phi[idx] = rand_simple() * TAU;
+            }
+        }
+        self.initialized = true;
+    }
+
+    fn update(&mut self) {
+        if !self.initialized || self.width < 3 || self.height < 3 {
+            return;
+        }
+
+        self.time += 0.05;
+        let w = self.width;
+        let h = self.height;
+        let dt = 0.1;
+
+        let mut new_theta = self.theta.clone();
+        let mut new_phi = self.phi.clone();
+
+        // Landau-Lifshitz-Gilbert dynamics
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let idx = y * w + x;
+
+                // Current spin in Cartesian
+                let theta = self.theta[idx];
+                let phi = self.phi[idx];
+                let sx = theta.sin() * phi.cos();
+                let sy = theta.sin() * phi.sin();
+                let sz = theta.cos();
+
+                // Effective field from exchange (sum of neighbor spins)
+                let mut hx = 0.0;
+                let mut hy = 0.0;
+                let mut hz = 0.0;
+
+                for &(dx, dy) in &[(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    let nidx = ny * w + nx;
+                    let nt = self.theta[nidx];
+                    let np = self.phi[nidx];
+                    hx += self.exchange_j * nt.sin() * np.cos();
+                    hy += self.exchange_j * nt.sin() * np.sin();
+                    hz += self.exchange_j * nt.cos();
+                }
+
+                // Anisotropy field (easy axis along z)
+                hz += self.anisotropy_k * sz;
+
+                // Thermal noise
+                hx += (rand_simple() - 0.5) * self.temperature;
+                hy += (rand_simple() - 0.5) * self.temperature;
+                hz += (rand_simple() - 0.5) * self.temperature;
+
+                // Torque: -S x H
+                let tx = sy * hz - sz * hy;
+                let ty = sz * hx - sx * hz;
+                let tz = sx * hy - sy * hx;
+
+                // Damping torque: -alpha * S x (S x H)
+                let dtx = self.damping * (sy * tz - sz * ty);
+                let dty = self.damping * (sz * tx - sx * tz);
+                let dtz = self.damping * (sx * ty - sy * tx);
+
+                // Update spin
+                let new_sx = sx + dt * (tx + dtx);
+                let new_sy = sy + dt * (ty + dty);
+                let new_sz = sz + dt * (tz + dtz);
+
+                // Normalize and convert back to spherical
+                let norm = (new_sx * new_sx + new_sy * new_sy + new_sz * new_sz).sqrt();
+                if norm > 0.001 {
+                    let nsx = new_sx / norm;
+                    let nsy = new_sy / norm;
+                    let nsz = new_sz / norm;
+
+                    new_theta[idx] = nsz.clamp(-1.0, 1.0).acos();
+                    new_phi[idx] = nsy.atan2(nsx);
+                }
+            }
+        }
+
+        self.theta = new_theta;
+        self.phi = new_phi;
+    }
+
+    fn render(&self, painter: &mut Painter, width: u16, height: u16) {
+        if !self.initialized || self.width == 0 || self.height == 0 {
+            return;
+        }
+
+        let scale_x = self.width as f64 / width as f64;
+        let scale_y = self.height as f64 / height as f64;
+
+        for py in 0..height as i32 {
+            for px in 0..width as i32 {
+                let gx = ((px as f64 * scale_x) as usize).min(self.width - 1);
+                let gy = ((py as f64 * scale_y) as usize).min(self.height - 1);
+                let idx = gy * self.width + gx;
+
+                let theta = self.theta[idx];
+                let phi = self.phi[idx];
+
+                // Color based on spin direction
+                // z-component (theta) maps to brightness
+                // xy-plane angle (phi) maps to hue
+                let sz = theta.cos();
+                let brightness = (sz + 1.0) / 2.0; // Map [-1,1] to [0,1]
+                let hue = (phi / TAU + 0.5) % 1.0;
+
+                let (r, g, b) = hsv_to_rgb(hue * 360.0, 0.9, brightness);
+                painter.point_colored(px, py, PackedRgba::rgb(r, g, b));
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Helper functions
+// =============================================================================
+
+static RAND_STATE: AtomicU64 = AtomicU64::new(12345);
+
+fn rand_simple() -> f64 {
+    let old = RAND_STATE
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| {
+            Some(s.wrapping_mul(6364136223846793005).wrapping_add(1))
+        })
+        .unwrap();
+    let new = old.wrapping_mul(6364136223846793005).wrapping_add(1);
+    (new >> 33) as f64 / (1u64 << 31) as f64
+}
+
+// =============================================================================
+// Screen implementation
+// =============================================================================
+
+impl Default for VisualEffectsScreen {
+    fn default() -> Self {
+        Self {
+            effect: EffectType::Metaballs,
+            frame: 0,
+            time: 0.0,
+            metaballs: MetaballsState::default(),
+            shape3d: Shape3DState::default(),
+            plasma: PlasmaState::default(),
+            particles: ParticleState::default(),
+            matrix: MatrixState::default(),
+            tunnel: TunnelState::default(),
+            fire: FireState::default(),
+            reaction_diffusion: ReactionDiffusionState::default(),
+            attractor: AttractorState::default(),
+            mandelbrot: MandelbrotState::default(),
+            lissajous: LissajousState::default(),
+            flow_field: FlowFieldState::default(),
+            julia: JuliaState::default(),
+            wave_interference: WaveInterferenceState::default(),
+            spiral: SpiralState::default(),
+            spin_lattice: SpinLatticeState::default(),
+            // FPS tracking
+            frame_times: VecDeque::with_capacity(60),
+            last_frame: None,
+            fps: 0.0,
+            avg_frame_time_us: 0.0,
+            min_frame_time_us: 0.0,
+            max_frame_time_us: 0.0,
+            // Transition overlay
+            transition: TransitionState::new(),
+        }
+    }
+}
+
+impl VisualEffectsScreen {
+    /// Start a transition overlay for the current effect.
+    fn start_transition(&mut self) {
+        // Use a rainbow gradient for the transition
+        self.transition.start_with_gradient(
+            self.effect.name(),
+            self.effect.description(),
+            ColorGradient::cyberpunk(),
+        );
+        self.transition.set_speed(0.04); // Smooth transition
+    }
+}
+
+impl Screen for VisualEffectsScreen {
+    type Message = ();
+
+    fn update(&mut self, event: &Event) -> Cmd<Self::Message> {
+        if let Event::Key(KeyEvent {
+            code,
+            kind: KeyEventKind::Press,
+            ..
+        }) = event
+        {
+            match code {
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.effect = self.effect.prev();
+                    self.start_transition();
+                }
+                KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
+                    // Space and Right both switch to next effect
+                    self.effect = self.effect.next();
+                    self.start_transition();
+                }
+                KeyCode::Char('p') => {
+                    // 'p' cycles sub-options (palette, shape, etc.)
+                    match self.effect {
+                        EffectType::Shape3D => {
+                            self.shape3d.shape = self.shape3d.shape.next();
+                        }
+                        EffectType::Plasma => {
+                            self.plasma.cycle_palette();
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        Cmd::None
+    }
+
+    fn view(&self, frame: &mut Frame, area: Rect) {
+        if area.width < 10 || area.height < 5 {
+            return;
+        }
+
+        // Header with effect name, controls, and FPS stats
+        let header_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        };
+        let space_hint = match self.effect {
+            EffectType::Shape3D => " │ Space: Shape",
+            EffectType::Plasma => " │ Space: Palette",
+            _ => "",
+        };
+        // Build FPS stats string
+        let fps_stats = format!(
+            " │ {:.1} FPS │ {:.1}ms avg │ {:.1}/{:.1}ms",
+            self.fps,
+            self.avg_frame_time_us / 1000.0,
+            self.min_frame_time_us / 1000.0,
+            self.max_frame_time_us / 1000.0
+        );
+        let header_text = format!(
+            " {} │ ←/→ Switch{}{}",
+            self.effect.name(),
+            space_hint,
+            fps_stats
+        );
+        let header = Paragraph::new(header_text)
+            .style(Style::new().bold().fg(PackedRgba::rgb(200, 200, 255)));
+        header.render(header_area, frame);
+
+        // Canvas area
+        let canvas_area = Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: area.height.saturating_sub(1),
+        };
+
+        // Create painter and render current effect
+        let mut painter = Painter::for_area(canvas_area, Mode::Braille);
+        let (pw, ph) = painter.size();
+
+        match self.effect {
+            EffectType::Metaballs => self.metaballs.render(&mut painter, pw, ph, self.time),
+            EffectType::Shape3D => self.shape3d.render(&mut painter, pw, ph, self.time),
+            EffectType::Plasma => self.plasma.render(&mut painter, pw, ph),
+            EffectType::Particles => self.particles.render(&mut painter, pw, ph),
+            EffectType::Matrix => self.matrix.render(&mut painter, pw, ph),
+            EffectType::Tunnel => self.tunnel.render(&mut painter, pw, ph),
+            EffectType::Fire => self.fire.render(&mut painter, pw, ph),
+            EffectType::ReactionDiffusion => self.reaction_diffusion.render(&mut painter, pw, ph),
+            EffectType::StrangeAttractor => self.attractor.render(&mut painter, pw, ph),
+            EffectType::Mandelbrot => self.mandelbrot.render(&mut painter, pw, ph),
+            EffectType::Lissajous => self.lissajous.render(&mut painter, pw, ph),
+            EffectType::FlowField => self.flow_field.render(&mut painter, pw, ph),
+            EffectType::Julia => self.julia.render(&mut painter, pw, ph),
+            EffectType::WaveInterference => self.wave_interference.render(&mut painter, pw, ph),
+            EffectType::Spiral => self.spiral.render(&mut painter, pw, ph),
+            EffectType::SpinLattice => self.spin_lattice.render(&mut painter, pw, ph),
+        }
+
+        // Render canvas to frame
+        let canvas = Canvas::from_painter(&painter);
+        canvas.render(canvas_area, frame);
+
+        // Render transition overlay if active
+        if self.transition.is_visible() {
+            self.transition.overlay().render(canvas_area, frame);
+        }
+    }
+
+    fn tick(&mut self, _tick_count: u64) {
+        // FPS tracking
+        let now = Instant::now();
+        if let Some(last) = self.last_frame {
+            let elapsed_us = now.duration_since(last).as_micros() as u64;
+            self.frame_times.push_back(elapsed_us);
+
+            // Keep last 60 frames for averaging
+            while self.frame_times.len() > 60 {
+                self.frame_times.pop_front();
+            }
+
+            // Calculate FPS stats
+            if !self.frame_times.is_empty() {
+                let sum: u64 = self.frame_times.iter().sum();
+                self.avg_frame_time_us = sum as f64 / self.frame_times.len() as f64;
+                self.fps = if self.avg_frame_time_us > 0.0 {
+                    1_000_000.0 / self.avg_frame_time_us
+                } else {
+                    0.0
+                };
+
+                // Min/max over recent frames
+                self.min_frame_time_us = *self.frame_times.iter().min().unwrap_or(&0) as f64;
+                self.max_frame_time_us = *self.frame_times.iter().max().unwrap_or(&0) as f64;
+            }
+        }
+        self.last_frame = Some(now);
+
+        self.frame += 1;
+        self.time += 0.1;
+
+        // Update all effects (so they're ready when switched to)
+        self.metaballs.update(self.time);
+        self.shape3d.update();
+        self.plasma.update();
+        self.particles.update();
+
+        // Initialize dimension-dependent effects
+        if !self.matrix.initialized {
+            self.matrix.init(80);
+        }
+        self.matrix.update(60);
+
+        self.tunnel.update();
+
+        if !self.fire.initialized {
+            self.fire.init(80, 50);
+        }
+        self.fire.update();
+
+        // Mathematical effects
+        if !self.reaction_diffusion.initialized {
+            self.reaction_diffusion.init(100, 60);
+        }
+        // Run multiple iterations per tick for visible evolution
+        for _ in 0..8 {
+            self.reaction_diffusion.update();
+        }
+
+        self.attractor.update();
+        self.mandelbrot.update();
+        self.lissajous.update();
+        self.flow_field.update();
+
+        // New effects
+        self.julia.update();
+        self.wave_interference.update();
+        self.spiral.update();
+
+        if !self.spin_lattice.initialized {
+            self.spin_lattice.init(60, 40);
+        }
+        self.spin_lattice.update();
+
+        // Update transition overlay animation
+        self.transition.tick();
+    }
+
+    fn keybindings(&self) -> Vec<HelpEntry> {
+        vec![
+            HelpEntry {
+                key: "Space/→",
+                action: "Next effect",
+            },
+            HelpEntry {
+                key: "←",
+                action: "Prev effect",
+            },
+            HelpEntry {
+                key: "p",
+                action: "Cycle options",
+            },
+        ]
+    }
+
+    fn title(&self) -> &'static str {
+        "Visual Effects"
+    }
+
+    fn tab_label(&self) -> &'static str {
+        "VFX"
+    }
+}

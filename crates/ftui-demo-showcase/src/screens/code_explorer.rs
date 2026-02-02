@@ -144,6 +144,7 @@ impl CodeExplorer {
 
         let mut highlighter = SyntaxHighlighter::new();
         highlighter.register_tokenizer(Box::new(c_tokenizer()));
+        highlighter.set_theme(theme::syntax_theme());
 
         let metadata_json = format!(
             "{{\n  \"filename\": \"sqlite3.c\",\n  \"lines\": {},\n  \"size\": \"{}\",\n  \"size_bytes\": {},\n  \"language\": \"C\",\n  \"description\": \"SQLite amalgamation\"\n}}",
@@ -159,18 +160,44 @@ impl CodeExplorer {
             highlighter,
             search_input: TextInput::new()
                 .with_placeholder("Search code... (/ to focus)")
-                .with_style(Style::new().fg(theme::fg::PRIMARY).bg(theme::bg::SURFACE))
+                .with_style(
+                    Style::new()
+                        .fg(theme::fg::PRIMARY)
+                        .bg(theme::alpha::SURFACE),
+                )
                 .with_placeholder_style(Style::new().fg(theme::fg::MUTED)),
             search_active: false,
             goto_input: TextInput::new()
                 .with_placeholder("Line number...")
-                .with_style(Style::new().fg(theme::fg::PRIMARY).bg(theme::bg::SURFACE))
+                .with_style(
+                    Style::new()
+                        .fg(theme::fg::PRIMARY)
+                        .bg(theme::alpha::SURFACE),
+                )
                 .with_placeholder_style(Style::new().fg(theme::fg::MUTED)),
             goto_active: false,
             search_matches: Vec::new(),
             current_match: 0,
             metadata_json,
         }
+    }
+
+    pub fn apply_theme(&mut self) {
+        self.highlighter.set_theme(theme::syntax_theme());
+        let input_style = Style::new()
+            .fg(theme::fg::PRIMARY)
+            .bg(theme::alpha::SURFACE);
+        let placeholder_style = Style::new().fg(theme::fg::MUTED);
+        self.search_input = self
+            .search_input
+            .clone()
+            .with_style(input_style)
+            .with_placeholder_style(placeholder_style);
+        self.goto_input = self
+            .goto_input
+            .clone()
+            .with_style(input_style)
+            .with_placeholder_style(placeholder_style);
     }
 
     fn total_lines(&self) -> usize {
@@ -531,7 +558,11 @@ impl CodeExplorer {
                     .render(content_area, frame);
             } else if is_any_match {
                 Paragraph::new(line)
-                    .style(Style::new().fg(theme::fg::PRIMARY).bg(theme::bg::HIGHLIGHT))
+                    .style(
+                        Style::new()
+                            .fg(theme::fg::PRIMARY)
+                            .bg(theme::alpha::HIGHLIGHT),
+                    )
                     .render(content_area, frame);
             } else {
                 // Syntax-highlighted line
@@ -600,7 +631,7 @@ impl CodeExplorer {
 
         let status = format!(" Line {pos}/{total} ({pct}%) | {size} | C");
         Paragraph::new(status)
-            .style(Style::new().fg(theme::fg::MUTED).bg(theme::bg::SURFACE))
+            .style(Style::new().fg(theme::fg::MUTED).bg(theme::alpha::SURFACE))
             .render(area, frame);
     }
 }

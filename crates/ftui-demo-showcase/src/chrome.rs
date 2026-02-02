@@ -3,7 +3,6 @@
 //! Shared UI chrome: tab bar, status bar, and help overlay.
 
 use ftui_core::geometry::Rect;
-use ftui_render::cell::PackedRgba;
 use ftui_render::frame::{Frame, HitId};
 use ftui_style::{Style, StyleFlags};
 use ftui_widgets::Widget;
@@ -20,6 +19,7 @@ use crate::theme;
 
 /// Base hit ID for tab bar entries.  Tab i has HitId(TAB_HIT_BASE + i).
 pub const TAB_HIT_BASE: u32 = 1000;
+const TAB_ACCENT_ALPHA: u8 = 220;
 
 /// Convert a hit ID back to a ScreenId if it falls in the tab range.
 pub fn screen_from_hit_id(id: HitId) -> Option<ScreenId> {
@@ -38,7 +38,7 @@ pub fn screen_from_hit_id(id: HitId) -> Option<ScreenId> {
 
 /// Render the tab bar with numbered screen tabs.
 ///
-/// The current screen's tab uses the screen's accent color background + bold white.
+/// The current screen's tab uses the screen's accent color background + bold primary.
 /// Other tabs are rendered in muted foreground.
 pub fn render_tab_bar(current: ScreenId, frame: &mut Frame, area: Rect) {
     // Fill background
@@ -67,12 +67,13 @@ pub fn render_tab_bar(current: ScreenId, frame: &mut Frame, area: Rect) {
         let tab_area = Rect::new(x, area.y, label_width, 1);
 
         let style = if id == current {
+            let accent_bg = theme::with_alpha(accent_for(id), TAB_ACCENT_ALPHA);
             Style::new()
-                .bg(accent_for(id))
-                .fg(PackedRgba::rgb(255, 255, 255))
+                .bg(accent_bg)
+                .fg(theme::fg::PRIMARY)
                 .attrs(StyleFlags::BOLD)
         } else {
-            Style::new().bg(theme::bg::SURFACE).fg(theme::fg::MUTED)
+            Style::new().bg(theme::alpha::SURFACE).fg(theme::fg::MUTED)
         };
 
         let tab = Paragraph::new(label).style(style);
@@ -98,6 +99,7 @@ pub struct StatusBarState<'a> {
     pub frame_count: u64,
     pub terminal_width: u16,
     pub terminal_height: u16,
+    pub theme_name: &'a str,
 }
 
 /// Render the status bar at the bottom of the screen.
@@ -114,10 +116,11 @@ pub fn render_status_bar(state: &StatusBarState<'_>, frame: &mut Frame, area: Re
 
     // Build left / center / right segments
     let left = format!(
-        " {} [{}/{}]",
+        " {} [{}/{}]  {}",
         state.screen_title,
         state.screen_index + 1,
         state.screen_count,
+        state.theme_name,
     );
     let center = format!("tick:{} frm:{}", state.tick_count, state.frame_count);
     let right = format!(
@@ -202,6 +205,7 @@ pub fn render_help_overlay(
     text.push_str("  Tab        Next screen\n");
     text.push_str("  Shift-Tab  Previous screen\n");
     text.push_str("  ?          Toggle this help\n");
+    text.push_str("  Ctrl+T     Cycle theme\n");
     text.push_str("  F12        Toggle debug overlay\n");
     text.push_str("  q          Quit\n");
     text.push_str("  Ctrl+C     Quit\n");
@@ -222,7 +226,7 @@ pub fn render_help_overlay(
 // ---------------------------------------------------------------------------
 
 /// Return the accent color for the given screen.
-pub fn accent_for(id: ScreenId) -> PackedRgba {
+pub fn accent_for(id: ScreenId) -> theme::ColorToken {
     match id {
         ScreenId::Dashboard => theme::screen_accent::DASHBOARD,
         ScreenId::Shakespeare => theme::screen_accent::SHAKESPEARE,
@@ -235,6 +239,7 @@ pub fn accent_for(id: ScreenId) -> PackedRgba {
         ScreenId::AdvancedFeatures => theme::screen_accent::ADVANCED,
         ScreenId::Performance => theme::screen_accent::PERFORMANCE,
         ScreenId::MarkdownRichText => theme::screen_accent::MARKDOWN,
+        ScreenId::VisualEffects => theme::screen_accent::VISUAL_EFFECTS,
     }
 }
 
@@ -245,6 +250,8 @@ pub fn accent_for(id: ScreenId) -> PackedRgba {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ftui_render::cell::Cell;
+    use ftui_render::cell::PackedRgba;
     use ftui_render::grapheme_pool::GraphemePool;
 
     fn make_frame(w: u16, h: u16) -> (GraphemePool, Frame<'static>) {
@@ -261,14 +268,23 @@ mod tests {
         let mut frame = Frame::with_hit_grid(100, 1, &mut pool);
         let area = Rect::new(0, 0, 100, 1);
 
+        frame
+            .buffer
+            .fill(area, Cell::default().with_bg(theme::bg::DEEP.into()));
+
         render_tab_bar(ScreenId::Shakespeare, &mut frame, area);
 
         // The Shakespeare tab should have the accent background color
         // Find the tab by scanning for '2' (Shakespeare is key 2)
         let mut found_accent = false;
+        let base_bg: PackedRgba = theme::bg::DEEP.into();
+        let surface_bg: PackedRgba = theme::alpha::SURFACE.into();
+        let surface = surface_bg.over(base_bg);
+        let expected_bg =
+            theme::with_alpha(theme::screen_accent::SHAKESPEARE, TAB_ACCENT_ALPHA).over(surface);
         for x in 0..100u16 {
             if let Some(cell) = frame.buffer.get(x, 0)
-                && cell.bg == theme::screen_accent::SHAKESPEARE
+                && cell.bg == expected_bg
             {
                 found_accent = true;
                 break;
@@ -294,6 +310,7 @@ mod tests {
             frame_count: 50,
             terminal_width: 120,
             terminal_height: 40,
+            theme_name: "default",
         };
         render_status_bar(&state, &mut frame, area);
 
@@ -359,7 +376,8 @@ mod tests {
     fn accent_for_all_screens() {
         // Verify each screen has a distinct accent color
         for &id in ScreenId::ALL {
-            let color = accent_for(id);
+            let color_token = accent_for(id);
+            let color: PackedRgba = color_token.into();
             // Just verify it returns something non-zero
             assert_ne!(
                 color,

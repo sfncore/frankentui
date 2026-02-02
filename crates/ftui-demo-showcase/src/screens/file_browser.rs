@@ -14,7 +14,6 @@ use ftui_extras::filepicker::{FileEntry, FileKind, FilePicker, FilePickerFilter,
 use ftui_extras::filesize;
 use ftui_extras::syntax::SyntaxHighlighter;
 use ftui_layout::{Constraint, Flex};
-use ftui_render::cell::PackedRgba;
 use ftui_render::frame::Frame;
 use ftui_runtime::Cmd;
 use ftui_style::Style;
@@ -113,24 +112,38 @@ impl FileBrowser {
         let entries = simulated_entries();
         let mut picker = FilePicker::new(entries);
         picker.set_path("/home/user/projects/my-app");
-        picker.set_style(FilePickerStyle {
-            selected: Style::new().fg(theme::fg::PRIMARY).bg(theme::bg::HIGHLIGHT),
-            directory: Style::new().fg(PackedRgba::rgb(100, 180, 255)),
-            file: Style::new().fg(theme::fg::PRIMARY),
-            symlink: Style::new().fg(PackedRgba::rgb(180, 130, 255)),
-            path: Style::new().fg(theme::fg::SECONDARY),
-        });
+        picker.set_style(Self::picker_style());
         picker.set_filter(FilePickerFilter {
             allowed_extensions: vec![],
             show_hidden: false,
         });
 
+        let mut highlighter = SyntaxHighlighter::new();
+        highlighter.set_theme(theme::syntax_theme());
+
         Self {
             focus: Panel::FilePicker,
             picker,
-            highlighter: SyntaxHighlighter::new(),
+            highlighter,
             preview_scroll: 0,
             show_hidden: false,
+        }
+    }
+
+    pub fn apply_theme(&mut self) {
+        self.picker.set_style(Self::picker_style());
+        self.highlighter.set_theme(theme::syntax_theme());
+    }
+
+    fn picker_style() -> FilePickerStyle {
+        FilePickerStyle {
+            selected: Style::new()
+                .fg(theme::fg::PRIMARY)
+                .bg(theme::alpha::HIGHLIGHT),
+            directory: Style::new().fg(theme::accent::INFO),
+            file: Style::new().fg(theme::fg::PRIMARY),
+            symlink: Style::new().fg(theme::accent::SECONDARY),
+            path: Style::new().fg(theme::fg::SECONDARY),
         }
     }
 
@@ -172,7 +185,7 @@ impl FileBrowser {
             .with_guides(TreeGuides::Unicode)
             .with_show_root(true)
             .with_label_style(Style::new().fg(theme::fg::PRIMARY))
-            .with_root_style(Style::new().fg(PackedRgba::rgb(100, 180, 255)))
+            .with_root_style(Style::new().fg(theme::accent::INFO))
             .with_guide_style(Style::new().fg(theme::fg::MUTED));
 
         tree_widget.render(inner, frame);
@@ -256,9 +269,11 @@ impl FileBrowser {
             let line = format!("{icon}{:<30} {}", entry.name, size_str);
 
             let style = if i == selected_idx {
-                Style::new().fg(theme::fg::PRIMARY).bg(theme::bg::HIGHLIGHT)
+                Style::new()
+                    .fg(theme::fg::PRIMARY)
+                    .bg(theme::alpha::HIGHLIGHT)
             } else if entry.is_dir() {
-                Style::new().fg(PackedRgba::rgb(100, 180, 255))
+                Style::new().fg(theme::accent::INFO)
             } else {
                 Style::new().fg(theme::fg::PRIMARY)
             };
@@ -477,7 +492,7 @@ impl Screen for FileBrowser {
             entry_info
         );
         Paragraph::new(&*status)
-            .style(Style::new().fg(theme::fg::MUTED).bg(theme::bg::SURFACE))
+            .style(Style::new().fg(theme::fg::MUTED).bg(theme::alpha::SURFACE))
             .render(main[1], frame);
     }
 

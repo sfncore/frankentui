@@ -118,6 +118,8 @@ impl DataViz {
         let sine_data: Vec<f64> = self.chart_data.sine_series.iter().copied().collect();
         let cos_data: Vec<f64> = self.chart_data.cosine_series.iter().copied().collect();
         let rand_data: Vec<f64> = self.chart_data.random_series.iter().copied().collect();
+        let colors = chart_palette();
+        let gradients = sparkline_gradients();
 
         // Labels and sparklines in alternating rows
         if !rows[0].is_empty() {
@@ -127,11 +129,8 @@ impl DataViz {
         }
         if !rows[1].is_empty() {
             Sparkline::new(&sine_data)
-                .style(Style::new().fg(PackedRgba::rgb(100, 180, 255)))
-                .gradient(
-                    PackedRgba::rgb(50, 100, 180),
-                    PackedRgba::rgb(130, 220, 255),
-                )
+                .style(Style::new().fg(colors[0]))
+                .gradient(gradients[0].0, gradients[0].1)
                 .render(rows[1], frame);
         }
         if !rows[2].is_empty() {
@@ -141,8 +140,8 @@ impl DataViz {
         }
         if !rows[3].is_empty() {
             Sparkline::new(&cos_data)
-                .style(Style::new().fg(PackedRgba::rgb(130, 220, 130)))
-                .gradient(PackedRgba::rgb(50, 150, 50), PackedRgba::rgb(130, 255, 130))
+                .style(Style::new().fg(colors[1]))
+                .gradient(gradients[1].0, gradients[1].1)
                 .render(rows[3], frame);
         }
         if !rows[4].is_empty() {
@@ -152,11 +151,8 @@ impl DataViz {
         }
         if !rows[5].is_empty() {
             Sparkline::new(&rand_data)
-                .style(Style::new().fg(PackedRgba::rgb(255, 180, 100)))
-                .gradient(
-                    PackedRgba::rgb(200, 100, 50),
-                    PackedRgba::rgb(255, 220, 130),
-                )
+                .style(Style::new().fg(colors[2]))
+                .gradient(gradients[2].0, gradients[2].1)
                 .render(rows[5], frame);
         }
     }
@@ -207,11 +203,7 @@ impl DataViz {
             .bar_width(2)
             .bar_gap(1)
             .group_gap(2)
-            .colors(vec![
-                PackedRgba::rgb(100, 180, 255),
-                PackedRgba::rgb(255, 130, 100),
-                PackedRgba::rgb(100, 220, 140),
-            ])
+            .colors(chart_palette().to_vec())
             .style(Style::new().fg(theme::fg::PRIMARY));
 
         chart.render(inner, frame);
@@ -254,9 +246,10 @@ impl DataViz {
             .map(|(i, &v)| (i as f64, v))
             .collect();
 
+        let line_colors = line_palette();
         let series = vec![
-            Series::new("sin(t)", &sine_points, PackedRgba::rgb(100, 180, 255)),
-            Series::new("cos(t)", &cos_points, PackedRgba::rgb(255, 130, 180)),
+            Series::new("sin(t)", &sine_points, line_colors[0]),
+            Series::new("cos(t)", &cos_points, line_colors[1]),
         ];
 
         let n = self.chart_data.sine_series.len() as f64;
@@ -350,6 +343,38 @@ fn hue_to_rgb(hue: u32) -> PackedRgba {
     )
 }
 
+fn chart_palette() -> [PackedRgba; 3] {
+    [
+        theme::accent::PRIMARY.into(),
+        theme::accent::SUCCESS.into(),
+        theme::accent::WARNING.into(),
+    ]
+}
+
+fn sparkline_gradients() -> [(PackedRgba, PackedRgba); 3] {
+    [
+        (
+            theme::accent::PRIMARY.into(),
+            theme::accent::ACCENT_7.into(),
+        ),
+        (
+            theme::accent::SUCCESS.into(),
+            theme::accent::ACCENT_9.into(),
+        ),
+        (
+            theme::accent::WARNING.into(),
+            theme::accent::ACCENT_10.into(),
+        ),
+    ]
+}
+
+fn line_palette() -> [PackedRgba; 2] {
+    [
+        theme::accent::PRIMARY.into(),
+        theme::accent::SECONDARY.into(),
+    ]
+}
+
 impl Screen for DataViz {
     type Message = Event;
 
@@ -428,7 +453,7 @@ impl Screen for DataViz {
             self.tick_count
         );
         Paragraph::new(&*status)
-            .style(Style::new().fg(theme::fg::MUTED).bg(theme::bg::SURFACE))
+            .style(Style::new().fg(theme::fg::MUTED).bg(theme::alpha::SURFACE))
             .render(main[1], frame);
     }
 

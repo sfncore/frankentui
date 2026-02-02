@@ -64,20 +64,38 @@ impl Shakespeare {
         let toc_entries = Self::build_toc(&lines);
         let toc_tree = Self::build_tree(&toc_entries);
 
-        Self {
+        let mut state = Self {
             lines,
             scroll_offset: 0,
             toc_entries,
             toc_tree,
             search_input: TextInput::new()
                 .with_placeholder("Search... (/ to focus, Esc to close)")
-                .with_style(Style::new().fg(theme::fg::PRIMARY).bg(theme::bg::SURFACE))
+                .with_style(
+                    Style::new()
+                        .fg(theme::fg::PRIMARY)
+                        .bg(theme::alpha::SURFACE),
+                )
                 .with_placeholder_style(Style::new().fg(theme::fg::MUTED)),
             search_active: false,
             search_matches: Vec::new(),
             current_match: 0,
             viewport_height: 20,
-        }
+        };
+        state.apply_theme();
+        state
+    }
+
+    pub fn apply_theme(&mut self) {
+        let input_style = Style::new()
+            .fg(theme::fg::PRIMARY)
+            .bg(theme::alpha::SURFACE);
+        let placeholder_style = Style::new().fg(theme::fg::MUTED);
+        self.search_input = self
+            .search_input
+            .clone()
+            .with_style(input_style)
+            .with_placeholder_style(placeholder_style);
     }
 
     /// Build table of contents from the text by detecting play titles.
@@ -446,7 +464,9 @@ impl Shakespeare {
                     .bg(theme::accent::WARNING)
                     .attrs(StyleFlags::BOLD)
             } else if is_any_match {
-                Style::new().fg(theme::fg::PRIMARY).bg(theme::bg::HIGHLIGHT)
+                Style::new()
+                    .fg(theme::fg::PRIMARY)
+                    .bg(theme::alpha::HIGHLIGHT)
             } else {
                 Style::new().fg(theme::fg::SECONDARY)
             };
@@ -508,7 +528,7 @@ impl Shakespeare {
         );
 
         Paragraph::new(status)
-            .style(Style::new().fg(theme::fg::MUTED).bg(theme::bg::SURFACE))
+            .style(Style::new().fg(theme::fg::MUTED).bg(theme::alpha::SURFACE))
             .render(area, frame);
     }
 }
