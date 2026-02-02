@@ -578,4 +578,460 @@ mod tests {
         // Value should not change since we quit
         assert_eq!(sim.model().value, 0);
     }
+
+    // =========================================================================
+    // DETERMINISM TESTS - ProgramSimulator determinism (bd-2nu8.10.3)
+    // =========================================================================
+
+    #[test]
+    fn identical_inputs_yield_identical_outputs() {
+        fn run_scenario() -> (i32, Vec<u8>) {
+            let mut sim = ProgramSimulator::new(Counter {
+                value: 0,
+                initialized: false,
+            });
+            sim.init();
+
+            sim.send(CounterMsg::Increment);
+            sim.send(CounterMsg::Increment);
+            sim.send(CounterMsg::Decrement);
+            sim.send(CounterMsg::BatchIncrement(3));
+
+            let buf = sim.capture_frame(20, 10);
+            let mut frame_bytes = Vec::new();
+            for y in 0..10 {
+                for x in 0..20 {
+                    if let Some(cell) = buf.get(x, y) {
+                        if let Some(c) = cell.content.as_char() {
+                            frame_bytes.push(c as u8);
+                        }
+                    }
+                }
+            }
+            (sim.model().value, frame_bytes)
+        }
+
+        let (value1, frame1) = run_scenario();
+        let (value2, frame2) = run_scenario();
+        let (value3, frame3) = run_scenario();
+
+        assert_eq!(value1, value2);
+        assert_eq!(value2, value3);
+        assert_eq!(value1, 4); // 0 + 1 + 1 - 1 + 3 = 4
+
+        assert_eq!(frame1, frame2);
+        assert_eq!(frame2, frame3);
+    }
+
+    #[test]
+    fn command_log_records_in_order() {
+        let mut sim = ProgramSimulator::new(Counter {
+            value: 0,
+            initialized: false,
+        });
+        sim.init();
+
+        sim.send(CounterMsg::Increment);
+        sim.send(CounterMsg::LogValue);
+        sim.send(CounterMsg::Increment);
+        sim.send(CounterMsg::LogValue);
+
+        let log = sim.command_log();
+
+        // Find Log entries and verify they're in order
+        let log_entries: Vec<_> = log
+            .iter()
+            .filter_map(|r| {
+                if let CmdRecord::Log(s) = r {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(log_entries, vec!["value=1", "value=2"]);
+    }
+
+    #[test]
+    fn sequence_command_records_correctly() {
+        // Model that emits a sequence command
+        struct SeqModel {
+            steps: Vec<i32>,
+        }
+
+        #[derive(Debug)]
+        enum SeqMsg {
+            Step(i32),
+            TriggerSeq,
+        }
+
+        impl From<Event> for SeqMsg {
+            fn from(_: Event) -> Self {
+                SeqMsg::Step(0)
+            }
+        }
+
+        impl Model for SeqModel {
+            type Message = SeqMsg;
+
+            fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                match msg {
+                    SeqMsg::Step(n) => {
+                        self.steps.push(n);
+                        Cmd::none()
+                    }
+                    SeqMsg::TriggerSeq => Cmd::sequence(vec![
+                        Cmd::msg(SeqMsg::Step(1)),
+                        Cmd::msg(SeqMsg::Step(2)),
+                        Cmd::msg(SeqMsg::Step(3)),
+                    ]),
+                }
+            }
+
+            fn view(&self, _frame: &mut Frame) {}
+        }
+
+        let mut sim = ProgramSimulator::new(SeqModel { steps: vec![] });
+        sim.init();
+        sim.send(SeqMsg::TriggerSeq);
+
+        // Verify sequence is recorded
+        let has_sequence = sim.command_log().iter().any(|r| matches!(r, CmdRecord::Sequence(3)));
+        assert!(has_sequence, "Should record Sequence(3)");
+
+        // Verify steps executed in order
+        assert_eq!(sim.model().steps, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn batch_command_records_correctly() {
+        let mut sim = ProgramSimulator::new(Counter {
+            value: 0,
+            initialized: false,
+        });
+        sim.init();
+
+        sim.send(CounterMsg::BatchIncrement(5));
+
+        // Should have Batch(5) in the log
+        let has_batch = sim.command_log().iter().any(|r| matches!(r, CmdRecord::Batch(5)));
+        assert!(has_batch, "Should record Batch(5)");
+
+        assert_eq!(sim.model().value, 5);
+    }
+
+    #[test]
+    fn frame_dimensions_match_request() {
+        let mut sim = ProgramSimulator::new(Counter {
+            value: 42,
+            initialized: false,
+        });
+        sim.init();
+
+        let buf = sim.capture_frame(100, 50);
+        assert_eq!(buf.width(), 100);
+        assert_eq!(buf.height(), 50);
+    }
+
+    #[test]
+    fn multiple_frame_captures_are_independent() {
+        let mut sim = ProgramSimulator::new(Counter {
+            value: 0,
+            initialized: false,
+        });
+        sim.init();
+
+        // Capture at value 0
+        sim.capture_frame(20, 10);
+
+        // Change value
+        sim.send(CounterMsg::Increment);
+        sim.send(CounterMsg::Increment);
+
+        // Capture at value 2
+        sim.capture_frame(20, 10);
+
+        let frames = sim.frames();
+        assert_eq!(frames.len(), 2);
+
+        // First frame should show "Count: 0"
+        assert_eq!(frames[0].get(7, 0).unwrap().content.as_char(), Some('0'));
+
+        // Second frame should show "Count: 2"
+        assert_eq!(frames[1].get(7, 0).unwrap().content.as_char(), Some('2'));
+    }
+
+    #[test]
+    fn inject_events_processes_in_order() {
+        let mut sim = ProgramSimulator::new(Counter {
+            value: 0,
+            initialized: false,
+        });
+        sim.init();
+
+        // '+' increments, '-' decrements
+        let events = vec![
+            key_event('+'),
+            key_event('+'),
+            key_event('+'),
+            key_event('-'),
+            key_event('+'),
+        ];
+
+        sim.inject_events(&events);
+
+        // 0 + 1 + 1 + 1 - 1 + 1 = 3
+        assert_eq!(sim.model().value, 3);
+    }
+
+    #[test]
+    fn task_command_records_task() {
+        struct TaskModel {
+            result: Option<i32>,
+        }
+
+        #[derive(Debug)]
+        enum TaskMsg {
+            SetResult(i32),
+            SpawnTask,
+        }
+
+        impl From<Event> for TaskMsg {
+            fn from(_: Event) -> Self {
+                TaskMsg::SetResult(0)
+            }
+        }
+
+        impl Model for TaskModel {
+            type Message = TaskMsg;
+
+            fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                match msg {
+                    TaskMsg::SetResult(v) => {
+                        self.result = Some(v);
+                        Cmd::none()
+                    }
+                    TaskMsg::SpawnTask => Cmd::task(|| {
+                        // Simulate computation
+                        TaskMsg::SetResult(42)
+                    }),
+                }
+            }
+
+            fn view(&self, _frame: &mut Frame) {}
+        }
+
+        let mut sim = ProgramSimulator::new(TaskModel { result: None });
+        sim.init();
+        sim.send(TaskMsg::SpawnTask);
+
+        // Task should execute synchronously in simulator
+        assert_eq!(sim.model().result, Some(42));
+
+        // Should have Task record in command log
+        let has_task = sim.command_log().iter().any(|r| matches!(r, CmdRecord::Task));
+        assert!(has_task);
+    }
+
+    #[test]
+    fn tick_rate_is_set() {
+        let mut sim = ProgramSimulator::new(Counter {
+            value: 0,
+            initialized: false,
+        });
+
+        assert!(sim.tick_rate().is_none());
+
+        sim.execute_cmd(Cmd::tick(std::time::Duration::from_millis(100)));
+
+        assert_eq!(sim.tick_rate(), Some(std::time::Duration::from_millis(100)));
+    }
+
+    #[test]
+    fn logs_accumulate_across_messages() {
+        let mut sim = ProgramSimulator::new(Counter {
+            value: 0,
+            initialized: false,
+        });
+        sim.init();
+
+        sim.send(CounterMsg::LogValue);
+        sim.send(CounterMsg::Increment);
+        sim.send(CounterMsg::LogValue);
+        sim.send(CounterMsg::Increment);
+        sim.send(CounterMsg::LogValue);
+
+        assert_eq!(sim.logs().len(), 3);
+        assert_eq!(sim.logs()[0], "value=0");
+        assert_eq!(sim.logs()[1], "value=1");
+        assert_eq!(sim.logs()[2], "value=2");
+    }
+
+    #[test]
+    fn deterministic_frame_content_across_runs() {
+        fn capture_frame_content(value: i32) -> Vec<Option<char>> {
+            let mut sim = ProgramSimulator::new(Counter {
+                value,
+                initialized: false,
+            });
+            sim.init();
+
+            let buf = sim.capture_frame(15, 1);
+            (0..15)
+                .map(|x| buf.get(x, 0).and_then(|c| c.content.as_char()))
+                .collect()
+        }
+
+        let content1 = capture_frame_content(123);
+        let content2 = capture_frame_content(123);
+        let content3 = capture_frame_content(123);
+
+        assert_eq!(content1, content2);
+        assert_eq!(content2, content3);
+
+        // Should be "Count: 123" followed by None (unwritten cells)
+        let expected: Vec<Option<char>> = "Count: 123".chars().map(Some).chain(std::iter::repeat(None).take(5)).collect();
+        assert_eq!(content1, expected);
+    }
+
+    #[test]
+    fn complex_scenario_is_deterministic() {
+        fn run_complex_scenario() -> (i32, usize, Vec<String>) {
+            let mut sim = ProgramSimulator::new(Counter {
+                value: 0,
+                initialized: false,
+            });
+            sim.init();
+
+            // Complex sequence of operations
+            for _ in 0..10 {
+                sim.send(CounterMsg::Increment);
+            }
+            sim.send(CounterMsg::LogValue);
+
+            sim.send(CounterMsg::BatchIncrement(5));
+            sim.send(CounterMsg::LogValue);
+
+            for _ in 0..3 {
+                sim.send(CounterMsg::Decrement);
+            }
+            sim.send(CounterMsg::LogValue);
+
+            sim.send(CounterMsg::Reset);
+            sim.send(CounterMsg::LogValue);
+
+            sim.capture_frame(20, 10);
+
+            (
+                sim.model().value,
+                sim.command_log().len(),
+                sim.logs().to_vec(),
+            )
+        }
+
+        let result1 = run_complex_scenario();
+        let result2 = run_complex_scenario();
+
+        assert_eq!(result1.0, result2.0);
+        assert_eq!(result1.1, result2.1);
+        assert_eq!(result1.2, result2.2);
+    }
+
+    #[test]
+    fn model_unchanged_when_not_running() {
+        let mut sim = ProgramSimulator::new(Counter {
+            value: 5,
+            initialized: false,
+        });
+        sim.init();
+
+        sim.send(CounterMsg::Quit);
+
+        let value_before = sim.model().value;
+        sim.send(CounterMsg::Increment);
+        sim.send(CounterMsg::BatchIncrement(10));
+        let value_after = sim.model().value;
+
+        assert_eq!(value_before, value_after);
+    }
+
+    #[test]
+    fn init_produces_consistent_command_log() {
+        // Model with init that returns a command
+        struct InitModel {
+            init_ran: bool,
+        }
+
+        #[derive(Debug)]
+        enum InitMsg {
+            MarkInit,
+        }
+
+        impl From<Event> for InitMsg {
+            fn from(_: Event) -> Self {
+                InitMsg::MarkInit
+            }
+        }
+
+        impl Model for InitModel {
+            type Message = InitMsg;
+
+            fn init(&mut self) -> Cmd<Self::Message> {
+                Cmd::msg(InitMsg::MarkInit)
+            }
+
+            fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                match msg {
+                    InitMsg::MarkInit => {
+                        self.init_ran = true;
+                        Cmd::none()
+                    }
+                }
+            }
+
+            fn view(&self, _frame: &mut Frame) {}
+        }
+
+        let mut sim1 = ProgramSimulator::new(InitModel { init_ran: false });
+        let mut sim2 = ProgramSimulator::new(InitModel { init_ran: false });
+
+        sim1.init();
+        sim2.init();
+
+        assert_eq!(sim1.model().init_ran, sim2.model().init_ran);
+        assert_eq!(sim1.command_log().len(), sim2.command_log().len());
+    }
+
+    #[test]
+    fn execute_cmd_directly() {
+        let mut sim = ProgramSimulator::new(Counter {
+            value: 0,
+            initialized: false,
+        });
+
+        // Execute commands directly without going through update
+        sim.execute_cmd(Cmd::log("direct log"));
+        sim.execute_cmd(Cmd::tick(std::time::Duration::from_secs(1)));
+
+        assert_eq!(sim.logs(), &["direct log"]);
+        assert_eq!(sim.tick_rate(), Some(std::time::Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn grapheme_pool_is_reused() {
+        let mut sim = ProgramSimulator::new(Counter {
+            value: 0,
+            initialized: false,
+        });
+        sim.init();
+
+        // Capture multiple frames - pool should be reused
+        for i in 0..10 {
+            sim.model_mut().value = i;
+            sim.capture_frame(80, 24);
+        }
+
+        assert_eq!(sim.frame_count(), 10);
+    }
 }

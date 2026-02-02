@@ -492,4 +492,364 @@ mod tests {
         let msgs = mgr.drain_messages();
         assert!(msgs.is_empty());
     }
+
+    // =========================================================================
+    // ADDITIONAL TESTS - Cmd sequencing + Subscriptions (bd-2nu8.10.2)
+    // =========================================================================
+
+    #[test]
+    fn stop_signal_is_cloneable() {
+        let (signal, trigger) = StopSignal::new();
+        let signal_clone = signal.clone();
+
+        assert!(!signal.is_stopped());
+        assert!(!signal_clone.is_stopped());
+
+        trigger.stop();
+
+        assert!(signal.is_stopped());
+        assert!(signal_clone.is_stopped());
+    }
+
+    #[test]
+    fn stop_signal_wait_wakes_immediately_when_already_stopped() {
+        let (signal, trigger) = StopSignal::new();
+        trigger.stop();
+
+        // Should return immediately, not wait for timeout
+        let start = std::time::Instant::now();
+        let stopped = signal.wait_timeout(Duration::from_secs(10));
+        let elapsed = start.elapsed();
+
+        assert!(stopped);
+        assert!(elapsed < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn stop_signal_wait_is_interrupted_by_trigger() {
+        let (signal, trigger) = StopSignal::new();
+
+        let signal_clone = signal.clone();
+        let handle = thread::spawn(move || {
+            signal_clone.wait_timeout(Duration::from_secs(10))
+        });
+
+        // Give thread time to start waiting
+        thread::sleep(Duration::from_millis(20));
+        trigger.stop();
+
+        let stopped = handle.join().unwrap();
+        assert!(stopped);
+    }
+
+    #[test]
+    fn mock_subscription_empty_messages() {
+        let sub = MockSubscription::<TestMsg>::new(1, vec![]);
+        let (tx, rx) = mpsc::channel();
+        let (signal, _trigger) = StopSignal::new();
+
+        sub.run(tx, signal);
+
+        let msgs: Vec<_> = rx.try_iter().collect();
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn mock_subscription_id_is_preserved() {
+        let sub = MockSubscription::<TestMsg>::new(42, vec![]);
+        assert_eq!(sub.id(), 42);
+    }
+
+    #[test]
+    fn mock_subscription_stops_on_disconnected_receiver() {
+        let sub = MockSubscription::new(1, vec![TestMsg::Value(1), TestMsg::Value(2), TestMsg::Value(3)]);
+        let (tx, rx) = mpsc::channel();
+        let (signal, _trigger) = StopSignal::new();
+
+        // Drop receiver before running
+        drop(rx);
+
+        // Should not panic, just return
+        sub.run(tx, signal);
+    }
+
+    #[test]
+    fn every_with_id_preserves_custom_id() {
+        let sub = Every::<TestMsg>::with_id(12345, Duration::from_secs(1), || TestMsg::Tick);
+        assert_eq!(sub.id(), 12345);
+    }
+
+    #[test]
+    fn every_stops_on_disconnected_receiver() {
+        let sub = Every::new(Duration::from_millis(5), || TestMsg::Tick);
+        let (tx, rx) = mpsc::channel();
+        let (signal, _trigger) = StopSignal::new();
+
+        // Drop receiver before running
+        drop(rx);
+
+        // Should exit the loop when send fails
+        let handle = thread::spawn(move || {
+            sub.run(tx, signal);
+        });
+
+        // Should complete quickly, not hang
+        let result = handle.join();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn every_respects_interval() {
+        let sub = Every::with_id(1, Duration::from_millis(50), || TestMsg::Tick);
+        let (tx, rx) = mpsc::channel();
+        let (signal, trigger) = StopSignal::new();
+
+        let start = std::time::Instant::now();
+        let handle = thread::spawn(move || {
+            sub.run(tx, signal);
+        });
+
+        // Wait for 3 ticks worth of time
+        thread::sleep(Duration::from_millis(160));
+        trigger.stop();
+        handle.join().unwrap();
+
+        let msgs: Vec<_> = rx.try_iter().collect();
+        let elapsed = start.elapsed();
+
+        // Should have approximately 3 ticks (at 50ms intervals over 160ms)
+        assert!(msgs.len() >= 2, "Expected at least 2 ticks, got {}", msgs.len());
+        assert!(msgs.len() <= 4, "Expected at most 4 ticks, got {}", msgs.len());
+        assert!(elapsed >= Duration::from_millis(150));
+    }
+
+    #[test]
+    fn subscription_manager_empty_reconcile() {
+        let mut mgr = SubscriptionManager::<TestMsg>::new();
+
+        // Reconcile with empty list should not panic
+        mgr.reconcile(vec![]);
+        let msgs = mgr.drain_messages();
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn subscription_manager_drain_messages_returns_all() {
+        let mut mgr = SubscriptionManager::<TestMsg>::new();
+        let subs: Vec<Box<dyn Subscription<TestMsg>>> = vec![
+            Box::new(MockSubscription::new(1, vec![TestMsg::Value(1), TestMsg::Value(2)])),
+        ];
+
+        mgr.reconcile(subs);
+        thread::sleep(Duration::from_millis(20));
+
+        let msgs = mgr.drain_messages();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0], TestMsg::Value(1));
+        assert_eq!(msgs[1], TestMsg::Value(2));
+
+        // Second drain should be empty
+        let msgs2 = mgr.drain_messages();
+        assert!(msgs2.is_empty());
+    }
+
+    #[test]
+    fn subscription_manager_replaces_subscription_with_different_id() {
+        let mut mgr = SubscriptionManager::<TestMsg>::new();
+
+        // Start with ID 1
+        mgr.reconcile(vec![Box::new(MockSubscription::new(1, vec![TestMsg::Value(1)]))]);
+        thread::sleep(Duration::from_millis(20));
+        let msgs1 = mgr.drain_messages();
+        assert_eq!(msgs1, vec![TestMsg::Value(1)]);
+
+        // Replace with ID 2
+        mgr.reconcile(vec![Box::new(MockSubscription::new(2, vec![TestMsg::Value(2)]))]);
+        thread::sleep(Duration::from_millis(20));
+        let msgs2 = mgr.drain_messages();
+        assert_eq!(msgs2, vec![TestMsg::Value(2)]);
+    }
+
+    #[test]
+    fn subscription_manager_multiple_subscriptions() {
+        let mut mgr = SubscriptionManager::<TestMsg>::new();
+        let subs: Vec<Box<dyn Subscription<TestMsg>>> = vec![
+            Box::new(MockSubscription::new(1, vec![TestMsg::Value(10)])),
+            Box::new(MockSubscription::new(2, vec![TestMsg::Value(20)])),
+            Box::new(MockSubscription::new(3, vec![TestMsg::Value(30)])),
+        ];
+
+        mgr.reconcile(subs);
+        thread::sleep(Duration::from_millis(30));
+
+        let mut msgs = mgr.drain_messages();
+        msgs.sort_by_key(|m| match m {
+            TestMsg::Value(v) => *v,
+            _ => 0,
+        });
+
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[0], TestMsg::Value(10));
+        assert_eq!(msgs[1], TestMsg::Value(20));
+        assert_eq!(msgs[2], TestMsg::Value(30));
+    }
+
+    #[test]
+    fn subscription_manager_partial_update() {
+        let mut mgr = SubscriptionManager::<TestMsg>::new();
+
+        // Start with 3 subscriptions
+        mgr.reconcile(vec![
+            Box::new(Every::with_id(1, Duration::from_millis(10), || TestMsg::Value(1))),
+            Box::new(Every::with_id(2, Duration::from_millis(10), || TestMsg::Value(2))),
+            Box::new(Every::with_id(3, Duration::from_millis(10), || TestMsg::Value(3))),
+        ]);
+
+        thread::sleep(Duration::from_millis(30));
+        let _ = mgr.drain_messages();
+
+        // Remove subscription 2, keep 1 and 3
+        mgr.reconcile(vec![
+            Box::new(Every::with_id(1, Duration::from_millis(10), || TestMsg::Value(1))),
+            Box::new(Every::with_id(3, Duration::from_millis(10), || TestMsg::Value(3))),
+        ]);
+
+        thread::sleep(Duration::from_millis(30));
+        let msgs = mgr.drain_messages();
+
+        // Should only have values 1 and 3, not 2
+        let values: Vec<i32> = msgs.iter().filter_map(|m| {
+            match m {
+                TestMsg::Value(v) => Some(*v),
+                _ => None,
+            }
+        }).collect();
+
+        assert!(values.contains(&1), "Should still receive from subscription 1");
+        assert!(values.contains(&3), "Should still receive from subscription 3");
+        assert!(!values.contains(&2), "Should not receive from stopped subscription 2");
+    }
+
+    #[test]
+    fn subscription_manager_drop_stops_all() {
+        let (_signal, _) = StopSignal::new();
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag_clone = flag.clone();
+
+        struct FlagSubscription {
+            id: SubId,
+            flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        }
+
+        impl Subscription<TestMsg> for FlagSubscription {
+            fn id(&self) -> SubId {
+                self.id
+            }
+
+            fn run(&self, _sender: mpsc::Sender<TestMsg>, stop: StopSignal) {
+                while !stop.is_stopped() {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                self.flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+
+        {
+            let mut mgr = SubscriptionManager::<TestMsg>::new();
+            mgr.reconcile(vec![Box::new(FlagSubscription {
+                id: 1,
+                flag: flag_clone,
+            })]);
+
+            thread::sleep(Duration::from_millis(20));
+            // mgr drops here, should stop all subscriptions
+        }
+
+        thread::sleep(Duration::from_millis(50));
+        assert!(flag.load(std::sync::atomic::Ordering::SeqCst), "Subscription should have stopped on drop");
+    }
+
+    #[test]
+    fn running_subscription_stop_joins_thread() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let completed = std::sync::Arc::new(AtomicBool::new(false));
+        let completed_clone = completed.clone();
+
+        let (signal, trigger) = StopSignal::new();
+        let (_tx, _rx) = mpsc::channel::<TestMsg>();
+
+        let thread = thread::spawn(move || {
+            while !signal.is_stopped() {
+                thread::sleep(Duration::from_millis(5));
+            }
+            completed_clone.store(true, Ordering::SeqCst);
+        });
+
+        let running = RunningSubscription {
+            id: 1,
+            trigger,
+            thread: Some(thread),
+        };
+
+        running.stop();
+        assert!(completed.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn every_id_stable_across_instances() {
+        // Same interval should produce same ID
+        let sub1 = Every::<TestMsg>::new(Duration::from_millis(100), || TestMsg::Tick);
+        let sub2 = Every::<TestMsg>::new(Duration::from_millis(100), || TestMsg::Tick);
+        let sub3 = Every::<TestMsg>::new(Duration::from_millis(100), || TestMsg::Value(1));
+
+        assert_eq!(sub1.id(), sub2.id());
+        assert_eq!(sub2.id(), sub3.id()); // ID is based on interval, not message factory
+    }
+
+    #[test]
+    fn drain_messages_preserves_order() {
+        let mut mgr = SubscriptionManager::<TestMsg>::new();
+
+        // Use a custom subscription that sends messages in order
+        struct OrderedSubscription {
+            values: Vec<i32>,
+        }
+
+        impl Subscription<TestMsg> for OrderedSubscription {
+            fn id(&self) -> SubId {
+                999
+            }
+
+            fn run(&self, sender: mpsc::Sender<TestMsg>, _stop: StopSignal) {
+                for v in &self.values {
+                    let _ = sender.send(TestMsg::Value(*v));
+                    thread::sleep(Duration::from_millis(1));
+                }
+            }
+        }
+
+        mgr.reconcile(vec![Box::new(OrderedSubscription {
+            values: vec![1, 2, 3, 4, 5],
+        })]);
+
+        thread::sleep(Duration::from_millis(30));
+        let msgs = mgr.drain_messages();
+
+        let values: Vec<i32> = msgs.iter().filter_map(|m| {
+            match m {
+                TestMsg::Value(v) => Some(*v),
+                _ => None,
+            }
+        }).collect();
+
+        assert_eq!(values, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn subscription_manager_new_is_empty() {
+        let mgr = SubscriptionManager::<TestMsg>::new();
+        let msgs = mgr.drain_messages();
+        assert!(msgs.is_empty());
+    }
 }

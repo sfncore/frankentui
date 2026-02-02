@@ -1181,4 +1181,638 @@ mod tests {
             }
         ));
     }
+
+    // =========================================================================
+    // DETERMINISM TESTS - Program loop determinism (bd-2nu8.10.1)
+    // =========================================================================
+
+    #[test]
+    fn cmd_sequence_executes_in_order() {
+        // Verify that Cmd::Sequence executes commands in declared order
+        use crate::simulator::ProgramSimulator;
+
+        struct SeqModel {
+            trace: Vec<i32>,
+        }
+
+        #[derive(Debug)]
+        enum SeqMsg {
+            Append(i32),
+            TriggerSequence,
+        }
+
+        impl From<Event> for SeqMsg {
+            fn from(_: Event) -> Self {
+                SeqMsg::Append(0)
+            }
+        }
+
+        impl Model for SeqModel {
+            type Message = SeqMsg;
+
+            fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                match msg {
+                    SeqMsg::Append(n) => {
+                        self.trace.push(n);
+                        Cmd::none()
+                    }
+                    SeqMsg::TriggerSequence => Cmd::sequence(vec![
+                        Cmd::msg(SeqMsg::Append(1)),
+                        Cmd::msg(SeqMsg::Append(2)),
+                        Cmd::msg(SeqMsg::Append(3)),
+                    ]),
+                }
+            }
+
+            fn view(&self, _frame: &mut Frame) {}
+        }
+
+        let mut sim = ProgramSimulator::new(SeqModel { trace: vec![] });
+        sim.init();
+        sim.send(SeqMsg::TriggerSequence);
+
+        assert_eq!(sim.model().trace, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn cmd_batch_executes_all_regardless_of_order() {
+        // Verify that Cmd::Batch executes all commands
+        use crate::simulator::ProgramSimulator;
+
+        struct BatchModel {
+            values: Vec<i32>,
+        }
+
+        #[derive(Debug)]
+        enum BatchMsg {
+            Add(i32),
+            TriggerBatch,
+        }
+
+        impl From<Event> for BatchMsg {
+            fn from(_: Event) -> Self {
+                BatchMsg::Add(0)
+            }
+        }
+
+        impl Model for BatchModel {
+            type Message = BatchMsg;
+
+            fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                match msg {
+                    BatchMsg::Add(n) => {
+                        self.values.push(n);
+                        Cmd::none()
+                    }
+                    BatchMsg::TriggerBatch => Cmd::batch(vec![
+                        Cmd::msg(BatchMsg::Add(10)),
+                        Cmd::msg(BatchMsg::Add(20)),
+                        Cmd::msg(BatchMsg::Add(30)),
+                    ]),
+                }
+            }
+
+            fn view(&self, _frame: &mut Frame) {}
+        }
+
+        let mut sim = ProgramSimulator::new(BatchModel { values: vec![] });
+        sim.init();
+        sim.send(BatchMsg::TriggerBatch);
+
+        // All values should be present
+        assert_eq!(sim.model().values.len(), 3);
+        assert!(sim.model().values.contains(&10));
+        assert!(sim.model().values.contains(&20));
+        assert!(sim.model().values.contains(&30));
+    }
+
+    #[test]
+    fn cmd_sequence_stops_on_quit() {
+        // Verify that Cmd::Sequence stops processing after Quit
+        use crate::simulator::ProgramSimulator;
+
+        struct SeqQuitModel {
+            trace: Vec<i32>,
+        }
+
+        #[derive(Debug)]
+        enum SeqQuitMsg {
+            Append(i32),
+            TriggerSequenceWithQuit,
+        }
+
+        impl From<Event> for SeqQuitMsg {
+            fn from(_: Event) -> Self {
+                SeqQuitMsg::Append(0)
+            }
+        }
+
+        impl Model for SeqQuitModel {
+            type Message = SeqQuitMsg;
+
+            fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                match msg {
+                    SeqQuitMsg::Append(n) => {
+                        self.trace.push(n);
+                        Cmd::none()
+                    }
+                    SeqQuitMsg::TriggerSequenceWithQuit => Cmd::sequence(vec![
+                        Cmd::msg(SeqQuitMsg::Append(1)),
+                        Cmd::quit(),
+                        Cmd::msg(SeqQuitMsg::Append(2)), // Should not execute
+                    ]),
+                }
+            }
+
+            fn view(&self, _frame: &mut Frame) {}
+        }
+
+        let mut sim = ProgramSimulator::new(SeqQuitModel { trace: vec![] });
+        sim.init();
+        sim.send(SeqQuitMsg::TriggerSequenceWithQuit);
+
+        assert_eq!(sim.model().trace, vec![1]);
+        assert!(!sim.is_running());
+    }
+
+    #[test]
+    fn identical_input_produces_identical_state() {
+        // Verify deterministic state transitions
+        use crate::simulator::ProgramSimulator;
+
+        fn run_scenario() -> Vec<i32> {
+            struct DetModel {
+                values: Vec<i32>,
+            }
+
+            #[derive(Debug, Clone)]
+            enum DetMsg {
+                Add(i32),
+                Double,
+            }
+
+            impl From<Event> for DetMsg {
+                fn from(_: Event) -> Self {
+                    DetMsg::Add(1)
+                }
+            }
+
+            impl Model for DetModel {
+                type Message = DetMsg;
+
+                fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                    match msg {
+                        DetMsg::Add(n) => {
+                            self.values.push(n);
+                            Cmd::none()
+                        }
+                        DetMsg::Double => {
+                            if let Some(&last) = self.values.last() {
+                                self.values.push(last * 2);
+                            }
+                            Cmd::none()
+                        }
+                    }
+                }
+
+                fn view(&self, _frame: &mut Frame) {}
+            }
+
+            let mut sim = ProgramSimulator::new(DetModel { values: vec![] });
+            sim.init();
+            sim.send(DetMsg::Add(5));
+            sim.send(DetMsg::Double);
+            sim.send(DetMsg::Add(3));
+            sim.send(DetMsg::Double);
+
+            sim.model().values.clone()
+        }
+
+        // Run the same scenario multiple times
+        let run1 = run_scenario();
+        let run2 = run_scenario();
+        let run3 = run_scenario();
+
+        assert_eq!(run1, run2);
+        assert_eq!(run2, run3);
+        assert_eq!(run1, vec![5, 10, 3, 6]);
+    }
+
+    #[test]
+    fn identical_state_produces_identical_render() {
+        // Verify consistent render outputs for identical inputs
+        use crate::simulator::ProgramSimulator;
+
+        struct RenderModel {
+            counter: i32,
+        }
+
+        #[derive(Debug)]
+        enum RenderMsg {
+            Set(i32),
+        }
+
+        impl From<Event> for RenderMsg {
+            fn from(_: Event) -> Self {
+                RenderMsg::Set(0)
+            }
+        }
+
+        impl Model for RenderModel {
+            type Message = RenderMsg;
+
+            fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                match msg {
+                    RenderMsg::Set(n) => {
+                        self.counter = n;
+                        Cmd::none()
+                    }
+                }
+            }
+
+            fn view(&self, frame: &mut Frame) {
+                let text = format!("Value: {}", self.counter);
+                for (i, c) in text.chars().enumerate() {
+                    if (i as u16) < frame.width() {
+                        use ftui_render::cell::Cell;
+                        frame.buffer.set_raw(i as u16, 0, Cell::from_char(c));
+                    }
+                }
+            }
+        }
+
+        // Create two simulators with the same state
+        let mut sim1 = ProgramSimulator::new(RenderModel { counter: 42 });
+        let mut sim2 = ProgramSimulator::new(RenderModel { counter: 42 });
+
+        let buf1 = sim1.capture_frame(80, 24);
+        let buf2 = sim2.capture_frame(80, 24);
+
+        // Compare buffer contents
+        for y in 0..24 {
+            for x in 0..80 {
+                let cell1 = buf1.get(x, y).unwrap();
+                let cell2 = buf2.get(x, y).unwrap();
+                assert_eq!(
+                    cell1.content.as_char(),
+                    cell2.content.as_char(),
+                    "Mismatch at ({}, {})",
+                    x,
+                    y
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn resize_debouncer_no_action_for_same_size() {
+        let mut debouncer = ResizeDebouncer::new(Duration::from_millis(100), (80, 24));
+
+        // Resize to the same size should be no-op
+        let action = debouncer.handle_resize(80, 24);
+        assert!(matches!(action, ResizeAction::None));
+    }
+
+    #[test]
+    fn resize_debouncer_time_until_apply() {
+        let mut debouncer = ResizeDebouncer::new(Duration::from_millis(100), (80, 24));
+        let now = Instant::now();
+
+        // No pending resize
+        assert!(debouncer.time_until_apply(now).is_none());
+
+        // Start resize
+        debouncer.handle_resize_at(100, 40, now);
+
+        // Should have ~100ms until apply
+        let time_left = debouncer.time_until_apply(now).unwrap();
+        assert!(time_left <= Duration::from_millis(100));
+        assert!(time_left > Duration::from_millis(90));
+
+        // After 50ms, should have ~50ms left
+        let time_left = debouncer
+            .time_until_apply(now + Duration::from_millis(50))
+            .unwrap();
+        assert!(time_left <= Duration::from_millis(50));
+    }
+
+    #[test]
+    fn resize_debouncer_resets_timer_on_new_resize() {
+        let mut debouncer = ResizeDebouncer::new(Duration::from_millis(100), (80, 24));
+        let now = Instant::now();
+
+        debouncer.handle_resize_at(100, 40, now);
+
+        // At 90ms (before debounce completes), resize again
+        debouncer.handle_resize_at(120, 50, now + Duration::from_millis(90));
+
+        // At 100ms from start, should still be pending (timer reset)
+        assert!(matches!(
+            debouncer.tick_at(now + Duration::from_millis(100)),
+            ResizeAction::None
+        ));
+
+        // At 200ms from start (100ms after second resize), should apply
+        assert!(matches!(
+            debouncer.tick_at(now + Duration::from_millis(200)),
+            ResizeAction::ApplyResize {
+                width: 120,
+                height: 50,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn cmd_log_creates_log_command() {
+        let cmd: Cmd<TestMsg> = Cmd::log("test message");
+        assert!(matches!(cmd, Cmd::Log(s) if s == "test message"));
+    }
+
+    #[test]
+    fn cmd_log_from_string() {
+        let msg = String::from("dynamic message");
+        let cmd: Cmd<TestMsg> = Cmd::log(msg);
+        assert!(matches!(cmd, Cmd::Log(s) if s == "dynamic message"));
+    }
+
+    #[test]
+    fn cmd_sequence_single_unwraps() {
+        let cmd: Cmd<TestMsg> = Cmd::sequence(vec![Cmd::quit()]);
+        // Single element sequence should unwrap to the inner command
+        assert!(matches!(cmd, Cmd::Quit));
+    }
+
+    #[test]
+    fn cmd_sequence_multiple() {
+        let cmd: Cmd<TestMsg> = Cmd::sequence(vec![Cmd::none(), Cmd::quit()]);
+        assert!(matches!(cmd, Cmd::Sequence(_)));
+    }
+
+    #[test]
+    fn cmd_default_is_none() {
+        let cmd: Cmd<TestMsg> = Cmd::default();
+        assert!(matches!(cmd, Cmd::None));
+    }
+
+    #[test]
+    fn cmd_debug_all_variants() {
+        // Test Debug impl for all variants
+        let none: Cmd<TestMsg> = Cmd::none();
+        assert_eq!(format!("{none:?}"), "None");
+
+        let quit: Cmd<TestMsg> = Cmd::quit();
+        assert_eq!(format!("{quit:?}"), "Quit");
+
+        let msg: Cmd<TestMsg> = Cmd::msg(TestMsg::Increment);
+        assert!(format!("{msg:?}").starts_with("Msg("));
+
+        let batch: Cmd<TestMsg> = Cmd::batch(vec![Cmd::none(), Cmd::none()]);
+        assert!(format!("{batch:?}").starts_with("Batch("));
+
+        let seq: Cmd<TestMsg> = Cmd::sequence(vec![Cmd::none(), Cmd::none()]);
+        assert!(format!("{seq:?}").starts_with("Sequence("));
+
+        let tick: Cmd<TestMsg> = Cmd::tick(Duration::from_secs(1));
+        assert!(format!("{tick:?}").starts_with("Tick("));
+
+        let log: Cmd<TestMsg> = Cmd::log("test");
+        assert!(format!("{log:?}").starts_with("Log("));
+    }
+
+    #[test]
+    fn program_config_with_budget() {
+        let budget = FrameBudgetConfig {
+            total: Duration::from_millis(50),
+            ..Default::default()
+        };
+        let config = ProgramConfig::default().with_budget(budget);
+        assert_eq!(config.budget.total, Duration::from_millis(50));
+    }
+
+    #[test]
+    fn program_config_with_resize_debounce() {
+        let config = ProgramConfig::default().with_resize_debounce(Duration::from_millis(200));
+        assert_eq!(config.resize_debounce, Duration::from_millis(200));
+    }
+
+    #[test]
+    fn nested_cmd_msg_executes_recursively() {
+        // Verify that Cmd::Msg triggers recursive update
+        use crate::simulator::ProgramSimulator;
+
+        struct NestedModel {
+            depth: usize,
+        }
+
+        #[derive(Debug)]
+        enum NestedMsg {
+            Nest(usize),
+        }
+
+        impl From<Event> for NestedMsg {
+            fn from(_: Event) -> Self {
+                NestedMsg::Nest(0)
+            }
+        }
+
+        impl Model for NestedModel {
+            type Message = NestedMsg;
+
+            fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                match msg {
+                    NestedMsg::Nest(n) => {
+                        self.depth += 1;
+                        if n > 0 {
+                            Cmd::msg(NestedMsg::Nest(n - 1))
+                        } else {
+                            Cmd::none()
+                        }
+                    }
+                }
+            }
+
+            fn view(&self, _frame: &mut Frame) {}
+        }
+
+        let mut sim = ProgramSimulator::new(NestedModel { depth: 0 });
+        sim.init();
+        sim.send(NestedMsg::Nest(3));
+
+        // Should have recursed 4 times (3, 2, 1, 0)
+        assert_eq!(sim.model().depth, 4);
+    }
+
+    #[test]
+    fn task_executes_synchronously_in_simulator() {
+        // In simulator, tasks execute synchronously
+        use crate::simulator::ProgramSimulator;
+
+        struct TaskModel {
+            completed: bool,
+        }
+
+        #[derive(Debug)]
+        enum TaskMsg {
+            Complete,
+            SpawnTask,
+        }
+
+        impl From<Event> for TaskMsg {
+            fn from(_: Event) -> Self {
+                TaskMsg::Complete
+            }
+        }
+
+        impl Model for TaskModel {
+            type Message = TaskMsg;
+
+            fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                match msg {
+                    TaskMsg::Complete => {
+                        self.completed = true;
+                        Cmd::none()
+                    }
+                    TaskMsg::SpawnTask => Cmd::task(|| TaskMsg::Complete),
+                }
+            }
+
+            fn view(&self, _frame: &mut Frame) {}
+        }
+
+        let mut sim = ProgramSimulator::new(TaskModel { completed: false });
+        sim.init();
+        sim.send(TaskMsg::SpawnTask);
+
+        // Task should have completed synchronously
+        assert!(sim.model().completed);
+    }
+
+    #[test]
+    fn resize_action_eq() {
+        // Test ResizeAction equality
+        assert_eq!(ResizeAction::None, ResizeAction::None);
+        assert_eq!(ResizeAction::ShowPlaceholder, ResizeAction::ShowPlaceholder);
+
+        let action1 = ResizeAction::ApplyResize {
+            width: 100,
+            height: 50,
+            elapsed: Duration::from_millis(100),
+        };
+        let action2 = ResizeAction::ApplyResize {
+            width: 100,
+            height: 50,
+            elapsed: Duration::from_millis(100),
+        };
+        assert_eq!(action1, action2);
+
+        assert_ne!(ResizeAction::None, ResizeAction::ShowPlaceholder);
+    }
+
+    #[test]
+    fn multiple_updates_accumulate_correctly() {
+        // Verify state accumulates correctly across multiple updates
+        use crate::simulator::ProgramSimulator;
+
+        struct AccumModel {
+            sum: i32,
+        }
+
+        #[derive(Debug)]
+        enum AccumMsg {
+            Add(i32),
+            Multiply(i32),
+        }
+
+        impl From<Event> for AccumMsg {
+            fn from(_: Event) -> Self {
+                AccumMsg::Add(1)
+            }
+        }
+
+        impl Model for AccumModel {
+            type Message = AccumMsg;
+
+            fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                match msg {
+                    AccumMsg::Add(n) => {
+                        self.sum += n;
+                        Cmd::none()
+                    }
+                    AccumMsg::Multiply(n) => {
+                        self.sum *= n;
+                        Cmd::none()
+                    }
+                }
+            }
+
+            fn view(&self, _frame: &mut Frame) {}
+        }
+
+        let mut sim = ProgramSimulator::new(AccumModel { sum: 0 });
+        sim.init();
+
+        // (0 + 5) * 2 + 3 = 13
+        sim.send(AccumMsg::Add(5));
+        sim.send(AccumMsg::Multiply(2));
+        sim.send(AccumMsg::Add(3));
+
+        assert_eq!(sim.model().sum, 13);
+    }
+
+    #[test]
+    fn init_command_executes_before_first_update() {
+        // Verify init() command executes before any update
+        use crate::simulator::ProgramSimulator;
+
+        struct InitModel {
+            initialized: bool,
+            updates: usize,
+        }
+
+        #[derive(Debug)]
+        enum InitMsg {
+            Update,
+            MarkInit,
+        }
+
+        impl From<Event> for InitMsg {
+            fn from(_: Event) -> Self {
+                InitMsg::Update
+            }
+        }
+
+        impl Model for InitModel {
+            type Message = InitMsg;
+
+            fn init(&mut self) -> Cmd<Self::Message> {
+                Cmd::msg(InitMsg::MarkInit)
+            }
+
+            fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+                match msg {
+                    InitMsg::MarkInit => {
+                        self.initialized = true;
+                        Cmd::none()
+                    }
+                    InitMsg::Update => {
+                        self.updates += 1;
+                        Cmd::none()
+                    }
+                }
+            }
+
+            fn view(&self, _frame: &mut Frame) {}
+        }
+
+        let mut sim = ProgramSimulator::new(InitModel {
+            initialized: false,
+            updates: 0,
+        });
+        sim.init();
+
+        assert!(sim.model().initialized);
+        sim.send(InitMsg::Update);
+        assert_eq!(sim.model().updates, 1);
+    }
 }
