@@ -387,7 +387,7 @@ fn draw_line(buffer: &mut Buffer, x: u16, y: u16, text: &str, style: Style, widt
         if col >= width {
             break;
         }
-        let cell_x = x + col as u16;
+        let cell_x = x.saturating_add(col as u16);
         let mut cell = Cell::from_char(ch);
         apply_style(&mut cell, style);
         buffer.set(cell_x, y, cell);
@@ -395,7 +395,7 @@ fn draw_line(buffer: &mut Buffer, x: u16, y: u16, text: &str, style: Style, widt
     }
     // Fill remaining with spaces
     while col < width {
-        let cell_x = x + col as u16;
+        let cell_x = x.saturating_add(col as u16);
         let mut cell = Cell::from_char(' ');
         apply_style(&mut cell, style);
         buffer.set(cell_x, y, cell);
