@@ -127,6 +127,18 @@ impl MarkdownRichText {
             strikethrough: Style::new().strikethrough(),
             list_bullet: Style::new().fg(theme::accent::PRIMARY),
             horizontal_rule: Style::new().fg(theme::fg::MUTED).dim(),
+            // GFM extensions - use themed colors
+            task_done: Style::new().fg(theme::accent::SUCCESS),
+            task_todo: Style::new().fg(theme::accent::INFO),
+            math_inline: Style::new().fg(theme::accent::SECONDARY).italic(),
+            math_block: Style::new().fg(theme::accent::SECONDARY).bold(),
+            footnote_ref: Style::new().fg(theme::fg::MUTED).dim(),
+            footnote_def: Style::new().fg(theme::fg::SECONDARY),
+            admonition_note: Style::new().fg(theme::accent::INFO).bold(),
+            admonition_tip: Style::new().fg(theme::accent::SUCCESS).bold(),
+            admonition_important: Style::new().fg(theme::accent::SECONDARY).bold(),
+            admonition_warning: Style::new().fg(theme::accent::WARNING).bold(),
+            admonition_caution: Style::new().fg(theme::accent::ERROR).bold(),
         };
         let renderer = MarkdownRenderer::new(md_theme).rule_width(36);
         let rendered_md = renderer.render(SAMPLE_MARKDOWN);

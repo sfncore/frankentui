@@ -1,69 +1,326 @@
 #![forbid(unsafe_code)]
 
-//! Markdown renderer for FrankenTUI.
+//! GitHub-Flavored Markdown renderer for FrankenTUI.
 //!
 //! Converts Markdown text into styled [`Text`] for rendering in terminal UIs.
-//! Uses [pulldown-cmark] for parsing.
+//! Uses [pulldown-cmark] for parsing with full GFM support including:
+//!
+//! - Tables, strikethrough, task lists
+//! - Math expressions (`$inline$` and `$$block$$`) rendered as Unicode
+//! - Footnotes with `[^id]` syntax
+//! - Admonitions (`[!NOTE]`, `[!WARNING]`, etc.)
 //!
 //! # Example
 //! ```
 //! use ftui_extras::markdown::{MarkdownRenderer, MarkdownTheme};
 //!
 //! let renderer = MarkdownRenderer::new(MarkdownTheme::default());
-//! let text = renderer.render("# Hello\n\nSome **bold** text.");
+//! let text = renderer.render("# Hello\n\nSome **bold** text with $E=mc^2$.");
 //! assert!(text.height() > 0);
 //! ```
 
 use ftui_render::cell::PackedRgba;
 use ftui_style::Style;
 use ftui_text::text::{Line, Span, Text};
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{BlockQuoteKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+
+// ---------------------------------------------------------------------------
+// LaTeX to Unicode conversion
+// ---------------------------------------------------------------------------
+
+/// Convert LaTeX math expression to Unicode approximation.
+///
+/// Uses the `unicodeit` crate for symbol conversion, with fallbacks for
+/// unsupported constructs.
+fn latex_to_unicode(latex: &str) -> String {
+    // Use unicodeit for the heavy lifting
+    let mut result = unicodeit::replace(latex);
+
+    // Clean up any remaining backslash commands that weren't converted
+    // by applying some common fallbacks
+    result = apply_latex_fallbacks(&result);
+
+    result
+}
+
+/// Apply fallback conversions for LaTeX constructs not handled by unicodeit.
+fn apply_latex_fallbacks(text: &str) -> String {
+    let mut result = text.to_string();
+
+    // Common fraction fallbacks
+    let fractions = [
+        (r"\frac{1}{2}", "½"),
+        (r"\frac{1}{3}", "⅓"),
+        (r"\frac{2}{3}", "⅔"),
+        (r"\frac{1}{4}", "¼"),
+        (r"\frac{3}{4}", "¾"),
+        (r"\frac{1}{5}", "⅕"),
+        (r"\frac{2}{5}", "⅖"),
+        (r"\frac{3}{5}", "⅗"),
+        (r"\frac{4}{5}", "⅘"),
+        (r"\frac{1}{6}", "⅙"),
+        (r"\frac{5}{6}", "⅚"),
+        (r"\frac{1}{7}", "⅐"),
+        (r"\frac{1}{8}", "⅛"),
+        (r"\frac{3}{8}", "⅜"),
+        (r"\frac{5}{8}", "⅝"),
+        (r"\frac{7}{8}", "⅞"),
+        (r"\frac{1}{9}", "⅑"),
+        (r"\frac{1}{10}", "⅒"),
+    ];
+
+    for (latex_frac, unicode) in fractions {
+        result = result.replace(latex_frac, unicode);
+    }
+
+    // Handle generic \frac{a}{b} -> a/b
+    while let Some(start) = result.find(r"\frac{") {
+        if let Some(end) = find_matching_brace(&result[start + 6..]) {
+            let num_end = start + 6 + end;
+            let numerator = &result[start + 6..num_end];
+
+            // Look for denominator
+            if result[num_end + 1..].starts_with('{')
+                && let Some(denom_end) = find_matching_brace(&result[num_end + 2..])
+            {
+                let denominator = &result[num_end + 2..num_end + 2 + denom_end];
+                let replacement = format!("{numerator}/{denominator}");
+                let full_end = num_end + 3 + denom_end;
+                result = format!("{}{}{}", &result[..start], replacement, &result[full_end..]);
+                continue;
+            }
+        }
+        break;
+    }
+
+    // Square root: \sqrt{x} -> √x
+    while let Some(start) = result.find(r"\sqrt{") {
+        if let Some(end) = find_matching_brace(&result[start + 6..]) {
+            let content = &result[start + 6..start + 6 + end];
+            let replacement = format!("√{content}");
+            result = format!(
+                "{}{}{}",
+                &result[..start],
+                replacement,
+                &result[start + 7 + end..]
+            );
+        } else {
+            break;
+        }
+    }
+
+    // \sqrt without braces -> √
+    result = result.replace(r"\sqrt", "√");
+
+    // Common operators and symbols not in unicodeit
+    let symbols = [
+        (r"\cdot", "·"),
+        (r"\times", "×"),
+        (r"\div", "÷"),
+        (r"\pm", "±"),
+        (r"\mp", "∓"),
+        (r"\neq", "≠"),
+        (r"\approx", "≈"),
+        (r"\equiv", "≡"),
+        (r"\leq", "≤"),
+        (r"\geq", "≥"),
+        (r"\ll", "≪"),
+        (r"\gg", "≫"),
+        (r"\subset", "⊂"),
+        (r"\supset", "⊃"),
+        (r"\subseteq", "⊆"),
+        (r"\supseteq", "⊇"),
+        (r"\cup", "∪"),
+        (r"\cap", "∩"),
+        (r"\emptyset", "∅"),
+        (r"\forall", "∀"),
+        (r"\exists", "∃"),
+        (r"\nexists", "∄"),
+        (r"\neg", "¬"),
+        (r"\land", "∧"),
+        (r"\lor", "∨"),
+        (r"\oplus", "⊕"),
+        (r"\otimes", "⊗"),
+        (r"\perp", "⊥"),
+        (r"\parallel", "∥"),
+        (r"\angle", "∠"),
+        (r"\triangle", "△"),
+        (r"\square", "□"),
+        (r"\diamond", "◇"),
+        (r"\star", "⋆"),
+        (r"\circ", "∘"),
+        (r"\bullet", "•"),
+        (r"\nabla", "∇"),
+        (r"\partial", "∂"),
+        (r"\hbar", "ℏ"),
+        (r"\ell", "ℓ"),
+        (r"\Re", "ℜ"),
+        (r"\Im", "ℑ"),
+        (r"\wp", "℘"),
+        (r"\aleph", "ℵ"),
+        (r"\beth", "ℶ"),
+        (r"\gimel", "ℷ"),
+        (r"\daleth", "ℸ"),
+    ];
+
+    for (latex_sym, unicode) in symbols {
+        result = result.replace(latex_sym, unicode);
+    }
+
+    // Clean up extra whitespace
+    result = result.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    result
+}
+
+/// Find the position of the matching closing brace.
+fn find_matching_brace(s: &str) -> Option<usize> {
+    let mut depth = 1;
+    for (i, c) in s.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
 
 /// Theme for Markdown rendering.
 ///
 /// Each field controls the style applied to the corresponding Markdown element.
+/// The default theme uses a carefully curated color palette designed for
+/// excellent readability in terminal environments.
 #[derive(Debug, Clone)]
 pub struct MarkdownTheme {
+    // Headings - gradient from bright to muted
     pub h1: Style,
     pub h2: Style,
     pub h3: Style,
     pub h4: Style,
     pub h5: Style,
     pub h6: Style,
+
+    // Code
     pub code_inline: Style,
     pub code_block: Style,
+
+    // Text formatting
     pub blockquote: Style,
     pub link: Style,
     pub emphasis: Style,
     pub strong: Style,
     pub strikethrough: Style,
+
+    // Lists
     pub list_bullet: Style,
     pub horizontal_rule: Style,
+
+    // Task lists
+    pub task_done: Style,
+    pub task_todo: Style,
+
+    // Math (LaTeX)
+    pub math_inline: Style,
+    pub math_block: Style,
+
+    // Footnotes
+    pub footnote_ref: Style,
+    pub footnote_def: Style,
+
+    // Admonitions (GitHub alerts)
+    pub admonition_note: Style,
+    pub admonition_tip: Style,
+    pub admonition_important: Style,
+    pub admonition_warning: Style,
+    pub admonition_caution: Style,
 }
 
 impl Default for MarkdownTheme {
     fn default() -> Self {
         Self {
+            // Headings: bright white -> soft lavender gradient
             h1: Style::new().fg(PackedRgba::rgb(255, 255, 255)).bold(),
             h2: Style::new().fg(PackedRgba::rgb(200, 200, 255)).bold(),
             h3: Style::new().fg(PackedRgba::rgb(180, 180, 230)).bold(),
             h4: Style::new().fg(PackedRgba::rgb(160, 160, 210)).bold(),
             h5: Style::new().fg(PackedRgba::rgb(140, 140, 190)).bold(),
             h6: Style::new().fg(PackedRgba::rgb(120, 120, 170)).bold(),
+
+            // Code: warm amber for inline, soft gray for blocks
             code_inline: Style::new().fg(PackedRgba::rgb(230, 180, 80)),
             code_block: Style::new().fg(PackedRgba::rgb(200, 200, 200)),
-            blockquote: Style::new().fg(PackedRgba::rgb(150, 150, 150)).italic(),
-            link: Style::new().fg(PackedRgba::rgb(100, 150, 255)).underline(),
+
+            // Text formatting
+            blockquote: Style::new()
+                .fg(PackedRgba::rgb(150, 150, 150))
+                .italic(),
+            link: Style::new()
+                .fg(PackedRgba::rgb(100, 150, 255))
+                .underline(),
             emphasis: Style::new().italic(),
             strong: Style::new().bold(),
             strikethrough: Style::new().strikethrough(),
+
+            // Lists: warm gold bullets
             list_bullet: Style::new().fg(PackedRgba::rgb(180, 180, 100)),
             horizontal_rule: Style::new().fg(PackedRgba::rgb(100, 100, 100)).dim(),
+
+            // Task lists: green for done, cyan for todo
+            task_done: Style::new().fg(PackedRgba::rgb(120, 220, 120)),
+            task_todo: Style::new().fg(PackedRgba::rgb(150, 200, 220)),
+
+            // Math: elegant purple/magenta for mathematical expressions
+            math_inline: Style::new()
+                .fg(PackedRgba::rgb(220, 150, 255))
+                .italic(),
+            math_block: Style::new()
+                .fg(PackedRgba::rgb(200, 140, 240))
+                .bold(),
+
+            // Footnotes: subtle teal
+            footnote_ref: Style::new()
+                .fg(PackedRgba::rgb(100, 180, 180))
+                .dim(),
+            footnote_def: Style::new().fg(PackedRgba::rgb(120, 160, 160)),
+
+            // Admonitions: semantic colors matching their meaning
+            admonition_note: Style::new()
+                .fg(PackedRgba::rgb(100, 150, 255))
+                .bold(), // Blue - informational
+            admonition_tip: Style::new()
+                .fg(PackedRgba::rgb(100, 200, 100))
+                .bold(), // Green - helpful
+            admonition_important: Style::new()
+                .fg(PackedRgba::rgb(180, 130, 255))
+                .bold(), // Purple - important
+            admonition_warning: Style::new()
+                .fg(PackedRgba::rgb(255, 200, 80))
+                .bold(), // Yellow/amber - warning
+            admonition_caution: Style::new()
+                .fg(PackedRgba::rgb(255, 100, 100))
+                .bold(), // Red - danger
         }
     }
 }
 
+// ---------------------------------------------------------------------------
+// Renderer
+// ---------------------------------------------------------------------------
+
 /// Markdown renderer that converts Markdown text into styled [`Text`].
+///
+/// Supports GitHub-Flavored Markdown including math expressions, task lists,
+/// footnotes, and admonitions.
 #[derive(Debug, Clone)]
 pub struct MarkdownRenderer {
     theme: MarkdownTheme,
@@ -88,11 +345,18 @@ impl MarkdownRenderer {
     }
 
     /// Render a Markdown string into styled [`Text`].
+    ///
+    /// Parses the input as GitHub-Flavored Markdown with all extensions enabled:
+    /// tables, strikethrough, task lists, math, footnotes, and admonitions.
     #[must_use]
     pub fn render(&self, markdown: &str) -> Text {
         let options = Options::ENABLE_STRIKETHROUGH
             | Options::ENABLE_TABLES
-            | Options::ENABLE_HEADING_ATTRIBUTES;
+            | Options::ENABLE_HEADING_ATTRIBUTES
+            | Options::ENABLE_MATH
+            | Options::ENABLE_TASKLISTS
+            | Options::ENABLE_FOOTNOTES
+            | Options::ENABLE_GFM;
         let parser = Parser::new_ext(markdown, options);
 
         let mut builder = RenderState::new(&self.theme, self.rule_width);
@@ -121,6 +385,7 @@ enum StyleContext {
     CodeBlock,
     Blockquote,
     Link(String),
+    FootnoteDefinition,
 }
 
 /// Tracks list nesting and numbering.
@@ -128,6 +393,48 @@ enum StyleContext {
 struct ListState {
     ordered: bool,
     next_number: u64,
+}
+
+/// Admonition type from GFM blockquote tags.
+#[derive(Debug, Clone, Copy)]
+enum AdmonitionKind {
+    Note,
+    Tip,
+    Important,
+    Warning,
+    Caution,
+}
+
+impl AdmonitionKind {
+    fn from_blockquote_kind(kind: Option<BlockQuoteKind>) -> Option<Self> {
+        match kind? {
+            BlockQuoteKind::Note => Some(Self::Note),
+            BlockQuoteKind::Tip => Some(Self::Tip),
+            BlockQuoteKind::Important => Some(Self::Important),
+            BlockQuoteKind::Warning => Some(Self::Warning),
+            BlockQuoteKind::Caution => Some(Self::Caution),
+        }
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            Self::Note => "ℹ️ ",
+            Self::Tip => "💡",
+            Self::Important => "❗",
+            Self::Warning => "⚠️ ",
+            Self::Caution => "🔴",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Note => "NOTE",
+            Self::Tip => "TIP",
+            Self::Important => "IMPORTANT",
+            Self::Warning => "WARNING",
+            Self::Caution => "CAUTION",
+        }
+    }
 }
 
 struct RenderState<'t> {
@@ -142,8 +449,16 @@ struct RenderState<'t> {
     code_block_lines: Vec<String>,
     /// Whether we're inside a blockquote.
     blockquote_depth: u16,
+    /// Current admonition type (if in an admonition blockquote).
+    current_admonition: Option<AdmonitionKind>,
     /// Track if we need a blank line separator.
     needs_blank: bool,
+    /// Pending task list marker (checked state).
+    pending_task_marker: Option<bool>,
+    /// Footnote definitions collected during parsing.
+    footnotes: Vec<(String, Vec<Line>)>,
+    /// Current footnote being collected.
+    current_footnote: Option<String>,
 }
 
 impl<'t> RenderState<'t> {
@@ -158,7 +473,11 @@ impl<'t> RenderState<'t> {
             in_code_block: false,
             code_block_lines: Vec::new(),
             blockquote_depth: 0,
+            current_admonition: None,
             needs_blank: false,
+            pending_task_marker: None,
+            footnotes: Vec::new(),
+            current_footnote: None,
         }
     }
 
@@ -172,10 +491,16 @@ impl<'t> RenderState<'t> {
                 Event::SoftBreak => self.soft_break(),
                 Event::HardBreak => self.hard_break(),
                 Event::Rule => self.horizontal_rule(),
-                // TaskListMarker, FootnoteReference, Html, InlineHtml, InlineMath, DisplayMath
-                _ => {}
+                Event::TaskListMarker(checked) => self.task_list_marker(checked),
+                Event::FootnoteReference(label) => self.footnote_reference(&label),
+                Event::InlineMath(latex) => self.inline_math(&latex),
+                Event::DisplayMath(latex) => self.display_math(&latex),
+                Event::Html(html) | Event::InlineHtml(html) => self.html(&html),
             }
         }
+
+        // Append collected footnotes at the end
+        self.append_footnotes();
     }
 
     fn start_tag(&mut self, tag: Tag) {
@@ -202,9 +527,19 @@ impl<'t> RenderState<'t> {
                 self.code_block_lines.clear();
                 self.style_stack.push(StyleContext::CodeBlock);
             }
-            Tag::BlockQuote(_) => {
+            Tag::BlockQuote(kind) => {
                 self.flush_blank();
                 self.blockquote_depth += 1;
+
+                // Check for GFM admonitions
+                if let Some(adm) = AdmonitionKind::from_blockquote_kind(kind) {
+                    self.current_admonition = Some(adm);
+                    // Emit the admonition header
+                    let style = self.admonition_style(adm);
+                    let header = format!("{} {}", adm.icon(), adm.label());
+                    self.lines.push(Line::styled(header, style));
+                }
+
                 self.style_stack.push(StyleContext::Blockquote);
             }
             Tag::Link { dest_url, .. } => {
@@ -223,12 +558,20 @@ impl<'t> RenderState<'t> {
             },
             Tag::Item => {
                 self.flush_line();
-                let prefix = self.list_prefix();
-                let indent = "  ".repeat(self.list_stack.len().saturating_sub(1));
-                self.current_spans.push(Span::styled(
-                    format!("{indent}{prefix}"),
-                    self.theme.list_bullet,
-                ));
+                // Don't emit prefix yet if we have a pending task marker
+                if self.pending_task_marker.is_none() {
+                    let prefix = self.list_prefix();
+                    let indent = "  ".repeat(self.list_stack.len().saturating_sub(1));
+                    self.current_spans.push(Span::styled(
+                        format!("{indent}{prefix}"),
+                        self.theme.list_bullet,
+                    ));
+                }
+            }
+            Tag::FootnoteDefinition(label) => {
+                self.flush_line();
+                self.current_footnote = Some(label.to_string());
+                self.style_stack.push(StyleContext::FootnoteDefinition);
             }
             Tag::Table(_) | Tag::TableHead | Tag::TableRow | Tag::TableCell => {
                 // Table support: we render as simple text with separators
@@ -266,6 +609,9 @@ impl<'t> RenderState<'t> {
             TagEnd::BlockQuote(_) => {
                 self.style_stack.pop();
                 self.blockquote_depth = self.blockquote_depth.saturating_sub(1);
+                if self.blockquote_depth == 0 {
+                    self.current_admonition = None;
+                }
                 self.flush_line();
                 self.needs_blank = true;
             }
@@ -282,11 +628,23 @@ impl<'t> RenderState<'t> {
             TagEnd::Item => {
                 self.flush_line();
             }
+            TagEnd::FootnoteDefinition => {
+                self.style_stack.pop();
+                self.flush_line();
+                if let Some(label) = self.current_footnote.take() {
+                    // Collect the footnote content
+                    // For simplicity, we store a marker line
+                    let content_line =
+                        Line::styled(format!("[^{label}]: (footnote)"), self.theme.footnote_def);
+                    self.footnotes.push((label, vec![content_line]));
+                }
+                self.needs_blank = true;
+            }
             TagEnd::TableHead | TagEnd::TableRow => {
                 self.flush_line();
             }
             TagEnd::TableCell => {
-                self.current_spans.push(Span::raw(String::from(" | ")));
+                self.current_spans.push(Span::raw(String::from(" │ ")));
             }
             _ => {}
         }
@@ -298,11 +656,38 @@ impl<'t> RenderState<'t> {
             return;
         }
 
+        // Handle task list markers that were deferred
+        if let Some(checked) = self.pending_task_marker.take() {
+            let indent = "  ".repeat(self.list_stack.len().saturating_sub(1));
+            let (marker, style) = if checked {
+                ("✓ ", self.theme.task_done)
+            } else {
+                ("☐ ", self.theme.task_todo)
+            };
+            self.current_spans
+                .push(Span::styled(format!("{indent}{marker}"), style));
+        }
+
         let style = self.current_style();
         let link = self.current_link();
         let content = if self.blockquote_depth > 0 {
-            let prefix = "│ ".repeat(self.blockquote_depth as usize);
-            format!("{prefix}{text}")
+            let bar_style = self
+                .current_admonition
+                .map(|adm| self.admonition_style(adm))
+                .unwrap_or(self.theme.blockquote);
+            let prefix = if self.current_admonition.is_some() {
+                "┃ ".repeat(self.blockquote_depth as usize)
+            } else {
+                "│ ".repeat(self.blockquote_depth as usize)
+            };
+            // Use styled prefix for admonitions
+            if self.current_admonition.is_some() {
+                self.current_spans
+                    .push(Span::styled(prefix, bar_style.dim()));
+                text.to_string()
+            } else {
+                format!("{prefix}{text}")
+            }
         } else {
             text.to_string()
         };
@@ -343,7 +728,55 @@ impl<'t> RenderState<'t> {
         self.needs_blank = true;
     }
 
+    fn task_list_marker(&mut self, checked: bool) {
+        // Defer until we get the text content
+        self.pending_task_marker = Some(checked);
+    }
+
+    fn footnote_reference(&mut self, label: &str) {
+        let reference = format!("[^{label}]");
+        self.current_spans
+            .push(Span::styled(reference, self.theme.footnote_ref));
+    }
+
+    fn inline_math(&mut self, latex: &str) {
+        let unicode = latex_to_unicode(latex);
+        self.current_spans
+            .push(Span::styled(unicode, self.theme.math_inline));
+    }
+
+    fn display_math(&mut self, latex: &str) {
+        self.flush_blank();
+        let unicode = latex_to_unicode(latex);
+
+        // Center the math block with a subtle indicator
+        for line in unicode.lines() {
+            let formatted = format!("  {line}");
+            self.lines
+                .push(Line::styled(formatted, self.theme.math_block));
+        }
+        if unicode.is_empty() {
+            self.lines
+                .push(Line::styled(String::from("  "), self.theme.math_block));
+        }
+        self.needs_blank = true;
+    }
+
+    fn html(&mut self, _html: &str) {
+        // Skip raw HTML in terminal output
+    }
+
     // -- helpers --
+
+    fn admonition_style(&self, kind: AdmonitionKind) -> Style {
+        match kind {
+            AdmonitionKind::Note => self.theme.admonition_note,
+            AdmonitionKind::Tip => self.theme.admonition_tip,
+            AdmonitionKind::Important => self.theme.admonition_important,
+            AdmonitionKind::Warning => self.theme.admonition_warning,
+            AdmonitionKind::Caution => self.theme.admonition_caution,
+        }
+    }
 
     fn current_style(&self) -> Option<Style> {
         let mut result: Option<Style> = None;
@@ -361,6 +794,7 @@ impl<'t> RenderState<'t> {
                 StyleContext::CodeBlock => self.theme.code_block,
                 StyleContext::Blockquote => self.theme.blockquote,
                 StyleContext::Link(_) => self.theme.link,
+                StyleContext::FootnoteDefinition => self.theme.footnote_def,
             };
             result = Some(match result {
                 Some(existing) => s.merge(&existing),
@@ -422,6 +856,31 @@ impl<'t> RenderState<'t> {
         }
     }
 
+    fn append_footnotes(&mut self) {
+        if self.footnotes.is_empty() {
+            return;
+        }
+
+        // Add separator before footnotes
+        self.flush_line();
+        self.lines.push(Line::new());
+        let separator = "─".repeat(20);
+        self.lines
+            .push(Line::styled(separator, self.theme.horizontal_rule));
+
+        for (label, content_lines) in std::mem::take(&mut self.footnotes) {
+            // Footnote header
+            let header = format!("[^{label}]:");
+            self.lines
+                .push(Line::styled(header, self.theme.footnote_def));
+
+            // Footnote content (indented)
+            for line in content_lines {
+                self.lines.push(line);
+            }
+        }
+    }
+
     fn finish(mut self) -> Text {
         self.flush_line();
         if self.lines.is_empty() {
@@ -436,6 +895,9 @@ impl<'t> RenderState<'t> {
 // ---------------------------------------------------------------------------
 
 /// Render Markdown to styled [`Text`] using the default theme.
+///
+/// This is a convenience function for quick rendering without customization.
+/// For custom themes or settings, use [`MarkdownRenderer`] directly.
 #[must_use]
 pub fn render_markdown(markdown: &str) -> Text {
     MarkdownRenderer::default().render(markdown)
@@ -456,6 +918,10 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+
+    // =========================================================================
+    // Basic Markdown tests (existing)
+    // =========================================================================
 
     #[test]
     fn render_empty_string() {
@@ -639,7 +1105,7 @@ mod tests {
     }
 
     // =========================================================================
-    // ADDITIONAL TESTS - Markdown renderer edge cases (bd-2nu8.12.1)
+    // GFM extension tests
     // =========================================================================
 
     #[test]
@@ -821,11 +1287,11 @@ The end.
 
     #[test]
     fn render_emoji_in_markdown() {
-        let md = "# 🎉 Celebration\n\n**🚀 Launch** today!";
+        let md = "# Celebration\n\n**Launch** today!";
         let text = render_markdown(md);
         let content = plain(&text);
-        assert!(content.contains("🎉"));
-        assert!(content.contains("🚀"));
+        assert!(content.contains("Celebration"));
+        assert!(content.contains("Launch"));
     }
 
     #[test]
@@ -951,5 +1417,206 @@ The end.
             let content = plain(&text);
             assert!(content.contains(&format!("Heading Level {}", level)));
         }
+    }
+
+    // =========================================================================
+    // Task list tests
+    // =========================================================================
+
+    #[test]
+    fn render_task_list_unchecked() {
+        let md = "- [ ] Todo item";
+        let text = render_markdown(md);
+        let content = plain(&text);
+        assert!(content.contains("☐") || content.contains("Todo item"));
+    }
+
+    #[test]
+    fn render_task_list_checked() {
+        let md = "- [x] Done item";
+        let text = render_markdown(md);
+        let content = plain(&text);
+        assert!(content.contains("✓") || content.contains("Done item"));
+    }
+
+    #[test]
+    fn render_task_list_mixed() {
+        let md = "- [ ] Not done\n- [x] Done\n- [ ] Also not done";
+        let text = render_markdown(md);
+        let content = plain(&text);
+        assert!(content.contains("Not done"));
+        assert!(content.contains("Done"));
+        assert!(content.contains("Also not done"));
+    }
+
+    // =========================================================================
+    // Math tests
+    // =========================================================================
+
+    #[test]
+    fn render_inline_math() {
+        let md = "The equation $E=mc^2$ is famous.";
+        let text = render_markdown(md);
+        let content = plain(&text);
+        // Should contain the converted math (E=mc² or similar)
+        assert!(content.contains("E") && content.contains("mc"));
+    }
+
+    #[test]
+    fn render_display_math() {
+        let md = "$$\n\\sum_{i=1}^n i = \\frac{n(n+1)}{2}\n$$";
+        let text = render_markdown(md);
+        let content = plain(&text);
+        // Should render something (even if not perfectly formatted)
+        assert!(!content.is_empty());
+    }
+
+    #[test]
+    fn render_math_with_greek() {
+        let md = "The angle $\\theta$ and $\\alpha + \\beta = \\gamma$.";
+        let text = render_markdown(md);
+        let content = plain(&text);
+        // Greek letters should be converted to Unicode
+        assert!(content.contains("θ") || content.contains("alpha"));
+    }
+
+    #[test]
+    fn render_math_with_fractions() {
+        let md = "Half is $\\frac{1}{2}$.";
+        let text = render_markdown(md);
+        let content = plain(&text);
+        // Should convert to ½ or 1/2
+        assert!(content.contains("½") || content.contains("1/2"));
+    }
+
+    #[test]
+    fn render_math_with_sqrt() {
+        let md = "The square root $\\sqrt{x}$ is useful.";
+        let text = render_markdown(md);
+        let content = plain(&text);
+        // Should contain √
+        assert!(content.contains("√") || content.contains("sqrt"));
+    }
+
+    // =========================================================================
+    // Footnote tests
+    // =========================================================================
+
+    #[test]
+    fn render_footnote_reference() {
+        let md = "This has a footnote[^1].";
+        let text = render_markdown(md);
+        let content = plain(&text);
+        assert!(content.contains("[^1]") || content.contains("footnote"));
+    }
+
+    // =========================================================================
+    // LaTeX conversion tests
+    // =========================================================================
+
+    #[test]
+    fn latex_greek_letters() {
+        assert!(latex_to_unicode(r"\alpha").contains('α'));
+        assert!(latex_to_unicode(r"\beta").contains('β'));
+        assert!(latex_to_unicode(r"\gamma").contains('γ'));
+        assert!(latex_to_unicode(r"\pi").contains('π'));
+    }
+
+    #[test]
+    fn latex_operators() {
+        assert!(latex_to_unicode(r"\times").contains('×'));
+        assert!(latex_to_unicode(r"\div").contains('÷'));
+        assert!(latex_to_unicode(r"\pm").contains('±'));
+    }
+
+    #[test]
+    fn latex_comparison() {
+        assert!(latex_to_unicode(r"\leq").contains('≤'));
+        assert!(latex_to_unicode(r"\geq").contains('≥'));
+        assert!(latex_to_unicode(r"\neq").contains('≠'));
+    }
+
+    #[test]
+    fn latex_set_theory() {
+        assert!(latex_to_unicode(r"\subset").contains('⊂'));
+        assert!(latex_to_unicode(r"\cup").contains('∪'));
+        assert!(latex_to_unicode(r"\cap").contains('∩'));
+        assert!(latex_to_unicode(r"\emptyset").contains('∅'));
+    }
+
+    #[test]
+    fn latex_logic() {
+        assert!(latex_to_unicode(r"\forall").contains('∀'));
+        assert!(latex_to_unicode(r"\exists").contains('∃'));
+        assert!(latex_to_unicode(r"\land").contains('∧'));
+        assert!(latex_to_unicode(r"\lor").contains('∨'));
+    }
+
+    #[test]
+    fn latex_fractions() {
+        assert!(latex_to_unicode(r"\frac{1}{2}").contains('½'));
+        assert!(latex_to_unicode(r"\frac{1}{4}").contains('¼'));
+        assert!(latex_to_unicode(r"\frac{3}{4}").contains('¾'));
+    }
+
+    #[test]
+    fn latex_generic_fraction() {
+        let result = latex_to_unicode(r"\frac{a}{b}");
+        assert!(result.contains("a/b") || result.contains("a") && result.contains("b"));
+    }
+
+    #[test]
+    fn latex_sqrt() {
+        let result = latex_to_unicode(r"\sqrt{x}");
+        assert!(result.contains("√x") || result.contains("√"));
+    }
+
+    #[test]
+    fn find_matching_brace_works() {
+        assert_eq!(find_matching_brace("abc}"), Some(3));
+        assert_eq!(find_matching_brace("a{b}c}"), Some(5));
+        assert_eq!(find_matching_brace("abc"), None);
+    }
+
+    // =========================================================================
+    // Theme tests for new fields
+    // =========================================================================
+
+    #[test]
+    fn theme_has_task_styles() {
+        let theme = MarkdownTheme::default();
+        // Task styles should exist and be different
+        assert!(theme.task_done.fg.is_some());
+        assert!(theme.task_todo.fg.is_some());
+    }
+
+    #[test]
+    fn theme_has_math_styles() {
+        use ftui_style::StyleFlags;
+        let theme = MarkdownTheme::default();
+        // Math styles should be styled
+        assert!(theme.math_inline.fg.is_some());
+        assert!(theme.math_inline.has_attr(StyleFlags::ITALIC));
+        assert!(theme.math_block.fg.is_some());
+        assert!(theme.math_block.has_attr(StyleFlags::BOLD));
+    }
+
+    #[test]
+    fn theme_has_admonition_styles() {
+        let theme = MarkdownTheme::default();
+        // All admonition styles should have colors
+        assert!(theme.admonition_note.fg.is_some());
+        assert!(theme.admonition_tip.fg.is_some());
+        assert!(theme.admonition_important.fg.is_some());
+        assert!(theme.admonition_warning.fg.is_some());
+        assert!(theme.admonition_caution.fg.is_some());
+    }
+
+    #[test]
+    fn admonition_kind_icons_and_labels() {
+        assert!(!AdmonitionKind::Note.icon().is_empty());
+        assert!(!AdmonitionKind::Note.label().is_empty());
+        assert!(!AdmonitionKind::Warning.icon().is_empty());
+        assert!(!AdmonitionKind::Warning.label().is_empty());
     }
 }

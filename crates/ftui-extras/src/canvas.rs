@@ -100,8 +100,8 @@ impl Painter {
 
     /// Create a painter sized to fill a terminal area.
     pub fn for_area(area: Rect, mode: Mode) -> Self {
-        let width = area.width * mode.cols_per_cell();
-        let height = area.height * mode.rows_per_cell();
+        let width = area.width.saturating_mul(mode.cols_per_cell());
+        let height = area.height.saturating_mul(mode.rows_per_cell());
         Self::new(width, height, mode)
     }
 

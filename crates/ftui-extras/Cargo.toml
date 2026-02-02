@@ -14,6 +14,8 @@ ftui-text = { path = "../ftui-text", optional = true }
 base64 = { version = "0.22.1", optional = true }
 image = { version = "0.25.9", default-features = false, features = ["png", "gif", "jpeg"], optional = true }
 pulldown-cmark = { version = "0.12", default-features = false, optional = true }
+unicodeit = { version = "0.2", optional = true }
+math-text-transform = { version = "0.1", optional = true }
 portable-pty = { version = "0.8.1", optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true }
@@ -28,7 +30,7 @@ console = ["dep:ftui-render", "dep:ftui-style", "dep:ftui-text", "dep:unicode-se
 clipboard-fallback = ["clipboard"]
 clipboard-logging = ["clipboard", "dep:tracing"]
 image = ["dep:base64", "dep:ftui-core", "dep:image"]
-markdown = ["dep:pulldown-cmark", "dep:ftui-render", "dep:ftui-style", "dep:ftui-text"]
+markdown = ["dep:pulldown-cmark", "dep:ftui-render", "dep:ftui-style", "dep:ftui-text", "dep:unicodeit", "dep:math-text-transform"]
 export = ["dep:ftui-render"]
 forms = ["dep:ftui-core", "dep:ftui-render", "dep:ftui-style", "dep:ftui-widgets", "dep:unicode-segmentation", "dep:unicode-width"]
 pty-capture = ["dep:portable-pty", "dep:ftui-core"]
