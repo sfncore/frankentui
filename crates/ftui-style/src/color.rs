@@ -347,10 +347,23 @@ pub fn rgb_to_256(r: u8, g: u8, b: u8) -> u8 {
         return 232 + idx;
     }
 
-    let r6 = (r as u16 * 6 / 256) as u8;
-    let g6 = (g as u16 * 6 / 256) as u8;
-    let b6 = (b as u16 * 6 / 256) as u8;
-    16 + 36 * r6 + 6 * g6 + b6
+    16 + 36 * cube_index(r) + 6 * cube_index(g) + cube_index(b)
+}
+
+/// Map an 8-bit channel value to the nearest ANSI 256-color 6×6×6 cube index.
+///
+/// The cube levels are `[0, 95, 135, 175, 215, 255]`, which are **not**
+/// uniformly spaced.  This function uses the midpoints between adjacent
+/// levels (48, 115, 155, 195, 235) so each channel maps to the closest
+/// cube entry rather than an equal-width bin.
+fn cube_index(v: u8) -> u8 {
+    if v < 48 {
+        0
+    } else if v < 115 {
+        1
+    } else {
+        (v - 35) / 40
+    }
 }
 
 /// Convert an ANSI 256-color index to its RGB representation.

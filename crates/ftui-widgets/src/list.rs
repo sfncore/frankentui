@@ -196,7 +196,7 @@ impl<'a> StatefulWidget for List<'a> {
             .skip(state.offset)
             .take(list_height)
         {
-            let y = list_area.y + (i - state.offset) as u16;
+            let y = list_area.y.saturating_add((i - state.offset) as u16);
             let is_selected = state.selected == Some(i);
 
             // Determine style

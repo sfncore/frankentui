@@ -194,7 +194,7 @@ impl Widget for Paragraph<'_> {
                     local_scroll = scroll_x - line_rel_start;
                 } else {
                     // Start is visible
-                    draw_x = text_area.x + (line_rel_start - scroll_x);
+                    draw_x = text_area.x.saturating_add(line_rel_start - scroll_x);
                     local_scroll = 0;
                 }
 
@@ -248,8 +248,8 @@ fn align_x(area: Rect, line_width: usize, alignment: Alignment) -> u16 {
     let line_width_u16 = u16::try_from(line_width).unwrap_or(u16::MAX);
     match alignment {
         Alignment::Left => area.x,
-        Alignment::Center => area.x + area.width.saturating_sub(line_width_u16) / 2,
-        Alignment::Right => area.x + area.width.saturating_sub(line_width_u16),
+        Alignment::Center => area.x.saturating_add(area.width.saturating_sub(line_width_u16) / 2),
+        Alignment::Right => area.x.saturating_add(area.width.saturating_sub(line_width_u16)),
     }
 }
 

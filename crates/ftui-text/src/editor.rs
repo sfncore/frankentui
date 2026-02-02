@@ -401,6 +401,7 @@ impl Editor {
         self.apply_op(&inverse);
         self.redo_stack.push((inverse, self.cursor));
         self.cursor = cursor_before;
+        self.selection = None;
         true
     }
 
@@ -413,6 +414,7 @@ impl Editor {
         self.apply_op(&inverse);
         self.undo_stack.push((inverse, self.cursor));
         self.cursor = cursor_before;
+        self.selection = None;
         // Move cursor to the correct position after redo
         let nav = CursorNavigator::new(&self.rope);
         self.cursor = nav.clamp(self.cursor);

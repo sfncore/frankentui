@@ -278,6 +278,17 @@ fn decode_utf8_char(bytes: &[u8]) -> Option<(char, usize)> {
         codepoint = (codepoint << 6) | (b & 0x3F) as u32;
     }
 
+    // Reject overlong encodings (RFC 3629)
+    let min_codepoint = match expected_len {
+        2 => 0x80,
+        3 => 0x800,
+        4 => 0x1_0000,
+        _ => return None,
+    };
+    if codepoint < min_codepoint {
+        return None;
+    }
+
     // Validate codepoint
     char::from_u32(codepoint).map(|c| (c, expected_len))
 }

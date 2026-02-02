@@ -251,6 +251,9 @@ impl StyleSheet {
     ///
     /// Styles from `other` override styles with the same name in `self`.
     pub fn extend(&self, other: &StyleSheet) {
+        if std::ptr::eq(self, other) {
+            return;
+        }
         let other_styles = other.styles.read().expect("StyleSheet lock poisoned");
         let mut self_styles = self.styles.write().expect("StyleSheet lock poisoned");
 
