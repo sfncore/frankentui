@@ -3,20 +3,20 @@
 Generated: 2026-02-02
 Tool: `cargo llvm-cov` (workspace, all targets)
 Total tests: 2,630 passing
-Overall line coverage: **91.66%**
+Overall line coverage: **89.73%**
 
 ## Per-Crate Coverage Summary
 
 | Crate | Target | Actual (lines) | Status | Key Gaps |
 |-------|--------|----------------|--------|----------|
-| ftui-render | >= 85% | ~96% | PASS | frame.rs (88%), terminal_model.rs (88%) |
-| ftui-core | >= 80% | ~96% | PASS | terminal_session.rs (93%), event.rs (93%) |
-| ftui-style | >= 80% | ~98% | PASS | style.rs (96%) - minor |
-| ftui-text | >= 80% | ~95% | PASS | text.rs (83%), markup.rs (89%) |
-| ftui-layout | >= 75% | ~97% | PASS | debug.rs (95%) - minor |
-| ftui-runtime | >= 75% | ~83% | PASS | **program.rs (34%)** - critical gap |
-| ftui-widgets | >= 70% | ~92% | PASS | block.rs (79%), virtualized.rs (81%) |
-| ftui-extras | >= 60% | N/A | SKIP | Feature-gated; not measured in this run |
+| ftui-render | >= 85% | 95.06% | PASS | frame.rs (88.36%), terminal_model.rs (87.46%) |
+| ftui-core | >= 80% | 94.86% | PASS | terminal_session.rs (92.61%), event.rs (92.72%) |
+| ftui-style | >= 80% | 98.53% | PASS | style.rs (96.64%) - minor |
+| ftui-text | >= 80% | 94.44% | PASS | text.rs (83.90%), markup.rs (88.87%) |
+| ftui-layout | >= 75% | 97.39% | PASS | debug.rs (94.54%) - minor |
+| ftui-runtime | >= 75% | 84.03% | PASS | **program.rs (34.05%)** - critical gap |
+| ftui-widgets | >= 70% | 90.04% | PASS | log_viewer.rs (74.75%), block.rs (78.79%) |
+| ftui-extras | >= 60% | 89.66% | PASS | image.rs (46.46%), pty_capture.rs (74.71%) |
 
 All crates exceed their targets at the aggregate level.
 
@@ -41,49 +41,49 @@ Coverage gap areas:
 that exercise `Model::update()` / `Model::view()` via the simulator. The terminal I/O paths
 (`run()`) are appropriately tested via PTY integration tests instead.
 
-### 2. ftui-widgets/src/block.rs — 78.70% lines (Target: 70%)
+### 2. ftui-widgets/src/block.rs — 78.79% lines (Target: 70%)
 
 Above widget target but below 85%. Uncovered paths include:
 - Complex border configurations
 - Multi-title rendering edge cases
 - Degraded-mode border fallbacks
 
-### 3. ftui-widgets/src/virtualized.rs — 81.01% lines (Target: 70%)
+### 3. ftui-widgets/src/virtualized.rs — 81.10% lines (Target: 70%)
 
 Above widget target. Uncovered paths:
 - Scroll acceleration edge cases
 - Dynamic height measurement fallbacks
 - Virtual viewport boundary conditions
 
-### 4. ftui-widgets/src/input.rs — 84.93% lines (Target: 70%)
+### 4. ftui-widgets/src/input.rs — 83.57% lines (Target: 70%)
 
 Above widget target. Uncovered paths:
 - Multi-codepoint input handling edge cases
 - Clipboard paste integration
 - Cursor movement at boundary conditions
 
-### 5. ftui-widgets/src/log_viewer.rs — 82.72% lines (Target: 70%)
+### 5. ftui-widgets/src/log_viewer.rs — 74.75% lines (Target: 70%)
 
 Above widget target. Uncovered paths:
 - Large log scrollback behavior
 - Markup parsing in log lines
 - Auto-scroll toggle edge cases
 
-### 6. ftui-text/src/text.rs — 83.01% lines (Target: 80%)
+### 6. ftui-text/src/text.rs — 83.90% lines (Target: 80%)
 
 Just above target. Uncovered paths:
 - Some `Display` trait implementations
 - Several `From` conversions
 - Edge cases in `Line` alignment
 
-### 7. ftui-render/src/frame.rs — 88.34% lines (Target: 85%)
+### 7. ftui-render/src/frame.rs — 88.36% lines (Target: 85%)
 
 Above target. Uncovered paths:
 - Hit grid boundary conditions
 - Some cursor save/restore sequences
 - Nested scissor interactions
 
-### 8. ftui-render/src/terminal_model.rs — 88.11% lines (Target: 85%)
+### 8. ftui-render/src/terminal_model.rs — 87.46% lines (Target: 85%)
 
 Above target. Uncovered paths:
 - Some rare ANSI escape sequences
@@ -92,7 +92,7 @@ Above target. Uncovered paths:
 
 ## Module-Level Coverage Detail
 
-### ftui-core (Aggregate: ~96%)
+### ftui-core (Aggregate: ~95%)
 
 | Module | Lines | Missed | Coverage |
 |--------|-------|--------|----------|
@@ -103,54 +103,54 @@ Above target. Uncovered paths:
 | cursor.rs | 159 | 3 | 98.11% |
 | event_coalescer.rs | 364 | 13 | 96.43% |
 | animation.rs | 513 | 22 | 95.71% |
-| input_parser.rs | 885 | 50 | 94.35% |
-| terminal_session.rs | 555 | 38 | 93.15% |
+| input_parser.rs | 885 | 49 | 94.46% |
+| terminal_session.rs | 555 | 41 | 92.61% |
 | event.rs | 426 | 31 | 92.72% |
 | inline_mode.rs | 268 | 21 | 92.16% |
 
-### ftui-render (Aggregate: ~96%)
+### ftui-render (Aggregate: ~95%)
 
 | Module | Lines | Missed | Coverage |
 |--------|-------|--------|----------|
-| diff.rs | 237 | 0 | 100.00% |
+| diff.rs | 244 | 0 | 100.00% |
 | drawing.rs | 438 | 3 | 99.32% |
 | link_registry.rs | 215 | 2 | 99.07% |
 | grapheme_pool.rs | 317 | 3 | 99.05% |
 | headless.rs | 515 | 5 | 99.03% |
-| budget.rs | 449 | 7 | 98.44% |
-| sanitize.rs | 837 | 17 | 97.97% |
-| counting_writer.rs | 220 | 5 | 97.73% |
+| budget.rs | 461 | 15 | 96.75% |
+| sanitize.rs | 845 | 18 | 97.87% |
+| counting_writer.rs | 223 | 5 | 97.76% |
 | ansi.rs | 416 | 13 | 96.88% |
 | buffer.rs | 485 | 20 | 95.88% |
 | cell.rs | 506 | 34 | 93.28% |
-| presenter.rs | 425 | 29 | 93.18% |
-| frame.rs | 523 | 61 | 88.34% |
-| terminal_model.rs | 875 | 104 | 88.11% |
+| presenter.rs | 435 | 32 | 92.64% |
+| frame.rs | 524 | 61 | 88.36% |
+| terminal_model.rs | 877 | 110 | 87.46% |
 
 ### ftui-style (Aggregate: ~98%)
 
 | Module | Lines | Missed | Coverage |
 |--------|-------|--------|----------|
-| color.rs | 381 | 1 | 99.74% |
+| color.rs | 385 | 2 | 99.48% |
 | theme.rs | 611 | 6 | 99.02% |
-| stylesheet.rs | 275 | 3 | 98.91% |
-| style.rs | 357 | 16 | 95.52% |
+| stylesheet.rs | 278 | 4 | 98.56% |
+| style.rs | 357 | 12 | 96.64% |
 
-### ftui-text (Aggregate: ~95%)
+### ftui-text (Aggregate: ~94%)
 
 | Module | Lines | Missed | Coverage |
 |--------|-------|--------|----------|
 | cursor.rs | 588 | 0 | 100.00% |
 | lib.rs | 149 | 0 | 100.00% |
-| width_cache.rs | 267 | 3 | 98.88% |
+| width_cache.rs | 275 | 11 | 96.00% |
 | wrap.rs | 487 | 7 | 98.56% |
 | rope.rs | 414 | 7 | 98.31% |
-| search.rs | 146 | 3 | 97.95% |
+| search.rs | 306 | 16 | 94.77% |
 | view.rs | 432 | 11 | 97.45% |
-| editor.rs | 723 | 26 | 96.40% |
+| editor.rs | 725 | 26 | 96.41% |
 | segment.rs | 545 | 54 | 90.09% |
 | markup.rs | 485 | 54 | 88.87% |
-| text.rs | 559 | 95 | 83.01% |
+| text.rs | 559 | 90 | 83.90% |
 
 ### ftui-layout (Aggregate: ~97%)
 
@@ -160,12 +160,12 @@ Above target. Uncovered paths:
 | grid.rs | 441 | 6 | 98.64% |
 | debug.rs | 476 | 26 | 94.54% |
 
-### ftui-runtime (Aggregate: ~83%)
+### ftui-runtime (Aggregate: ~84%)
 
 | Module | Lines | Missed | Coverage |
 |--------|-------|--------|----------|
-| subscription.rs | 241 | 2 | 99.17% |
-| log_sink.rs | 152 | 1 | 99.34% |
+| subscription.rs | 251 | 2 | 99.20% |
+| log_sink.rs | 156 | 0 | 100.00% |
 | input_macro.rs | 781 | 31 | 96.03% |
 | simulator.rs | 328 | 16 | 95.12% |
 | asciicast.rs | 267 | 19 | 92.88% |
@@ -173,44 +173,45 @@ Above target. Uncovered paths:
 | string_model.rs | 209 | 33 | 84.21% |
 | program.rs | 602 | 397 | **34.05%** |
 
-### ftui-widgets (Aggregate: ~92%)
+### ftui-widgets (Aggregate: ~90%)
 
 | Module | Lines | Missed | Coverage |
 |--------|-------|--------|----------|
 | borders.rs | 208 | 0 | 100.00% |
-| rule.rs | 360 | 1 | 99.72% |
-| padding.rs | 242 | 3 | 98.76% |
-| cached.rs | 329 | 6 | 98.18% |
+| rule.rs | 362 | 1 | 99.72% |
+| padding.rs | 246 | 3 | 98.78% |
+| cached.rs | 328 | 9 | 97.26% |
 | constraint_overlay.rs | 275 | 5 | 98.18% |
 | log_ring.rs | 283 | 6 | 97.88% |
 | group.rs | 180 | 4 | 97.78% |
-| spinner.rs | 251 | 6 | 97.61% |
-| paginator.rs | 245 | 6 | 97.55% |
-| progress.rs | 224 | 6 | 97.32% |
-| table.rs | 446 | 14 | 96.86% |
-| status_line.rs | 346 | 13 | 96.24% |
-| panel.rs | 519 | 21 | 95.95% |
+| spinner.rs | 253 | 6 | 97.63% |
+| paginator.rs | 247 | 6 | 97.57% |
+| progress.rs | 226 | 6 | 97.35% |
+| table.rs | 456 | 14 | 96.93% |
+| status_line.rs | 348 | 13 | 96.26% |
+| panel.rs | 521 | 21 | 95.97% |
 | pretty.rs | 121 | 5 | 95.87% |
-| columns.rs | 236 | 13 | 94.49% |
+| columns.rs | 238 | 13 | 94.54% |
 | timer.rs | 256 | 14 | 94.53% |
 | lib.rs | 224 | 14 | 93.75% |
-| error_boundary.rs | 500 | 31 | 93.80% |
-| paragraph.rs | 329 | 22 | 93.31% |
+| error_boundary.rs | 506 | 31 | 93.87% |
+| paragraph.rs | 331 | 22 | 93.35% |
 | stopwatch.rs | 351 | 24 | 93.16% |
 | layout.rs | 310 | 21 | 93.23% |
-| textarea.rs | 704 | 52 | 92.61% |
-| list.rs | 310 | 22 | 92.90% |
+| textarea.rs | 791 | 137 | 82.68% |
+| list.rs | 313 | 22 | 92.97% |
 | tree.rs | 341 | 29 | 91.50% |
 | help.rs | 313 | 26 | 91.69% |
-| layout_debugger.rs | 181 | 16 | 91.16% |
+| layout_debugger.rs | 187 | 14 | 92.51% |
 | align.rs | 230 | 20 | 91.30% |
 | emoji.rs | 117 | 12 | 89.74% |
 | json_view.rs | 361 | 49 | 86.43% |
-| input.rs | 743 | 112 | 84.93% |
-| log_viewer.rs | 492 | 85 | 82.72% |
-| virtualized.rs | 790 | 150 | 81.01% |
+| input.rs | 761 | 125 | 83.57% |
+| log_viewer.rs | 907 | 229 | 74.75% |
+| virtualized.rs | 799 | 151 | 81.10% |
 | file_picker.rs | 374 | 72 | 80.75% |
-| block.rs | 460 | 98 | 78.70% |
+| block.rs | 462 | 98 | 78.79% |
+
 
 ## Coverage Matrix Checklist Audit
 

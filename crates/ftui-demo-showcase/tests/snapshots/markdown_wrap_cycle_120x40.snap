@@ -1,0 +1,40 @@
+╭────────────────────Markdown Renderer─────────────────────╮╭──────────────────────Style Sampler───────────────────────╮
+│FrankenTUI Markdown Demo                                  ││Bold  Dim  Italic  Underline                              │
+│                                                          ││Strikethrough  Reverse  Blink                             │
+│Typography Showcase                                       ││Dbl-Underline  Curly-Underline  [Hidden]                  │
+│                                                          ││                                                          │
+│This demonstrates the full range of Markdown rendering    ││Error  Success  Warning  Link  Code                       │
+│capabilities built into the framework.                    ││                                                          │
+│                                                          ││                                                          │
+│Inline Styles                                             │╰──────────────────────────────────────────────────────────╯
+│                                                          │────────────────────────────────────────────────────────────
+│You can use bold, italic, strikethrough, and `inline      │╭─────────────────────Unicode Showcase─────────────────────╮
+│code`. Combine them: bold italic, `bold code`, `italic    ││Text                      Type                      Cells │
+│code`.                                                    ││Hello                     ASCII                     5     │
+│                                                          ││????                  CJK                       8     │
+│Links                                                     ││?????                Hiragana                  10    │
+│                                                          ││???                    Emoji                     6     │
+│Visit FrankenTUI for more info.                           ││café                      Latin+accent              4     │
+│                                                          ││α β γ δ                   Greek                     7     │
+│Blockquotes                                               ││→ ← ↑ ↓                   Arrows                    7     │
+│                                                          ││█▓▒░                      Block el.                 4     │
+││ "Any sufficiently advanced technology is                ││                                                          │
+│indistinguishable from magic." │ — Arthur C. Clarke       ││                                                          │
+│                                                          ││                                                          │
+│Code Block                                                ││                                                          │
+│                                                          ││                                                          │
+│  fn main() {                                             │╰──────────────────────────────────────────────────────────╯
+│      println!("Hello, FrankenTUI!");                     │╭─────────────────Wrap: Char | Align: Left─────────────────╮
+│      let tui = FrankenTUI::new()                         ││w: cycle wrap | a: cycle alignment                        │
+│          .with_theme(Theme::dark())                      ││The quick brown fox jumps over the lazy dog. Supercalifrag│
+│          .build();                                       ││ilisticexpialidocious is quite a long word that tests char│
+│      tui.run().unwrap();                                 ││acter-level wrapping behavior. ???? contains CJK chara│
+│  }                                                       ││cters that are double-width. ? Ferris says hello!        │
+│                                                          ││                                                          │
+│Lists                                                     ││                                                          │
+│                                                          ││                                                          │
+│Unordered:                                                ││                                                          │
+│• Styled text rendering                                   ││                                                          │
+│• Unicode-aware wrapping                                  ││                                                          │
+│• Grapheme cluster support                                ││                                                          │
+╰──────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────╯

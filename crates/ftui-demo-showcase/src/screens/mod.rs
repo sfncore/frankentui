@@ -49,6 +49,9 @@ pub trait Screen {
         vec![]
     }
 
+    /// Called on each application tick (100ms interval) with the global tick count.
+    fn tick(&mut self, _tick_count: u64) {}
+
     /// Title shown in the tab bar.
     fn title(&self) -> &'static str;
 

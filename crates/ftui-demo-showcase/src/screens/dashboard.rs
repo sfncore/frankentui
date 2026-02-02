@@ -13,6 +13,12 @@ use super::Screen;
 
 pub struct Dashboard;
 
+impl Default for Dashboard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Dashboard {
     pub fn new() -> Self {
         Self

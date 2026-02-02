@@ -1,0 +1,40 @@
+╭─────Project Tree──────╮╭───────────────Files (15 items)───────────────╮╭────────────────Preview: src─────────────────╮
+│my-app                 ││/home/user/projects/my-app                    ││(no preview available)                       │
+│├── src                ││/src                                          ││                                             │
+││   ├── main.rs        ││/tests                                        ││                                             │
+││   ├── lib.rs         ││/docs                                         ││                                             │
+││   └── models         ││/.git                                         ││                                             │
+││       ├── user.rs    ││/target                                       ││                                             │
+││       └── post.rs    ││ main.rs                        2.0 KB        ││                                             │
+│├── tests              ││ lib.rs                         4.1 KB        ││                                             │
+││   ├── test_app.py    ││ app.py                         1.5 KB        ││                                             │
+││   └── integration.rs ││ test_app.py                    892 B         ││                                             │
+│├── docs               ││ Cargo.toml                     512 B         ││                                             │
+││   ├── README.md      ││ config.toml                    256 B         ││                                             │
+││   └── API.md         ││ package.json                   384 B         ││                                             │
+│├── Cargo.toml         ││ data.json                      10.2 KB       ││                                             │
+│├── package.json       ││ README.md                      3.1 KB        ││                                             │
+│└── .gitignore         ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+│                       ││                                              ││                                             │
+╰───────────────────────╯╰──────────────────────────────────────────────╯╰─────────────────────────────────────────────╯
+src  | Ctrl+←/→: panels | ↑/↓: navigate | h: toggle hidden                                                              

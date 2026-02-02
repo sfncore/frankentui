@@ -130,6 +130,12 @@ pub struct CodeExplorer {
     metadata_json: String,
 }
 
+impl Default for CodeExplorer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodeExplorer {
     pub fn new() -> Self {
         let lines: Vec<&'static str> = SQLITE_SOURCE.lines().collect();

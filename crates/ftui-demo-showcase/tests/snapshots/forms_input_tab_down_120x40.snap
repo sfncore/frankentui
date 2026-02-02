@@ -1,0 +1,40 @@
+╭────────────────────Registration Form─────────────────────╮╭───────────────────────Text Inputs────────────────────────╮
+│Name:         Enter your name...                          ││Search:   Search...                                       │
+│Email:        user@example.com                            ││Password: Password                                        │
+│Role:           Developer                                 ││                                                          │
+│Theme:        (1) Light                                   │╰──────────────────────────────────────────────────────────╯
+│Age:            25                                        │╭───────────────────────Text Editor────────────────────────╮
+│Accept Terms: [ ]                                         ││1  Hello, world!                                          │
+│                                                          ││2                                                         │
+│                                                          ││3  This is a multi-line text editor.                      │
+│                                                          ││4  You can type, select, undo/redo, and more.             │
+│                                                          ││5                                                         │
+│                                                          ││6  Try Shift+Arrow to select text.                        │
+│                                                          ││7  Ctrl+A selects all.                                    │
+│                                                          ││8  Ctrl+Z to undo, Ctrl+Y to redo.                        │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│Tab: next | Enter: submit | Esc: cancel                   ││                                                          │
+│                                                          ││                                                          │
+╰──────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────╯
+Editing: Email (field 2/6)                                                                                              

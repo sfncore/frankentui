@@ -1,0 +1,10 @@
+╭─────Project Tree──────╮╭Files (15 ite╮
+│my-app                 ││/home/user/pr│
+│├── src                ││/src         │
+││   ├── main.rs        ││/tests       │
+││   ├── lib.rs         ││/docs        │
+││   └── models         ││/.git        │
+││       ├── user.rs    ││/target      │
+││       └── post.rs    ││ main.rs     │
+╰───────────────────────╯╰─────────────╯
+src  | Ctrl+←/→: panels | ↑/↓: navigate 

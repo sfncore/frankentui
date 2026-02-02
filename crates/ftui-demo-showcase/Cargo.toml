@@ -31,3 +31,6 @@ ftui-extras = { path = "../ftui-extras", features = [
     "traceback",
 ] }
 serde_json = "1"
+
+[dev-dependencies]
+ftui-harness = { path = "../ftui-harness" }

@@ -68,6 +68,12 @@ pub struct FormsInput {
     status_text: String,
 }
 
+impl Default for FormsInput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FormsInput {
     pub fn new() -> Self {
         let form = Form::new(vec![

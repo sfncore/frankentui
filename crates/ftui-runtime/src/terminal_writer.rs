@@ -355,7 +355,11 @@ impl<W: Write> TerminalWriter<W> {
             write!(self.writer(), "\x1b[{};1H", ui_y_start.saturating_add(1))?;
 
             for i in 0..visible_height {
-                write!(self.writer(), "\x1b[{};1H", ui_y_start.saturating_add(i).saturating_add(1))?;
+                write!(
+                    self.writer(),
+                    "\x1b[{};1H",
+                    ui_y_start.saturating_add(i).saturating_add(1)
+                )?;
                 self.writer().write_all(ERASE_LINE)?;
             }
 
@@ -471,7 +475,12 @@ impl<W: Write> TerminalWriter<W> {
                 continue;
             }
             // Move cursor to run start
-            write!(writer, "\x1b[{};{}H", ui_y_start.saturating_add(run.y).saturating_add(1), run.x0.saturating_add(1))?;
+            write!(
+                writer,
+                "\x1b[{};{}H",
+                ui_y_start.saturating_add(run.y).saturating_add(1),
+                run.x0.saturating_add(1)
+            )?;
 
             // Emit cells in the run
             for x in run.x0..=run.x1 {

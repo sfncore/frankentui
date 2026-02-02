@@ -175,12 +175,12 @@ impl Widget for Paragraph<'_> {
                 // Effective position of this span relative to text_area.x
                 // pos = alignment_offset + span_visual_offset - scroll_x
 
-                let line_rel_start = alignment_offset + span_visual_offset;
+                let line_rel_start = alignment_offset.saturating_add(span_visual_offset);
 
                 // Check visibility
-                if line_rel_start + (span_width as u16) <= scroll_x {
+                if line_rel_start.saturating_add(span_width as u16) <= scroll_x {
                     // Fully scrolled out to the left
-                    span_visual_offset += span_width as u16;
+                    span_visual_offset = span_visual_offset.saturating_add(span_width as u16);
                     continue;
                 }
 
@@ -236,9 +236,9 @@ impl Widget for Paragraph<'_> {
                     );
                 }
 
-                span_visual_offset += span_width as u16;
+                span_visual_offset = span_visual_offset.saturating_add(span_width as u16);
             }
-            y += 1;
+            y = y.saturating_add(1);
             current_visual_line += 1;
         }
     }
@@ -248,8 +248,12 @@ fn align_x(area: Rect, line_width: usize, alignment: Alignment) -> u16 {
     let line_width_u16 = u16::try_from(line_width).unwrap_or(u16::MAX);
     match alignment {
         Alignment::Left => area.x,
-        Alignment::Center => area.x.saturating_add(area.width.saturating_sub(line_width_u16) / 2),
-        Alignment::Right => area.x.saturating_add(area.width.saturating_sub(line_width_u16)),
+        Alignment::Center => area
+            .x
+            .saturating_add(area.width.saturating_sub(line_width_u16) / 2),
+        Alignment::Right => area
+            .x
+            .saturating_add(area.width.saturating_sub(line_width_u16)),
     }
 }
 

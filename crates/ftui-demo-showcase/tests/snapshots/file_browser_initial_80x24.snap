@@ -1,0 +1,24 @@
+╭─────Project Tree──────╮╭───────Files (15 items)───────╮╭────Preview: src─────╮
+│my-app                 ││/home/user/projects/my-app    ││(no preview available│
+│├── src                ││/src                          ││                     │
+││   ├── main.rs        ││/tests                        ││                     │
+││   ├── lib.rs         ││/docs                         ││                     │
+││   └── models         ││/.git                         ││                     │
+││       ├── user.rs    ││/target                       ││                     │
+││       └── post.rs    ││ main.rs                      ││                     │
+│├── tests              ││ lib.rs                       ││                     │
+││   ├── test_app.py    ││ app.py                       ││                     │
+││   └── integration.rs ││ test_app.py                  ││                     │
+│├── docs               ││ Cargo.toml                   ││                     │
+││   ├── README.md      ││ config.toml                  ││                     │
+││   └── API.md         ││ package.json                 ││                     │
+│├── Cargo.toml         ││ data.json                    ││                     │
+│├── package.json       ││ README.md                    ││                     │
+│└── .gitignore         ││                              ││                     │
+│                       ││                              ││                     │
+│                       ││                              ││                     │
+│                       ││                              ││                     │
+│                       ││                              ││                     │
+│                       ││                              ││                     │
+╰───────────────────────╯╰──────────────────────────────╯╰─────────────────────╯
+src  | Ctrl+←/→: panels | ↑/↓: navigate | h: toggle hidden                      

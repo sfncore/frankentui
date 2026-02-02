@@ -102,6 +102,12 @@ pub struct FileBrowser {
     show_hidden: bool,
 }
 
+impl Default for FileBrowser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileBrowser {
     pub fn new() -> Self {
         let entries = simulated_entries();

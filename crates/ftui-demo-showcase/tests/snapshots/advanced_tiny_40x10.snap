@@ -1,0 +1,10 @@
+╭─Error Traceback──╮╭Timers & Spinners─╮
+│── Application Err││Compact timer: 5m0│
+│  File "src/main.r││Clock timer:   02:│
+│   40 │ fn main() ││                  │
+│   41 │     let co│╰──────────────────╯
+│ ❱ 42 │     app::r│╭───System Info────╮
+│   43 │     Ok(())││FrankenTUI Demo Sh│
+│   44 │ }         ││                  │
+╰──────────────────╯╰──────────────────╯
+Tick: 0 | Ctrl+←/→: panels | r: reset | 

@@ -27,16 +27,16 @@ Note: Integration-heavy PTY tests are enforced separately; do not "unit test" ar
 
 | Crate | Target | Actual | Status |
 |-------|--------|--------|--------|
-| ftui-render | >= 85% | ~96% | PASS |
-| ftui-core | >= 80% | ~96% | PASS |
-| ftui-style | >= 80% | ~98% | PASS |
-| ftui-text | >= 80% | ~95% | PASS |
+| ftui-render | >= 85% | ~95% | PASS |
+| ftui-core | >= 80% | ~95% | PASS |
+| ftui-style | >= 80% | ~99% | PASS |
+| ftui-text | >= 80% | ~94% | PASS |
 | ftui-layout | >= 75% | ~97% | PASS |
-| ftui-runtime | >= 75% | ~83% | PASS (program.rs at 34% drags average) |
-| ftui-widgets | >= 70% | ~92% | PASS |
-| ftui-extras | >= 60% | N/A | Not measured (feature-gated) |
+| ftui-runtime | >= 75% | ~84% | PASS (program.rs at 34% drags average) |
+| ftui-widgets | >= 70% | ~90% | PASS |
+| ftui-extras | >= 60% | ~90% | PASS |
 
-## ftui-render (>= 85%) — Actual: ~96%
+## ftui-render (>= 85%) — Actual: ~95%
 Kernel correctness lives here.
 
 ### Cell / CellContent / CellAttrs — 93% lines
@@ -82,7 +82,7 @@ Kernel correctness lives here.
 - sanitize.rs: 98% lines
 - terminal_model.rs: 88% lines (test infrastructure)
 
-## ftui-core (>= 80%) — Actual: ~96%
+## ftui-core (>= 80%) — Actual: ~95%
 
 ### Event types — 93% lines
 - [x] Canonical key/mouse/resize/paste/focus event types are stable
@@ -110,14 +110,14 @@ Kernel correctness lives here.
 - logging.rs: 100% lines
 - mux_passthrough.rs: 100% lines
 
-## ftui-style (>= 80%) — Actual: ~98%
+## ftui-style (>= 80%) — Actual: ~99%
 - [x] Style defaults + builder ergonomics — 96% (style.rs)
 - [x] Deterministic style merge (explicit masks) — 96% (style.rs)
 - [x] Color downgrade (truecolor -> 256 -> 16 -> mono) — 100% (color.rs)
 - [x] Theme presets + semantic slots — 99% (theme.rs)
 - [x] StyleSheet registry + named style composition — 99% (stylesheet.rs)
 
-## ftui-text (>= 80%) — Actual: ~95%
+## ftui-text (>= 80%) — Actual: ~94%
 - [x] Segment system correctness (Cow<str>) — 90% (segment.rs)
 - [x] Width measurement correctness + LRU cache behavior — 99% (width_cache.rs)
 - [x] Grapheme segmentation helpers for wrap/truncate correctness — 99% (wrap.rs)
@@ -139,7 +139,7 @@ Kernel correctness lives here.
 - [x] Grid placement + spanning + named areas — 99% (grid.rs)
 - [x] Min/max sizing invariants — 99% (lib.rs)
 
-## ftui-runtime (>= 75%) — Actual: ~83%
+## ftui-runtime (>= 75%) — Actual: ~84%
 - [x] Deterministic scheduling (update/view loop) — 95% (simulator.rs)
 - [ ] Cmd sequencing + cancellation — **34% (program.rs) CRITICAL GAP**
 - [x] Subscription polling correctness — 99% (subscription.rs)
@@ -157,7 +157,7 @@ The core `Program` runtime loop has only 34% line coverage. The `run()` method r
 a real terminal for event polling. Coverage should be improved via `ProgramSimulator` tests
 for Cmd handling, AppBuilder, and model lifecycle. Terminal I/O paths belong in PTY tests.
 
-## ftui-widgets (>= 70%) — Actual: ~92%
+## ftui-widgets (>= 70%) — Actual: ~90%
 - [x] Harness-essential widgets have snapshot tests (renderable_snapshots.rs: 59+ tests)
 - [x] Widgets: key unit tests (render + layout invariants) (frame_integration.rs + per-module)
 
@@ -196,8 +196,7 @@ for Cmd handling, AppBuilder, and model lifecycle. Terminal I/O paths belong in 
 | file_picker.rs | 81% | Gap: filesystem edge cases |
 | block.rs | 79% | Gap: complex borders, multi-title, degraded mode |
 
-## ftui-extras (>= 60%)
-- [ ] Feature-gated modules include correctness tests — not measured this run
-- [ ] Protocol detection tested (where applicable) — not measured this run
-
-Requires `cargo llvm-cov --all-features` for accurate measurement.
+## ftui-extras (>= 60%) — Actual: ~90%
+- [x] Feature-gated modules include correctness tests (measured with `--all-features`)
+- [ ] `image.rs` remains low coverage (46.46%) — add decode/format/error-path tests
+- [ ] `pty_capture.rs` at 74.71% — add PTY integration scenarios for partial reads

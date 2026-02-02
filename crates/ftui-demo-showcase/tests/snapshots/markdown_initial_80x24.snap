@@ -1,0 +1,24 @@
+╭──────────Markdown Renderer───────────╮╭────────────Style Sampler─────────────╮
+│FrankenTUI Markdown Demo              ││Bold  Dim  Italic  Underline          │
+│                                      ││Strikethrough  Reverse  Blink         │
+│Typography Showcase                   ││Dbl-Underline  Curly-Underline  [Hidde│
+│                                      ││                                      │
+│This demonstrates the full range of   ││Error  Success  Warning  Link  Code   │
+│Markdown rendering capabilities built ││                                      │
+│into the framework.                   ││                                      │
+│                                      │╰──────────────────────────────────────╯
+│Inline Styles                         │────────────────────────────────────────
+│                                      │╭───────────Unicode Showcase───────────╮
+│You can use bold, italic,             ││Text            Type            Cells │
+│strikethrough, and `inline code`.     ││Hello           ASCII           5     │
+│Combine them: bold italic, `bold      ││????        CJK             8     │
+│code`, `italic code`.                 ││?????      Hiragana        10    │
+│                                      ││???          Emoji           6     │
+│Links                                 ││café            Latin+accent    4     │
+│                                      │╰──────────────────────────────────────╯
+│Visit FrankenTUI for more info.       │╭───────Wrap: Word | Align: Left───────╮
+│                                      ││w: cycle wrap | a: cycle alignment    │
+│Blockquotes                           ││The quick brown fox jumps over the    │
+│                                      ││lazy dog.                             │
+││ "Any sufficiently advanced          ││Supercalifragilisticexpialidocious is │
+╰──────────────────────────────────────╯╰──────────────────────────────────────╯

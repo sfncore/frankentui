@@ -1,0 +1,24 @@
+╭───────────Error Traceback────────────╮╭──────────Timers & Spinners───────────╮
+│── Application Error ──               ││Compact timer: 5m0s (0%)              │
+│  File "src/main.rs", line 42, in main││Clock timer:   02:00 (0%)             │
+│   40 │ fn main() -> Result<()> {     ││                                      │
+│   41 │     let config = Config::load(││Spinners:                             │
+│ ❱ 42 │     app::run(config)?;        ││dots        ⠋                         │
+│   43 │     Ok(())                    ││line        |                         │
+│   44 │ }                             ││braille     ⠋                         │
+│  File "src/app.rs", line 128, in run ││Progress: ░░░░░░░░░░░░░░░░░░░░░░░░░░  │
+│   125 │ pub fn run(config: Config) ->││                                      │
+│   126 │     let db = Database::connec││                                      │
+│   127 │     let server = Server::new(│╰──────────────────────────────────────╯
+│ ❱ 128 │     server.listen(config.port│╭─────────────System Info──────────────╮
+│   129 │     Ok(())                   ││FrankenTUI Demo Showcase              │
+│   130 │ }                            ││                                      │
+│  File "src/database.rs", line 56, in ││Framework: ftui (Rust)                │
+│   53 │ pub fn connect(url: &str) -> R││Rendering: 16-byte Cell model         │
+│   54 │     let pool = Pool::builder()││Color: 24-bit true color (RGB)        │
+│   55 │         .max_size(10)         ││Input: Kitty keyboard protocol        │
+│ ❱ 56 │         .build(url)?;         ││                                      │
+│   57 │     Ok(Self { pool })         ││Features demonstrated:                │
+│   58 │ }                             ││  - Traceback error display           │
+╰──────────────────────────────────────╯╰──────────────────────────────────────╯
+Tick: 0 | Ctrl+←/→: panels | r: reset | Space: pause/resume                     

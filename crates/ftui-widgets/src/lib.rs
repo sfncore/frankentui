@@ -351,7 +351,7 @@ pub(crate) fn draw_text_span(
         if w == 0 {
             continue;
         }
-        if x + w as u16 > max_x {
+        if x.saturating_add(w as u16) > max_x {
             break;
         }
 
@@ -412,7 +412,7 @@ pub(crate) fn draw_text_span_scrolled(
         0
     };
 
-    let mut visual_pos = 0;
+    let mut visual_pos: u16 = 0;
 
     for grapheme in content.graphemes(true) {
         if x >= max_x {
@@ -423,7 +423,7 @@ pub(crate) fn draw_text_span_scrolled(
             continue;
         }
 
-        let next_visual_pos = visual_pos + w as u16;
+        let next_visual_pos = visual_pos.saturating_add(w as u16);
 
         // Check if this grapheme is visible
         if next_visual_pos <= scroll_x {
@@ -439,7 +439,7 @@ pub(crate) fn draw_text_span_scrolled(
             continue;
         }
 
-        if x + w as u16 > max_x {
+        if x.saturating_add(w as u16) > max_x {
             break;
         }
 

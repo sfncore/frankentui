@@ -254,7 +254,7 @@ impl Flex {
                     if !sizes.is_empty() {
                         let slots = sizes.len() as u16 * 2;
                         let unit = leftover / slots;
-                        current_pos = current_pos.saturating_add(unit * 2);
+                        current_pos = current_pos.saturating_add(unit.saturating_mul(2));
                     }
                 }
                 _ => {}
@@ -282,7 +282,9 @@ pub(crate) fn solve_constraints(constraints: &[Constraint], available_size: u16)
                 remaining -= size;
             }
             Constraint::Percentage(p) => {
-                let size = (available_size as f32 * p / 100.0).round() as u16;
+                let size = (available_size as f32 * p / 100.0)
+                    .round()
+                    .min(u16::MAX as f32) as u16;
                 let size = min(size, remaining);
                 sizes[i] = size;
                 remaining -= size;

@@ -62,6 +62,12 @@ pub struct AdvancedFeatures {
     tick_count: u64,
 }
 
+impl Default for AdvancedFeatures {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AdvancedFeatures {
     pub fn new() -> Self {
         let mut timer_compact = Timer::new(Duration::from_secs(300)).format(DisplayFormat::Compact);

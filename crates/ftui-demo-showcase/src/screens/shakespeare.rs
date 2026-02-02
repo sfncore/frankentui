@@ -52,6 +52,12 @@ pub struct Shakespeare {
     viewport_height: u16,
 }
 
+impl Default for Shakespeare {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Shakespeare {
     pub fn new() -> Self {
         let lines: Vec<&'static str> = SHAKESPEARE_TEXT.lines().collect();

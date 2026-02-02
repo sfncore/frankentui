@@ -62,6 +62,12 @@ pub struct DataViz {
     bar_horizontal: bool,
 }
 
+impl Default for DataViz {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DataViz {
     pub fn new() -> Self {
         let mut chart_data = ChartData::default();

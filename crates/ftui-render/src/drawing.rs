@@ -180,7 +180,12 @@ impl Draw for Buffer {
 
         // Right (excluding corners)
         if rect.width > 1 && rect.height > 2 {
-            self.draw_vertical_line(rect.right().saturating_sub(1), rect.y.saturating_add(1), rect.height - 2, cell);
+            self.draw_vertical_line(
+                rect.right().saturating_sub(1),
+                rect.y.saturating_add(1),
+                rect.height - 2,
+                cell,
+            );
         }
     }
 
@@ -280,11 +285,19 @@ impl Draw for Buffer {
         self.set(rect.left(), rect.top(), make_cell(chars.top_left));
 
         if rect.width > 1 {
-            self.set(rect.right().saturating_sub(1), rect.top(), make_cell(chars.top_right));
+            self.set(
+                rect.right().saturating_sub(1),
+                rect.top(),
+                make_cell(chars.top_right),
+            );
         }
 
         if rect.height > 1 {
-            self.set(rect.left(), rect.bottom().saturating_sub(1), make_cell(chars.bottom_left));
+            self.set(
+                rect.left(),
+                rect.bottom().saturating_sub(1),
+                make_cell(chars.bottom_left),
+            );
         }
 
         if rect.width > 1 && rect.height > 1 {
@@ -303,7 +316,12 @@ impl Draw for Buffer {
 
         // Fill interior first
         if rect.width > 2 && rect.height > 2 {
-            let inner = Rect::new(rect.x.saturating_add(1), rect.y.saturating_add(1), rect.width - 2, rect.height - 2);
+            let inner = Rect::new(
+                rect.x.saturating_add(1),
+                rect.y.saturating_add(1),
+                rect.width - 2,
+                rect.height - 2,
+            );
             self.fill(inner, fill_cell);
         }
 

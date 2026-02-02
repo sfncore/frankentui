@@ -33,6 +33,12 @@ pub struct Performance {
     tick_count: u64,
 }
 
+impl Default for Performance {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Performance {
     pub fn new() -> Self {
         let items: Vec<String> = (0..TOTAL_ITEMS)

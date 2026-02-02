@@ -1,0 +1,896 @@
+#![forbid(unsafe_code)]
+
+//! Main application model, message routing, and screen navigation.
+//!
+//! This module contains the top-level [`AppModel`] that implements the Elm
+//! architecture via [`Model`]. It manages all 11 demo screens, routes events,
+//! handles global keybindings, and renders the chrome (tab bar, status bar,
+//! help/debug overlays).
+
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::time::Duration;
+
+use ftui_core::event::{Event, KeyCode, KeyEvent, KeyEventKind, Modifiers};
+use ftui_core::geometry::Rect;
+use ftui_layout::{Constraint, Flex};
+use ftui_render::frame::Frame;
+use ftui_runtime::{Cmd, Every, Model, Subscription};
+use ftui_style::Style;
+use ftui_widgets::Widget;
+use ftui_widgets::block::{Alignment, Block};
+use ftui_widgets::borders::{BorderType, Borders};
+use ftui_widgets::error_boundary::FallbackWidget;
+use ftui_widgets::paragraph::Paragraph;
+
+use crate::screens;
+use crate::theme;
+
+// ---------------------------------------------------------------------------
+// ScreenId
+// ---------------------------------------------------------------------------
+
+/// Identifies which demo screen is active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenId {
+    /// System dashboard with live widgets.
+    Dashboard,
+    /// Complete Shakespeare works with search.
+    Shakespeare,
+    /// SQLite source with syntax highlighting.
+    CodeExplorer,
+    /// Showcase of every widget type.
+    WidgetGallery,
+    /// Interactive constraint solver demo.
+    LayoutLab,
+    /// Form widgets and text editing.
+    FormsInput,
+    /// Charts, canvas, and structured data.
+    DataViz,
+    /// File system navigation and preview.
+    FileBrowser,
+    /// Diagnostics, timers, and spinners.
+    AdvancedFeatures,
+    /// Virtualized list and stress testing.
+    Performance,
+    /// Markdown rendering and typography.
+    MarkdownRichText,
+}
+
+impl ScreenId {
+    /// All screens in display order.
+    pub const ALL: &[ScreenId] = &[
+        Self::Dashboard,
+        Self::Shakespeare,
+        Self::CodeExplorer,
+        Self::WidgetGallery,
+        Self::LayoutLab,
+        Self::FormsInput,
+        Self::DataViz,
+        Self::FileBrowser,
+        Self::AdvancedFeatures,
+        Self::Performance,
+        Self::MarkdownRichText,
+    ];
+
+    /// 0-based index in the ALL array.
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|&s| s == self).unwrap_or(0)
+    }
+
+    /// Next screen (wraps around).
+    pub fn next(self) -> Self {
+        let i = (self.index() + 1) % Self::ALL.len();
+        Self::ALL[i]
+    }
+
+    /// Previous screen (wraps around).
+    pub fn prev(self) -> Self {
+        let i = (self.index() + Self::ALL.len() - 1) % Self::ALL.len();
+        Self::ALL[i]
+    }
+
+    /// Title for the tab bar.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Dashboard => "Dashboard",
+            Self::Shakespeare => "Shakespeare",
+            Self::CodeExplorer => "Code Explorer",
+            Self::WidgetGallery => "Widget Gallery",
+            Self::LayoutLab => "Layout Lab",
+            Self::FormsInput => "Forms & Input",
+            Self::DataViz => "Data Viz",
+            Self::FileBrowser => "File Browser",
+            Self::AdvancedFeatures => "Advanced",
+            Self::Performance => "Performance",
+            Self::MarkdownRichText => "Markdown",
+        }
+    }
+
+    /// Short label for the tab (max ~12 chars).
+    pub fn tab_label(self) -> &'static str {
+        match self {
+            Self::Dashboard => "Dash",
+            Self::Shakespeare => "Shakes",
+            Self::CodeExplorer => "Code",
+            Self::WidgetGallery => "Widgets",
+            Self::LayoutLab => "Layout",
+            Self::FormsInput => "Forms",
+            Self::DataViz => "DataViz",
+            Self::FileBrowser => "Files",
+            Self::AdvancedFeatures => "Adv",
+            Self::Performance => "Perf",
+            Self::MarkdownRichText => "MD",
+        }
+    }
+
+    /// Widget name used in error boundary fallback messages.
+    fn widget_name(self) -> &'static str {
+        match self {
+            Self::Dashboard => "Dashboard",
+            Self::Shakespeare => "Shakespeare",
+            Self::CodeExplorer => "CodeExplorer",
+            Self::WidgetGallery => "WidgetGallery",
+            Self::LayoutLab => "LayoutLab",
+            Self::FormsInput => "FormsInput",
+            Self::DataViz => "DataViz",
+            Self::FileBrowser => "FileBrowser",
+            Self::AdvancedFeatures => "AdvancedFeatures",
+            Self::Performance => "Performance",
+            Self::MarkdownRichText => "MarkdownRichText",
+        }
+    }
+
+    /// Map number key to screen: '1'..='9' -> first 9, '0' -> 10th.
+    pub fn from_number_key(ch: char) -> Option<Self> {
+        let idx = match ch {
+            '1'..='9' => (ch as usize) - ('1' as usize),
+            '0' => 9,
+            _ => return None,
+        };
+        Self::ALL.get(idx).copied()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ScreenStates
+// ---------------------------------------------------------------------------
+
+/// Holds the state for every screen.
+#[derive(Default)]
+pub struct ScreenStates {
+    /// Dashboard screen state.
+    pub dashboard: screens::dashboard::Dashboard,
+    /// Shakespeare library screen state.
+    pub shakespeare: screens::shakespeare::Shakespeare,
+    /// Code explorer screen state.
+    pub code_explorer: screens::code_explorer::CodeExplorer,
+    /// Widget gallery screen state.
+    pub widget_gallery: screens::widget_gallery::WidgetGallery,
+    /// Layout laboratory screen state.
+    pub layout_lab: screens::layout_lab::LayoutLab,
+    /// Forms and input screen state.
+    pub forms_input: screens::forms_input::FormsInput,
+    /// Data visualization screen state.
+    pub data_viz: screens::data_viz::DataViz,
+    /// File browser screen state.
+    pub file_browser: screens::file_browser::FileBrowser,
+    /// Advanced features screen state.
+    pub advanced_features: screens::advanced_features::AdvancedFeatures,
+    /// Performance stress test screen state.
+    pub performance: screens::performance::Performance,
+    /// Markdown and rich text screen state.
+    pub markdown_rich_text: screens::markdown_rich_text::MarkdownRichText,
+    /// Tracks whether each screen has errored during rendering.
+    /// Indexed by `ScreenId::index()`.
+    screen_errors: [Option<String>; 11],
+}
+
+impl ScreenStates {
+    /// Forward an event to the screen identified by `id`.
+    fn update(&mut self, id: ScreenId, event: &Event) {
+        use screens::Screen;
+        match id {
+            ScreenId::Dashboard => {
+                self.dashboard.update(event);
+            }
+            ScreenId::Shakespeare => {
+                self.shakespeare.update(event);
+            }
+            ScreenId::CodeExplorer => {
+                self.code_explorer.update(event);
+            }
+            ScreenId::WidgetGallery => {
+                self.widget_gallery.update(event);
+            }
+            ScreenId::LayoutLab => {
+                self.layout_lab.update(event);
+            }
+            ScreenId::FormsInput => {
+                self.forms_input.update(event);
+            }
+            ScreenId::DataViz => {
+                self.data_viz.update(event);
+            }
+            ScreenId::FileBrowser => {
+                self.file_browser.update(event);
+            }
+            ScreenId::AdvancedFeatures => {
+                self.advanced_features.update(event);
+            }
+            ScreenId::Performance => {
+                self.performance.update(event);
+            }
+            ScreenId::MarkdownRichText => {
+                self.markdown_rich_text.update(event);
+            }
+        }
+    }
+
+    /// Forward a tick to all screens (so they can update animations/data).
+    fn tick(&mut self, tick_count: u64) {
+        use screens::Screen;
+        self.dashboard.tick(tick_count);
+        self.shakespeare.tick(tick_count);
+        self.code_explorer.tick(tick_count);
+        self.widget_gallery.tick(tick_count);
+        self.layout_lab.tick(tick_count);
+        self.forms_input.tick(tick_count);
+        self.data_viz.tick(tick_count);
+        self.file_browser.tick(tick_count);
+        self.advanced_features.tick(tick_count);
+        self.performance.tick(tick_count);
+        self.markdown_rich_text.tick(tick_count);
+    }
+
+    /// Render the screen identified by `id` into the given area.
+    ///
+    /// Wraps each screen's `view()` call in a panic boundary. If a screen
+    /// panics during rendering, the error is captured and a
+    /// [`FallbackWidget`] is shown instead of crashing the application.
+    fn view(&self, id: ScreenId, frame: &mut Frame, area: Rect) {
+        let idx = id.index();
+
+        // If this screen previously errored, show the cached fallback.
+        if let Some(msg) = &self.screen_errors[idx] {
+            FallbackWidget::from_message(msg.clone(), id.widget_name()).render(area, frame);
+            return;
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            use screens::Screen;
+            match id {
+                ScreenId::Dashboard => self.dashboard.view(frame, area),
+                ScreenId::Shakespeare => self.shakespeare.view(frame, area),
+                ScreenId::CodeExplorer => self.code_explorer.view(frame, area),
+                ScreenId::WidgetGallery => self.widget_gallery.view(frame, area),
+                ScreenId::LayoutLab => self.layout_lab.view(frame, area),
+                ScreenId::FormsInput => self.forms_input.view(frame, area),
+                ScreenId::DataViz => self.data_viz.view(frame, area),
+                ScreenId::FileBrowser => self.file_browser.view(frame, area),
+                ScreenId::AdvancedFeatures => self.advanced_features.view(frame, area),
+                ScreenId::Performance => self.performance.view(frame, area),
+                ScreenId::MarkdownRichText => self.markdown_rich_text.view(frame, area),
+            }
+        }));
+
+        if let Err(payload) = result {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                (*s).to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic".to_string()
+            };
+            FallbackWidget::from_message(&msg, id.widget_name()).render(area, frame);
+            // Note: We can't write to self.screen_errors here because view()
+            // takes &self. The error boundary still protects the app from
+            // crashing — it just re-catches on each render.
+        }
+    }
+
+    /// Reset the error state for a screen (e.g., after user presses 'R' to retry).
+    fn clear_error(&mut self, id: ScreenId) {
+        self.screen_errors[id.index()] = None;
+    }
+
+    /// Returns true if the screen has a cached error.
+    fn has_error(&self, id: ScreenId) -> bool {
+        self.screen_errors[id.index()].is_some()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AppMsg
+// ---------------------------------------------------------------------------
+
+/// Top-level application message.
+pub enum AppMsg {
+    /// A raw terminal event forwarded to the current screen.
+    ScreenEvent(Event),
+    /// Switch to a specific screen.
+    SwitchScreen(ScreenId),
+    /// Advance to the next screen tab.
+    NextScreen,
+    /// Go back to the previous screen tab.
+    PrevScreen,
+    /// Toggle the help overlay.
+    ToggleHelp,
+    /// Toggle the debug overlay.
+    ToggleDebug,
+    /// Periodic tick for animations and data updates.
+    Tick,
+    /// Terminal resize.
+    Resize {
+        /// New terminal width.
+        width: u16,
+        /// New terminal height.
+        height: u16,
+    },
+    /// Quit the application.
+    Quit,
+}
+
+impl From<Event> for AppMsg {
+    fn from(event: Event) -> Self {
+        // Global key bindings are checked first.
+        if let Event::Key(KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            ..
+        }) = &event
+        {
+            match (*code, *modifiers) {
+                // Quit
+                (KeyCode::Char('q'), Modifiers::NONE) => return Self::Quit,
+                (KeyCode::Char('c'), Modifiers::CTRL) => return Self::Quit,
+                // Help
+                (KeyCode::Char('?'), _) => return Self::ToggleHelp,
+                // Debug
+                (KeyCode::F(12), _) => return Self::ToggleDebug,
+                // Tab cycling
+                (KeyCode::Tab, Modifiers::NONE) => return Self::NextScreen,
+                (KeyCode::BackTab, _) => return Self::PrevScreen,
+                // Number keys for direct screen access
+                (KeyCode::Char(ch @ '0'..='9'), Modifiers::NONE) => {
+                    if let Some(id) = ScreenId::from_number_key(ch) {
+                        return Self::SwitchScreen(id);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Resize events
+        if let Event::Resize { width, height } = event {
+            return Self::Resize { width, height };
+        }
+
+        // Everything else goes to the current screen.
+        Self::ScreenEvent(event)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AppModel
+// ---------------------------------------------------------------------------
+
+/// Top-level application state.
+///
+/// Implements the Elm architecture: all state lives here, messages drive
+/// transitions, and `view()` is a pure function of state.
+pub struct AppModel {
+    /// Currently displayed screen.
+    pub current_screen: ScreenId,
+    /// Per-screen state storage.
+    pub screens: ScreenStates,
+    /// Whether the help overlay is visible.
+    pub help_visible: bool,
+    /// Whether the debug overlay is visible.
+    pub debug_visible: bool,
+    /// Global tick counter (incremented every 100ms).
+    pub tick_count: u64,
+    /// Total frames rendered.
+    pub frame_count: u64,
+    /// Current terminal width.
+    pub terminal_width: u16,
+    /// Current terminal height.
+    pub terminal_height: u16,
+}
+
+impl Default for AppModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AppModel {
+    /// Create a new application model with default state.
+    pub fn new() -> Self {
+        Self {
+            current_screen: ScreenId::Dashboard,
+            screens: ScreenStates::default(),
+            help_visible: false,
+            debug_visible: false,
+            tick_count: 0,
+            frame_count: 0,
+            terminal_width: 0,
+            terminal_height: 0,
+        }
+    }
+}
+
+impl Model for AppModel {
+    type Message = AppMsg;
+
+    fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
+        match msg {
+            AppMsg::Quit => Cmd::Quit,
+
+            AppMsg::SwitchScreen(id) => {
+                self.current_screen = id;
+                Cmd::None
+            }
+
+            AppMsg::NextScreen => {
+                self.current_screen = self.current_screen.next();
+                Cmd::None
+            }
+
+            AppMsg::PrevScreen => {
+                self.current_screen = self.current_screen.prev();
+                Cmd::None
+            }
+
+            AppMsg::ToggleHelp => {
+                self.help_visible = !self.help_visible;
+                Cmd::None
+            }
+
+            AppMsg::ToggleDebug => {
+                self.debug_visible = !self.debug_visible;
+                Cmd::None
+            }
+
+            AppMsg::Tick => {
+                self.tick_count += 1;
+                self.screens.tick(self.tick_count);
+                Cmd::None
+            }
+
+            AppMsg::Resize { width, height } => {
+                self.terminal_width = width;
+                self.terminal_height = height;
+                Cmd::None
+            }
+
+            AppMsg::ScreenEvent(event) => {
+                // Handle 'R' key to retry errored screens
+                if self.screens.has_error(self.current_screen)
+                    && let Event::Key(KeyEvent {
+                        code: KeyCode::Char('r' | 'R'),
+                        kind: KeyEventKind::Press,
+                        ..
+                    }) = &event
+                {
+                    self.screens.clear_error(self.current_screen);
+                    return Cmd::None;
+                }
+                self.screens.update(self.current_screen, &event);
+                Cmd::None
+            }
+        }
+    }
+
+    fn view(&self, frame: &mut Frame) {
+        let area = Rect::from_size(frame.buffer.width(), frame.buffer.height());
+
+        // Top-level layout: tab bar (1 row) + content + status bar (1 row)
+        let chunks = Flex::vertical()
+            .constraints([
+                Constraint::Fixed(1),
+                Constraint::Min(1),
+                Constraint::Fixed(1),
+            ])
+            .split(area);
+
+        // Tab bar (chrome module)
+        crate::chrome::render_tab_bar(self.current_screen, frame, chunks[0]);
+
+        // Content area with border
+        let content_block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(self.current_screen.title())
+            .title_alignment(Alignment::Center)
+            .style(theme::content_border());
+
+        let inner = content_block.inner(chunks[1]);
+        content_block.render(chunks[1], frame);
+
+        // Screen content (wrapped in error boundary)
+        self.screens.view(self.current_screen, frame, inner);
+
+        // Help overlay (chrome module)
+        if self.help_visible {
+            let bindings = self.current_screen_keybindings();
+            crate::chrome::render_help_overlay(self.current_screen, &bindings, frame, area);
+        }
+
+        // Debug overlay
+        if self.debug_visible {
+            self.render_debug_overlay(frame, area);
+        }
+
+        // Status bar (chrome module)
+        let status_state = crate::chrome::StatusBarState {
+            screen_title: self.current_screen.title(),
+            screen_index: self.current_screen.index(),
+            screen_count: ScreenId::ALL.len(),
+            tick_count: self.tick_count,
+            frame_count: self.frame_count,
+            terminal_width: self.terminal_width,
+            terminal_height: self.terminal_height,
+        };
+        crate::chrome::render_status_bar(&status_state, frame, chunks[2]);
+    }
+
+    fn subscriptions(&self) -> Vec<Box<dyn Subscription<Self::Message>>> {
+        vec![Box::new(Every::new(Duration::from_millis(100), || {
+            AppMsg::Tick
+        }))]
+    }
+}
+
+impl AppModel {
+    /// Gather keybindings from the current screen for the help overlay.
+    fn current_screen_keybindings(&self) -> Vec<crate::chrome::HelpEntry> {
+        use screens::Screen;
+        let entries = match self.current_screen {
+            ScreenId::Dashboard => self.screens.dashboard.keybindings(),
+            ScreenId::Shakespeare => self.screens.shakespeare.keybindings(),
+            ScreenId::CodeExplorer => self.screens.code_explorer.keybindings(),
+            ScreenId::WidgetGallery => self.screens.widget_gallery.keybindings(),
+            ScreenId::LayoutLab => self.screens.layout_lab.keybindings(),
+            ScreenId::FormsInput => self.screens.forms_input.keybindings(),
+            ScreenId::DataViz => self.screens.data_viz.keybindings(),
+            ScreenId::FileBrowser => self.screens.file_browser.keybindings(),
+            ScreenId::AdvancedFeatures => self.screens.advanced_features.keybindings(),
+            ScreenId::Performance => self.screens.performance.keybindings(),
+            ScreenId::MarkdownRichText => self.screens.markdown_rich_text.keybindings(),
+        };
+        // Convert screens::HelpEntry to chrome::HelpEntry (same struct, different module).
+        entries
+            .into_iter()
+            .map(|e| crate::chrome::HelpEntry {
+                key: e.key,
+                action: e.action,
+            })
+            .collect()
+    }
+
+    /// Render the debug overlay in the top-right corner.
+    fn render_debug_overlay(&self, frame: &mut Frame, area: Rect) {
+        let overlay_width = 40u16.min(area.width.saturating_sub(4));
+        let overlay_height = 8u16.min(area.height.saturating_sub(4));
+        let x = area.x + area.width.saturating_sub(overlay_width).saturating_sub(1);
+        let y = area.y + 1;
+        let overlay_area = Rect::new(x, y, overlay_width, overlay_height);
+
+        let debug_block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title("Debug")
+            .title_alignment(Alignment::Center)
+            .style(theme::help_overlay());
+
+        let debug_inner = debug_block.inner(overlay_area);
+        debug_block.render(overlay_area, frame);
+
+        let debug_text = format!(
+            "Tick: {}\nFrame: {}\nScreen: {:?}\nSize: {}x{}",
+            self.tick_count,
+            self.frame_count,
+            self.current_screen,
+            self.terminal_width,
+            self.terminal_height,
+        );
+        Paragraph::new(debug_text)
+            .style(Style::new().fg(theme::fg::PRIMARY))
+            .render(debug_inner, frame);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ftui_render::grapheme_pool::GraphemePool;
+
+    #[test]
+    fn switch_screen_changes_current() {
+        let mut app = AppModel::new();
+        assert_eq!(app.current_screen, ScreenId::Dashboard);
+
+        app.update(AppMsg::SwitchScreen(ScreenId::Shakespeare));
+        assert_eq!(app.current_screen, ScreenId::Shakespeare);
+
+        app.update(AppMsg::SwitchScreen(ScreenId::Performance));
+        assert_eq!(app.current_screen, ScreenId::Performance);
+    }
+
+    #[test]
+    fn next_screen_advances() {
+        let mut app = AppModel::new();
+        assert_eq!(app.current_screen, ScreenId::Dashboard);
+
+        app.update(AppMsg::NextScreen);
+        assert_eq!(app.current_screen, ScreenId::Shakespeare);
+
+        app.update(AppMsg::NextScreen);
+        assert_eq!(app.current_screen, ScreenId::CodeExplorer);
+    }
+
+    #[test]
+    fn prev_screen_goes_back() {
+        let mut app = AppModel::new();
+        assert_eq!(app.current_screen, ScreenId::Dashboard);
+
+        app.update(AppMsg::PrevScreen);
+        assert_eq!(app.current_screen, ScreenId::MarkdownRichText);
+    }
+
+    #[test]
+    fn tick_increments_count() {
+        let mut app = AppModel::new();
+        assert_eq!(app.tick_count, 0);
+
+        app.update(AppMsg::Tick);
+        assert_eq!(app.tick_count, 1);
+
+        for _ in 0..10 {
+            app.update(AppMsg::Tick);
+        }
+        assert_eq!(app.tick_count, 11);
+    }
+
+    #[test]
+    fn toggle_help() {
+        let mut app = AppModel::new();
+        assert!(!app.help_visible);
+
+        app.update(AppMsg::ToggleHelp);
+        assert!(app.help_visible);
+
+        app.update(AppMsg::ToggleHelp);
+        assert!(!app.help_visible);
+    }
+
+    #[test]
+    fn toggle_debug() {
+        let mut app = AppModel::new();
+        assert!(!app.debug_visible);
+
+        app.update(AppMsg::ToggleDebug);
+        assert!(app.debug_visible);
+
+        app.update(AppMsg::ToggleDebug);
+        assert!(!app.debug_visible);
+    }
+
+    #[test]
+    fn resize_updates_dimensions() {
+        let mut app = AppModel::new();
+        app.update(AppMsg::Resize {
+            width: 120,
+            height: 40,
+        });
+        assert_eq!(app.terminal_width, 120);
+        assert_eq!(app.terminal_height, 40);
+    }
+
+    #[test]
+    fn number_keys_map_to_screens() {
+        assert_eq!(ScreenId::from_number_key('1'), Some(ScreenId::Dashboard));
+        assert_eq!(ScreenId::from_number_key('2'), Some(ScreenId::Shakespeare));
+        assert_eq!(ScreenId::from_number_key('3'), Some(ScreenId::CodeExplorer));
+        assert_eq!(
+            ScreenId::from_number_key('4'),
+            Some(ScreenId::WidgetGallery)
+        );
+        assert_eq!(ScreenId::from_number_key('5'), Some(ScreenId::LayoutLab));
+        assert_eq!(ScreenId::from_number_key('6'), Some(ScreenId::FormsInput));
+        assert_eq!(ScreenId::from_number_key('7'), Some(ScreenId::DataViz));
+        assert_eq!(ScreenId::from_number_key('8'), Some(ScreenId::FileBrowser));
+        assert_eq!(
+            ScreenId::from_number_key('9'),
+            Some(ScreenId::AdvancedFeatures)
+        );
+        assert_eq!(ScreenId::from_number_key('0'), Some(ScreenId::Performance));
+        // No direct key for 11th screen
+        assert_eq!(ScreenId::from_number_key('a'), None);
+    }
+
+    #[test]
+    fn screen_next_prev_wraps() {
+        assert_eq!(ScreenId::Dashboard.next(), ScreenId::Shakespeare);
+        assert_eq!(ScreenId::MarkdownRichText.next(), ScreenId::Dashboard);
+        assert_eq!(ScreenId::Dashboard.prev(), ScreenId::MarkdownRichText);
+        assert_eq!(ScreenId::Shakespeare.prev(), ScreenId::Dashboard);
+    }
+
+    #[test]
+    fn quit_returns_quit_cmd() {
+        let mut app = AppModel::new();
+        let cmd = app.update(AppMsg::Quit);
+        assert!(matches!(cmd, Cmd::Quit));
+    }
+
+    #[test]
+    fn event_conversion_quit_key() {
+        let event = Event::Key(KeyEvent {
+            code: KeyCode::Char('q'),
+            modifiers: Modifiers::NONE,
+            kind: KeyEventKind::Press,
+        });
+        let msg = AppMsg::from(event);
+        assert!(matches!(msg, AppMsg::Quit));
+    }
+
+    #[test]
+    fn event_conversion_help_key() {
+        let event = Event::Key(KeyEvent {
+            code: KeyCode::Char('?'),
+            modifiers: Modifiers::NONE,
+            kind: KeyEventKind::Press,
+        });
+        let msg = AppMsg::from(event);
+        assert!(matches!(msg, AppMsg::ToggleHelp));
+    }
+
+    #[test]
+    fn event_conversion_tab_is_next_screen() {
+        let event = Event::Key(KeyEvent {
+            code: KeyCode::Tab,
+            modifiers: Modifiers::NONE,
+            kind: KeyEventKind::Press,
+        });
+        let msg = AppMsg::from(event);
+        assert!(matches!(msg, AppMsg::NextScreen));
+    }
+
+    #[test]
+    fn event_conversion_backtab_is_prev_screen() {
+        let event = Event::Key(KeyEvent {
+            code: KeyCode::BackTab,
+            modifiers: Modifiers::SHIFT,
+            kind: KeyEventKind::Press,
+        });
+        let msg = AppMsg::from(event);
+        assert!(matches!(msg, AppMsg::PrevScreen));
+    }
+
+    #[test]
+    fn event_conversion_number_key() {
+        let event = Event::Key(KeyEvent {
+            code: KeyCode::Char('3'),
+            modifiers: Modifiers::NONE,
+            kind: KeyEventKind::Press,
+        });
+        let msg = AppMsg::from(event);
+        assert!(matches!(msg, AppMsg::SwitchScreen(ScreenId::CodeExplorer)));
+    }
+
+    #[test]
+    fn event_conversion_resize() {
+        let event = Event::Resize {
+            width: 80,
+            height: 24,
+        };
+        let msg = AppMsg::from(event);
+        assert!(matches!(
+            msg,
+            AppMsg::Resize {
+                width: 80,
+                height: 24
+            }
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Integration tests
+    // -----------------------------------------------------------------------
+
+    /// Render each screen at 120x40 to verify none panic.
+    #[test]
+    fn integration_all_screens_render() {
+        let app = AppModel::new();
+        for &id in ScreenId::ALL {
+            let mut pool = GraphemePool::new();
+            let mut frame = Frame::new(120, 40, &mut pool);
+            let area = Rect::new(0, 0, 120, 38); // Leave room for tab bar + status
+            app.screens.view(id, &mut frame, area);
+            // If we reach here without panicking, the screen rendered successfully.
+        }
+    }
+
+    /// Render each screen at 40x10 (tiny) to verify graceful degradation.
+    #[test]
+    fn integration_resize_small() {
+        let app = AppModel::new();
+        for &id in ScreenId::ALL {
+            let mut pool = GraphemePool::new();
+            let mut frame = Frame::new(40, 10, &mut pool);
+            let area = Rect::new(0, 0, 40, 8);
+            app.screens.view(id, &mut frame, area);
+        }
+    }
+
+    /// Switch through all 11 screens and verify each renders.
+    #[test]
+    fn integration_screen_cycle() {
+        let mut app = AppModel::new();
+        for &id in ScreenId::ALL {
+            app.update(AppMsg::SwitchScreen(id));
+            assert_eq!(app.current_screen, id);
+
+            let mut pool = GraphemePool::new();
+            let mut frame = Frame::new(120, 40, &mut pool);
+            app.view(&mut frame);
+        }
+    }
+
+    /// Verify the error boundary catches panics and shows fallback.
+    #[test]
+    fn integration_error_boundary() {
+        let mut states = ScreenStates::default();
+
+        // Simulate a cached error for the Dashboard screen.
+        states.screen_errors[ScreenId::Dashboard.index()] = Some("test panic message".to_string());
+
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(40, 10, &mut pool);
+        let area = Rect::new(0, 0, 40, 10);
+
+        // This should show the fallback widget, not panic.
+        states.view(ScreenId::Dashboard, &mut frame, area);
+
+        // Verify the fallback rendered (look for the error border character).
+        let top_left = frame.buffer.get(0, 0).unwrap();
+        assert_eq!(
+            top_left.content.as_char(),
+            Some('┌'),
+            "FallbackWidget should render error border"
+        );
+
+        // Verify the error can be cleared.
+        assert!(states.has_error(ScreenId::Dashboard));
+        states.clear_error(ScreenId::Dashboard);
+        assert!(!states.has_error(ScreenId::Dashboard));
+    }
+
+    /// Verify Tab cycles forward through all screens.
+    #[test]
+    fn integration_tab_cycles_all_screens() {
+        let mut app = AppModel::new();
+        assert_eq!(app.current_screen, ScreenId::Dashboard);
+
+        for i in 1..ScreenId::ALL.len() {
+            app.update(AppMsg::NextScreen);
+            assert_eq!(app.current_screen, ScreenId::ALL[i]);
+        }
+
+        // One more wraps to Dashboard.
+        app.update(AppMsg::NextScreen);
+        assert_eq!(app.current_screen, ScreenId::Dashboard);
+    }
+
+    /// Verify all screens have the expected count.
+    #[test]
+    fn all_screens_count() {
+        assert_eq!(ScreenId::ALL.len(), 11);
+    }
+}

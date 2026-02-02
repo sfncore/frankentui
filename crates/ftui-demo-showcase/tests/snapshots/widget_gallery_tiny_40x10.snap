@@ -1,0 +1,10 @@
+▸ A: Borders │   B: Text Styles │   C: C
++ASCII------+┌──Square───┐╭────Rounded╮ 
+|Border: ASC|│Border: Squ││Border: Rou│ 
+|Align: Left|│Align: Cent││Align: Righ│ 
++-----------+└───────────┘╰───────────╯ 
+╔Double═════╗┏━━━Heavy━━━┓╭─────Custom╮ 
+║Border: Dou║┃Border: Hea┃│Border: Cus│ 
+║Align: Left║┃Align: Cent┃│Align: Righ│ 
+╚═══════════╝┗━━━━━━━━━━━┛╰───────────╯ 
+*......                                 
