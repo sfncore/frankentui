@@ -59,7 +59,7 @@ mod tests {
     fn harness_pty_capture_sanitizes() {
         let mut writer = create_writer();
         let mut cmd = CommandBuilder::new("sh");
-        cmd.args(["-c", "printf 'ok \\x1b[31mred\\x1b[0m\\n'"]);
+        cmd.args(["-c", "printf 'ok \\033[31mred\\033[0m\\n'"]);
 
         let _ = run_command_with_pty(&mut writer, cmd, PtyCaptureConfig::default());
 

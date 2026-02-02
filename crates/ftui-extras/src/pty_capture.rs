@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn pty_capture_routes_through_log_sink() {
         let mut cmd = CommandBuilder::new("sh");
-        cmd.args(["-c", "printf 'ok \\\\x1b[31mred\\\\x1b[0m\\n'"]);
+        cmd.args(["-c", "printf 'ok \\033[31mred\\033[0m\\n'"]);
 
         let mut capture = PtyCapture::spawn(PtyCaptureConfig::default(), cmd).unwrap();
         let mut writer = create_writer();

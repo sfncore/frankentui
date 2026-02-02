@@ -12,6 +12,7 @@ pty_run() {
 
     local timeout="${PTY_TIMEOUT:-5}"
     local send_data="${PTY_SEND:-}"
+    local send_file="${PTY_SEND_FILE:-}"
     local send_delay_ms="${PTY_SEND_DELAY_MS:-0}"
     local cols="${PTY_COLS:-80}"
     local rows="${PTY_ROWS:-24}"
@@ -29,6 +30,7 @@ pty_run() {
         if PTY_OUTPUT="$output_file" \
             PTY_TIMEOUT="$timeout" \
             PTY_SEND="$send_data" \
+            PTY_SEND_FILE="$send_file" \
             PTY_SEND_DELAY_MS="$send_delay_ms" \
             PTY_COLS="$cols" \
             PTY_ROWS="$rows" \
@@ -58,16 +60,27 @@ if not output_path:
 
 timeout = float(os.environ.get("PTY_TIMEOUT", "5"))
 raw_send = os.environ.get("PTY_SEND", "")
+send_file = os.environ.get("PTY_SEND_FILE", "")
 send_delay_ms = int(os.environ.get("PTY_SEND_DELAY_MS", "0"))
 cols = int(os.environ.get("PTY_COLS", "80"))
 rows = int(os.environ.get("PTY_ROWS", "24"))
+resize_delay_ms = int(os.environ.get("PTY_RESIZE_DELAY_MS", "0"))
+resize_cols = os.environ.get("PTY_RESIZE_COLS")
+resize_rows = os.environ.get("PTY_RESIZE_ROWS")
 drain_timeout = float(os.environ.get("PTY_DRAIN_TIMEOUT_MS", "200")) / 1000.0
 terminate_grace = float(os.environ.get("PTY_TERMINATE_GRACE_MS", "300")) / 1000.0
 read_poll = float(os.environ.get("PTY_READ_POLL_MS", "50")) / 1000.0
 read_chunk = int(os.environ.get("PTY_READ_CHUNK", "4096"))
 
 send_bytes = b""
-if raw_send:
+if send_file:
+    try:
+        with open(send_file, "rb") as handle:
+            send_bytes = handle.read()
+    except Exception as exc:
+        print(f"Failed to read PTY_SEND_FILE: {exc}", file=sys.stderr)
+        sys.exit(2)
+elif raw_send:
     send_bytes = codecs.decode(raw_send, "unicode_escape").encode("utf-8")
 
 master_fd, slave_fd = pty.openpty()
@@ -84,6 +97,17 @@ except Exception:
 
 start = time.monotonic()
 deadline = start + timeout
+resize_at = None
+resize_done = False
+resize_cols_int = None
+resize_rows_int = None
+if resize_delay_ms > 0 and resize_cols and resize_rows:
+    try:
+        resize_cols_int = int(resize_cols)
+        resize_rows_int = int(resize_rows)
+        resize_at = start + (resize_delay_ms / 1000.0)
+    except ValueError:
+        resize_at = None
 
 proc = subprocess.Popen(
     cmd,
@@ -112,6 +136,23 @@ try:
                 sent = True
             except OSError:
                 pass
+
+        if resize_at is not None and (not resize_done) and now >= resize_at:
+            if resize_cols_int and resize_rows_int:
+                try:
+                    import fcntl
+                    import struct
+                    import termios
+
+                    winsize = struct.pack("HHHH", resize_rows_int, resize_cols_int, 0, 0)
+                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+                    try:
+                        os.killpg(proc.pid, signal.SIGWINCH)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            resize_done = True
 
         if terminate_at is None and now >= deadline:
             terminate_at = now + terminate_grace
