@@ -41,22 +41,12 @@ use ftui_core::geometry::Rect;
 use ftui_harness::assert_snapshot;
 use ftui_render::frame::Frame;
 use ftui_render::grapheme_pool::GraphemePool;
-use ftui_text::cursor::CursorPosition;
-use ftui_text::editor::Editor;
 use ftui_widgets::textarea::{TextArea, TextAreaState};
 use ftui_widgets::StatefulWidget;
 
 // ============================================================================
 // Test Helpers
 // ============================================================================
-
-/// Create a frame for testing with given dimensions.
-fn create_frame(width: u16, height: u16) -> (GraphemePool, Frame<'static>) {
-    // We use a leaked pool to avoid lifetime issues in tests
-    let pool = Box::leak(Box::new(GraphemePool::new()));
-    let frame = Frame::new(width, height, pool);
-    (GraphemePool::new(), frame)
-}
 
 /// Create a focused TextArea with the given content.
 fn textarea_with_text(text: &str) -> TextArea {
@@ -214,9 +204,12 @@ fn snapshot_editor_selection_multiline() {
 fn snapshot_editor_selection_word_boundary() {
     let mut ta = textarea_with_text("one two three");
     ta.move_to_document_start();
-    // Move to start of "two" then select whole word
+    // Move to start of "two" then select the word (3 chars)
     ta.move_word_right();
-    ta.editor_mut().select_word_right();
+    // Select "two" by selecting right 3 times
+    for _ in 0..3 {
+        ta.select_right();
+    }
     let area = Rect::new(0, 0, 20, 3);
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(20, 3, &mut pool);
@@ -376,8 +369,7 @@ fn snapshot_editor_combining_chars() {
 
 #[test]
 fn snapshot_editor_scroll_vertical() {
-    let mut ta = TextArea::new();
-    ta.set_focused(true);
+    let mut ta = TextArea::new().with_focus(true);
     // Insert many lines
     for i in 1..=20 {
         ta.insert_text(&format!("Line {i}\n"));
@@ -408,8 +400,10 @@ fn snapshot_editor_narrow_viewport() {
 
 #[test]
 fn snapshot_editor_line_numbers() {
-    let mut ta = textarea_with_text("Line 1\nLine 2\nLine 3\nLine 4\nLine 5");
-    ta.set_show_line_numbers(true);
+    let ta = TextArea::new()
+        .with_text("Line 1\nLine 2\nLine 3\nLine 4\nLine 5")
+        .with_line_numbers(true)
+        .with_focus(true);
     let area = Rect::new(0, 0, 20, 7);
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(20, 7, &mut pool);
@@ -424,8 +418,7 @@ fn snapshot_editor_line_numbers() {
 
 #[test]
 fn snapshot_editor_placeholder() {
-    let mut ta = TextArea::new();
-    ta.set_placeholder("Enter text here...");
+    let ta = TextArea::new().with_placeholder("Enter text here...");
     let area = Rect::new(0, 0, 25, 3);
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(25, 3, &mut pool);
@@ -441,8 +434,7 @@ fn snapshot_editor_placeholder() {
 /// Invariant: undo stack preserves exact state
 #[test]
 fn property_undo_preserves_state() {
-    let mut ta = TextArea::new();
-    ta.set_focused(true);
+    let mut ta = TextArea::new().with_focus(true);
     ta.insert_text("Initial");
     let initial_text = ta.text();
 
