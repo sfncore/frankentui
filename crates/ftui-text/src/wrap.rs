@@ -1926,8 +1926,9 @@ mod tests {
             }
 
             times_us.sort();
-            let p50 = times_us[times_us.len() / 2];
-            let p95 = times_us[(times_us.len() as f64 * 0.95) as usize];
+            let len = times_us.len();
+            let p50 = times_us[len / 2];
+            let p95 = times_us[((len as f64 * 0.95) as usize).min(len.saturating_sub(1))];
 
             // JSONL log
             eprintln!(

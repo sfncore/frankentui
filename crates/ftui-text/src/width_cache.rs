@@ -2110,13 +2110,15 @@ mod perf_cache_overhead {
     }
 
     fn p95(sorted: &[u128]) -> u128 {
-        let idx = (sorted.len() as f64 * 0.95) as usize;
-        sorted[idx.min(sorted.len() - 1)]
+        let len = sorted.len();
+        let idx = ((len as f64 * 0.95) as usize).min(len.saturating_sub(1));
+        sorted[idx]
     }
 
     fn p99(sorted: &[u128]) -> u128 {
-        let idx = (sorted.len() as f64 * 0.99) as usize;
-        sorted[idx.min(sorted.len() - 1)]
+        let len = sorted.len();
+        let idx = ((len as f64 * 0.99) as usize).min(len.saturating_sub(1));
+        sorted[idx]
     }
 
     fn median(sorted: &[u128]) -> u128 {
