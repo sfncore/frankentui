@@ -712,6 +712,7 @@ mod tests {
         let mut state = TableState {
             offset: 5,
             selected: Some(2), // Selected is below offset
+            persistence_id: None,
         };
 
         let table = Table::new(

@@ -885,4 +885,64 @@ mod tests {
         assert_eq!(state.selected_index(), None);
         assert_eq!(state.offset, 0); // reset on deselect
     }
+
+    // --- Stateful Persistence tests ---
+
+    use crate::stateful::Stateful;
+
+    #[test]
+    fn list_state_with_persistence_id() {
+        let state = ListState::default().with_persistence_id("sidebar-menu");
+        assert_eq!(state.persistence_id(), Some("sidebar-menu"));
+    }
+
+    #[test]
+    fn list_state_default_no_persistence_id() {
+        let state = ListState::default();
+        assert_eq!(state.persistence_id(), None);
+    }
+
+    #[test]
+    fn list_state_save_restore_round_trip() {
+        let mut state = ListState::default().with_persistence_id("test");
+        state.select(Some(7));
+        state.offset = 4;
+
+        let saved = state.save_state();
+        assert_eq!(saved.selected, Some(7));
+        assert_eq!(saved.offset, 4);
+
+        // Reset state
+        state.select(None);
+        assert_eq!(state.selected, None);
+        assert_eq!(state.offset, 0);
+
+        // Restore
+        state.restore_state(saved);
+        assert_eq!(state.selected, Some(7));
+        assert_eq!(state.offset, 4);
+    }
+
+    #[test]
+    fn list_state_key_uses_persistence_id() {
+        let state = ListState::default().with_persistence_id("file-browser");
+        let key = state.state_key();
+        assert_eq!(key.widget_type, "List");
+        assert_eq!(key.instance_id, "file-browser");
+    }
+
+    #[test]
+    fn list_state_key_default_when_no_id() {
+        let state = ListState::default();
+        let key = state.state_key();
+        assert_eq!(key.widget_type, "List");
+        assert_eq!(key.instance_id, "default");
+    }
+
+    #[test]
+    fn list_persist_state_default() {
+        let persist = ListPersistState::default();
+        assert_eq!(persist.selected, None);
+        assert_eq!(persist.offset, 0);
+    }
 }

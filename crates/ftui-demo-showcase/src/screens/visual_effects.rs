@@ -567,9 +567,14 @@ impl TextEffectsDemo {
             Easing::Linear => Easing::EaseIn,
             Easing::EaseIn => Easing::EaseOut,
             Easing::EaseOut => Easing::EaseInOut,
-            Easing::EaseInOut => Easing::Bounce,
+            Easing::EaseInOut => Easing::EaseInQuad,
+            Easing::EaseInQuad => Easing::EaseOutQuad,
+            Easing::EaseOutQuad => Easing::EaseInOutQuad,
+            Easing::EaseInOutQuad => Easing::Bounce,
             Easing::Bounce => Easing::Elastic,
-            Easing::Elastic => Easing::Linear,
+            Easing::Elastic => Easing::Back,
+            Easing::Back => Easing::Step(4),
+            Easing::Step(_) => Easing::Linear,
         };
     }
 
@@ -2747,27 +2752,24 @@ impl VisualEffectsScreen {
             }
             3 => {
                 // Mirror reflection
-                let reflection = Reflection::new(text, 0.5, PackedRgba::rgb(100, 150, 200));
-                let main_styled = StyledText::new(text)
+                let reflection = Reflection {
+                    gap: 1,
+                    start_opacity: 0.5,
+                    end_opacity: 0.1,
+                    height_ratio: 1.0,
+                    wave: 0.0,
+                };
+                let styled = StyledMultiLine::new(vec![text.to_string()])
                     .bold()
-                    .base_color(PackedRgba::rgb(200, 220, 255));
-                main_styled.render(area, frame);
-
-                // Render reflection below
-                if area.height > 2 {
-                    let reflect_area = Rect {
-                        y: area.y + 1,
-                        height: area.height.saturating_sub(1),
-                        ..area
-                    };
-                    reflection.render(reflect_area, frame);
-                }
+                    .base_color(PackedRgba::rgb(200, 220, 255))
+                    .reflection(reflection)
+                    .time(self.text_effects.time);
+                styled.render(area, frame);
             }
             _ => {
                 // ASCII Art
                 let ascii = AsciiArtText::new(text, AsciiArtStyle::Block);
-                let ascii_styled = ascii
-                    .styled()
+                let ascii_styled = StyledMultiLine::from_ascii_art(ascii)
                     .effect(TextEffect::RainbowGradient { speed: 0.3 })
                     .time(self.text_effects.time);
                 ascii_styled.render(area, frame);
