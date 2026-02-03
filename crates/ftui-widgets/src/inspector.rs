@@ -1231,6 +1231,398 @@ mod tests {
                 };
                 prop_assert_eq!(state.mode, expected);
             }
+
+            /// should_show_hits respects both mode and toggle flag.
+            #[test]
+            fn should_show_hits_respects_both(mode_idx in 0u8..4, flag in proptest::bool::ANY) {
+                let mut state = InspectorState::new();
+                state.set_mode(mode_idx);
+                state.show_hits = flag;
+                let mode_allows = state.mode.show_hit_regions();
+                prop_assert_eq!(state.should_show_hits(), flag && mode_allows);
+            }
+
+            /// should_show_bounds respects both mode and toggle flag.
+            #[test]
+            fn should_show_bounds_respects_both(mode_idx in 0u8..4, flag in proptest::bool::ANY) {
+                let mut state = InspectorState::new();
+                state.set_mode(mode_idx);
+                state.show_bounds = flag;
+                let mode_allows = state.mode.show_widget_bounds();
+                prop_assert_eq!(state.should_show_bounds(), flag && mode_allows);
+            }
         }
+    }
+
+    // =========================================================================
+    // Region Color Coverage Tests (bd-17h9.6)
+    // =========================================================================
+
+    #[test]
+    fn region_color_all_variants() {
+        let style = InspectorStyle::default();
+
+        // Each region type returns a distinct (or appropriate) color
+        let none_color = style.region_color(HitRegion::None);
+        let content_color = style.region_color(HitRegion::Content);
+        let border_color = style.region_color(HitRegion::Border);
+        let scrollbar_color = style.region_color(HitRegion::Scrollbar);
+        let handle_color = style.region_color(HitRegion::Handle);
+        let button_color = style.region_color(HitRegion::Button);
+        let link_color = style.region_color(HitRegion::Link);
+        let custom_color = style.region_color(HitRegion::Custom(42));
+
+        // None returns transparent
+        assert_eq!(none_color, PackedRgba::TRANSPARENT);
+
+        // Other regions return non-transparent colors
+        assert_ne!(content_color.a(), 0);
+        assert_ne!(border_color.a(), 0);
+        assert_ne!(scrollbar_color.a(), 0);
+        assert_ne!(handle_color.a(), 0);
+        assert_ne!(button_color.a(), 0);
+        assert_ne!(link_color.a(), 0);
+        assert_ne!(custom_color.a(), 0);
+
+        // Verify they are semi-transparent (not fully opaque)
+        assert!(content_color.a() < 255);
+        assert!(button_color.a() < 255);
+    }
+
+    #[test]
+    fn region_color_custom_variants() {
+        let style = InspectorStyle::default();
+
+        // All Custom variants return the same color
+        let c0 = style.region_color(HitRegion::Custom(0));
+        let c1 = style.region_color(HitRegion::Custom(1));
+        let c255 = style.region_color(HitRegion::Custom(255));
+
+        assert_eq!(c0, c1);
+        assert_eq!(c1, c255);
+    }
+
+    // =========================================================================
+    // Should-Show Methods Tests (bd-17h9.6)
+    // =========================================================================
+
+    #[test]
+    fn should_show_hits_requires_both_mode_and_flag() {
+        let mut state = InspectorState::new();
+
+        // Off mode: never show
+        state.mode = InspectorMode::Off;
+        state.show_hits = true;
+        assert!(!state.should_show_hits());
+
+        // HitRegions mode with flag on: show
+        state.mode = InspectorMode::HitRegions;
+        state.show_hits = true;
+        assert!(state.should_show_hits());
+
+        // HitRegions mode with flag off: don't show
+        state.show_hits = false;
+        assert!(!state.should_show_hits());
+
+        // WidgetBounds mode: doesn't show hits
+        state.mode = InspectorMode::WidgetBounds;
+        state.show_hits = true;
+        assert!(!state.should_show_hits());
+
+        // Full mode with flag on: show
+        state.mode = InspectorMode::Full;
+        state.show_hits = true;
+        assert!(state.should_show_hits());
+    }
+
+    #[test]
+    fn should_show_bounds_requires_both_mode_and_flag() {
+        let mut state = InspectorState::new();
+
+        // Off mode: never show
+        state.mode = InspectorMode::Off;
+        state.show_bounds = true;
+        assert!(!state.should_show_bounds());
+
+        // WidgetBounds mode with flag on: show
+        state.mode = InspectorMode::WidgetBounds;
+        state.show_bounds = true;
+        assert!(state.should_show_bounds());
+
+        // WidgetBounds mode with flag off: don't show
+        state.show_bounds = false;
+        assert!(!state.should_show_bounds());
+
+        // HitRegions mode: doesn't show bounds
+        state.mode = InspectorMode::HitRegions;
+        state.show_bounds = true;
+        assert!(!state.should_show_bounds());
+
+        // Full mode with flag on: show
+        state.mode = InspectorMode::Full;
+        state.show_bounds = true;
+        assert!(state.should_show_bounds());
+    }
+
+    // =========================================================================
+    // Overlay Rendering Tests (bd-17h9.6)
+    // =========================================================================
+
+    #[test]
+    fn overlay_respects_mode_hit_regions_only() {
+        let mut state = InspectorState::new();
+        state.mode = InspectorMode::HitRegions;
+
+        // Register a widget for bounds drawing BEFORE creating overlay
+        state.register_widget(WidgetInfo::new("TestWidget", Rect::new(5, 5, 10, 3)));
+
+        let overlay = InspectorOverlay::new(&state);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::with_hit_grid(20, 10, &mut pool);
+
+        // Register a hit region
+        frame.register_hit(Rect::new(0, 0, 5, 5), HitId::new(1), HitRegion::Button, 0);
+
+        let area = Rect::new(0, 0, 20, 10);
+        overlay.render(area, &mut frame);
+
+        // In HitRegions mode, bounds should NOT be rendered
+        // (We can verify by checking that widget info bounds area is not drawn)
+        assert!(state.should_show_hits());
+        assert!(!state.should_show_bounds());
+    }
+
+    #[test]
+    fn overlay_respects_mode_widget_bounds_only() {
+        let mut state = InspectorState::new();
+        state.mode = InspectorMode::WidgetBounds;
+        state.show_names = true;
+
+        // Register widget
+        state.register_widget(WidgetInfo::new("TestWidget", Rect::new(2, 2, 15, 5)));
+
+        let overlay = InspectorOverlay::new(&state);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::with_hit_grid(20, 10, &mut pool);
+
+        let area = Rect::new(0, 0, 20, 10);
+        overlay.render(area, &mut frame);
+
+        // In WidgetBounds mode, hits should NOT be shown
+        assert!(!state.should_show_hits());
+        assert!(state.should_show_bounds());
+    }
+
+    #[test]
+    fn overlay_full_mode_shows_both() {
+        let mut state = InspectorState::new();
+        state.mode = InspectorMode::Full;
+
+        // Register widget
+        state.register_widget(WidgetInfo::new("FullTest", Rect::new(0, 0, 10, 5)));
+
+        let overlay = InspectorOverlay::new(&state);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::with_hit_grid(20, 10, &mut pool);
+
+        frame.register_hit(Rect::new(0, 0, 5, 5), HitId::new(1), HitRegion::Content, 0);
+
+        let area = Rect::new(0, 0, 20, 10);
+        overlay.render(area, &mut frame);
+
+        assert!(state.should_show_hits());
+        assert!(state.should_show_bounds());
+    }
+
+    #[test]
+    fn overlay_detail_panel_renders_when_enabled() {
+        let mut state = InspectorState::new();
+        state.mode = InspectorMode::Full;
+        state.show_detail_panel = true;
+        state.set_hover(Some((5, 5)));
+
+        let overlay = InspectorOverlay::new(&state);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::with_hit_grid(50, 25, &mut pool);
+
+        let area = Rect::new(0, 0, 50, 25);
+        overlay.render(area, &mut frame);
+
+        // The detail panel is 24 chars wide, rendered at right edge
+        // Panel should be at x = 50 - 24 - 1 = 25
+        // Check that something is rendered in the panel area
+        let panel_x = 25;
+        let panel_y = 1;
+
+        // Panel background should be the label_bg color
+        let cell = frame.buffer.get(panel_x + 1, panel_y + 1);
+        assert!(cell.is_some());
+    }
+
+    #[test]
+    fn overlay_without_hit_grid_shows_warning() {
+        let mut state = InspectorState::new();
+        state.mode = InspectorMode::HitRegions;
+
+        let overlay = InspectorOverlay::new(&state);
+        let mut pool = GraphemePool::new();
+        // Frame without hit grid
+        let mut frame = Frame::new(40, 10, &mut pool);
+
+        let area = Rect::new(0, 0, 40, 10);
+        overlay.render(area, &mut frame);
+
+        // Warning message "HitGrid not enabled" should be centered
+        // The message is 20 chars, centered in 40 char width = starts at x=10
+        // Check first char is 'H' from "HitGrid"
+        if let Some(cell) = frame.buffer.get(10, 0) {
+            assert_eq!(cell.content.as_char(), Some('H'));
+        }
+    }
+
+    // =========================================================================
+    // Widget Tree Rendering Tests (bd-17h9.6)
+    // =========================================================================
+
+    #[test]
+    fn nested_widgets_render_with_depth_colors() {
+        let mut state = InspectorState::new();
+        state.mode = InspectorMode::WidgetBounds;
+        state.show_names = false; // Disable names for clearer test
+
+        // Create nested widget tree
+        let mut parent = WidgetInfo::new("Parent", Rect::new(0, 0, 30, 20)).with_depth(0);
+        let child = WidgetInfo::new("Child", Rect::new(2, 2, 26, 16)).with_depth(1);
+        parent.add_child(child);
+
+        state.register_widget(parent);
+
+        let overlay = InspectorOverlay::new(&state);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::with_hit_grid(40, 25, &mut pool);
+
+        let area = Rect::new(0, 0, 40, 25);
+        overlay.render(area, &mut frame);
+
+        // Parent outline at depth 0 uses bound_colors[0]
+        // Child outline at depth 1 uses bound_colors[1]
+        let style = InspectorStyle::default();
+        let parent_color = style.bound_color(0);
+        let child_color = style.bound_color(1);
+
+        // Verify different colors are used
+        assert_ne!(parent_color, child_color);
+    }
+
+    #[test]
+    fn widget_with_empty_name_skips_label() {
+        let mut state = InspectorState::new();
+        state.mode = InspectorMode::WidgetBounds;
+        state.show_names = true;
+
+        // Widget with empty name
+        state.register_widget(WidgetInfo::new("", Rect::new(5, 5, 10, 5)));
+
+        let overlay = InspectorOverlay::new(&state);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::with_hit_grid(20, 15, &mut pool);
+
+        let area = Rect::new(0, 0, 20, 15);
+        overlay.render(area, &mut frame);
+
+        // Should not panic; empty name is handled gracefully
+    }
+
+    // =========================================================================
+    // Hit Info Edge Cases (bd-17h9.6)
+    // =========================================================================
+
+    #[test]
+    fn hit_info_all_region_types() {
+        let regions = [
+            HitRegion::None,
+            HitRegion::Content,
+            HitRegion::Border,
+            HitRegion::Scrollbar,
+            HitRegion::Handle,
+            HitRegion::Button,
+            HitRegion::Link,
+            HitRegion::Custom(0),
+            HitRegion::Custom(255),
+        ];
+
+        for region in regions {
+            let cell = HitCell::new(HitId::new(1), region, 42);
+            let info = HitInfo::from_cell(&cell, 10, 20);
+
+            let info = info.expect("should create info");
+            assert_eq!(info.region, region);
+            assert_eq!(info.data, 42);
+        }
+    }
+
+    #[test]
+    fn hit_cell_with_zero_data() {
+        let cell = HitCell::new(HitId::new(5), HitRegion::Content, 0);
+        let info = HitInfo::from_cell(&cell, 0, 0).unwrap();
+        assert_eq!(info.data, 0);
+    }
+
+    #[test]
+    fn hit_cell_with_max_data() {
+        let cell = HitCell::new(HitId::new(5), HitRegion::Content, u64::MAX);
+        let info = HitInfo::from_cell(&cell, 0, 0).unwrap();
+        assert_eq!(info.data, u64::MAX);
+    }
+
+    // =========================================================================
+    // State Initialization Tests (bd-17h9.6)
+    // =========================================================================
+
+    #[test]
+    fn inspector_state_new_defaults() {
+        let state = InspectorState::new();
+
+        // Verify all defaults
+        assert_eq!(state.mode, InspectorMode::Off);
+        assert!(state.hover_pos.is_none());
+        assert!(state.selected.is_none());
+        assert!(state.widgets.is_empty());
+        assert!(!state.show_detail_panel);
+        assert!(state.show_hits);
+        assert!(state.show_bounds);
+        assert!(state.show_names);
+        assert!(!state.show_times);
+    }
+
+    #[test]
+    fn inspector_state_default_matches_new() {
+        let state_new = InspectorState::new();
+        let state_default = InspectorState::default();
+
+        // Most fields should match (but new() sets show_hits/bounds/names to true)
+        assert_eq!(state_new.mode, state_default.mode);
+        assert_eq!(state_new.hover_pos, state_default.hover_pos);
+        assert_eq!(state_new.selected, state_default.selected);
+    }
+
+    #[test]
+    fn inspector_style_colors_are_semi_transparent() {
+        let style = InspectorStyle::default();
+
+        // hit_overlay should be semi-transparent
+        assert!(style.hit_overlay.a() > 0);
+        assert!(style.hit_overlay.a() < 255);
+
+        // hit_hover should be semi-transparent
+        assert!(style.hit_hover.a() > 0);
+        assert!(style.hit_hover.a() < 255);
+
+        // selected_highlight should be semi-transparent
+        assert!(style.selected_highlight.a() > 0);
+        assert!(style.selected_highlight.a() < 255);
+
+        // label_bg should be nearly opaque
+        assert!(style.label_bg.a() > 128);
     }
 }

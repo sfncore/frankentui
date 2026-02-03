@@ -195,6 +195,12 @@ pub struct TablePersistState {
     pub selected: Option<usize>,
     /// Scroll offset (first visible row).
     pub offset: usize,
+    /// Current sort column index.
+    pub sort_column: Option<usize>,
+    /// Sort direction (true = ascending, false = descending).
+    pub sort_ascending: bool,
+    /// Active filter text.
+    pub filter: String,
 }
 
 impl crate::stateful::Stateful for TableState {
@@ -208,6 +214,9 @@ impl crate::stateful::Stateful for TableState {
         TablePersistState {
             selected: self.selected,
             offset: self.offset,
+            sort_column: self.sort_column,
+            sort_ascending: self.sort_ascending,
+            filter: self.filter.clone(),
         }
     }
 
@@ -215,6 +224,9 @@ impl crate::stateful::Stateful for TableState {
         // Restore values directly; clamping to valid ranges happens during render
         self.selected = state.selected;
         self.offset = state.offset;
+        self.sort_column = state.sort_column;
+        self.sort_ascending = state.sort_ascending;
+        self.filter = state.filter;
     }
 }
 
@@ -1188,6 +1200,9 @@ mod tests {
         let persist = TablePersistState::default();
         assert_eq!(persist.selected, None);
         assert_eq!(persist.offset, 0);
+        assert_eq!(persist.sort_column, None);
+        assert!(!persist.sort_ascending);
+        assert!(persist.filter.is_empty());
     }
 
     // ============================================================================

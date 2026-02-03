@@ -357,6 +357,61 @@ When a widget is selected (clicked), show a detail panel:
 - Performance: <1ms overhead when disabled
 - Clipboard integration (if available)
 
+## Usage + Demo Presets (Harness)
+
+The inspector demo is implemented in the harness view `widget-inspector`. This view renders a deterministic widget tree plus hit regions so the overlay can be verified in screenshots and PTY captures.
+
+### Quick Demo (Interactive)
+
+```bash
+FTUI_HARNESS_VIEW=widget-inspector \
+FTUI_HARNESS_SCREEN_MODE=inline \
+FTUI_HARNESS_UI_HEIGHT=10 \
+FTUI_HARNESS_SUPPRESS_WELCOME=1 \
+cargo run -p ftui-harness
+```
+
+### Preset Sizes (PTY Capture Friendly)
+
+- **120x40 (wide)**: `PTY_COLS=120 PTY_ROWS=40`
+- **80x24 (classic)**: `PTY_COLS=80 PTY_ROWS=24`
+
+Example smoke run with auto-exit:
+
+```bash
+PTY_COLS=120 PTY_ROWS=40 \
+FTUI_HARNESS_VIEW=widget-inspector \
+FTUI_HARNESS_EXIT_AFTER_MS=1200 \
+cargo run -p ftui-harness
+```
+
+## E2E Script + JSONL Logging
+
+The canonical E2E script lives at `tests/e2e/scripts/test_ui_inspector.sh`. It runs two PTY captures (120x40 + 80x24) and emits JSONL logs containing environment, capabilities, timings, seed, and output checksums.
+
+```bash
+E2E_HARNESS_BIN=target/debug/ftui-harness \
+E2E_LOG_DIR=/tmp/ftui_e2e_logs \
+E2E_RESULTS_DIR=/tmp/ftui_e2e_results \
+tests/e2e/scripts/test_ui_inspector.sh
+```
+
+JSONL output (default: `/tmp/ftui_e2e_results/ui_inspector.jsonl`) includes:
+
+- `run_id`, `case`, `status`
+- `duration_ms`, `output_bytes`, `output_sha256`
+- `seed`, `view`, `cols`, `rows`
+- `term`, `colorterm`, `no_color`
+- `capabilities` (screen mode, input mode, ui height, mouse/focus/kitty flags)
+
+Deterministic mode: keep the harness flags stable (`FTUI_HARNESS_SCREEN_MODE`, `FTUI_HARNESS_UI_HEIGHT`, input + capability toggles) and fix `FTUI_HARNESS_EXIT_AFTER_MS` to limit runtime jitter.
+
+## Evidence Ledger (Docs + Demo)
+
+- **Demo target**: `ftui-harness` `widget-inspector` view because it supplies a deterministic widget tree + hit regions that exercise overlay rendering and panel text.
+- **Preset sizes**: 120x40 (wide) + 80x24 (classic) to cover label wrapping and panel constraints at common terminal sizes.
+- **Smoke assertions**: Check for `Inspector`, `Region:`, and `LogPanel` strings in the PTY capture to confirm overlay header, hit region labels, and widget tree naming are present.
+
 ## Invariants
 
 1. Inspector MUST NOT mutate underlying widget state
