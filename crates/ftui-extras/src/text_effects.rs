@@ -7324,6 +7324,43 @@ impl StyledMultiLine {
                         color = lerp_color(colors[idx], colors[next], frac);
                     }
                 }
+                TextEffect::Scanline {
+                    intensity,
+                    line_gap,
+                    scroll,
+                    scroll_speed,
+                    flicker,
+                } => {
+                    // Calculate scroll offset for animated scanlines
+                    let scroll_offset = if *scroll {
+                        (self.time * scroll_speed) as usize
+                    } else {
+                        0
+                    };
+
+                    // Determine if this row is a scanline (dimmed)
+                    let effective_row = row + scroll_offset;
+                    let is_scanline = *line_gap > 0 && effective_row % (*line_gap as usize) == 0;
+
+                    // Apply scanline dimming
+                    let mut dim_factor = if is_scanline {
+                        1.0 - *intensity
+                    } else {
+                        1.0
+                    };
+
+                    // Apply flicker (random per-frame brightness variation)
+                    if *flicker > 0.0 {
+                        let flicker_seed = (self.time * 60.0) as u64;
+                        let hash = flicker_seed
+                            .wrapping_mul(2654435761)
+                            .wrapping_add((row * total_width + col) as u64 * 2246822519);
+                        let rand = (hash % 10000) as f64 / 10000.0;
+                        dim_factor *= 1.0 - (*flicker * rand);
+                    }
+
+                    color = apply_alpha(color, dim_factor);
+                }
                 _ => {} // Position/char effects handled separately
             }
         }
