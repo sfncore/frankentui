@@ -446,6 +446,14 @@ impl CodeExplorer {
         self.layout_spotlight.set(Rect::default());
     }
 
+    fn query_index(&self) -> usize {
+        if QUERY_SNIPPETS.is_empty() {
+            0
+        } else {
+            (self.tick_count / 12) as usize % QUERY_SNIPPETS.len()
+        }
+    }
+
     fn update_match_density(&mut self) {
         let buckets = 48usize;
         let mut density = vec![0.0; buckets];
