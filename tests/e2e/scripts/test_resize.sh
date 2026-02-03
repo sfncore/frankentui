@@ -28,6 +28,17 @@ if [[ ! -x "${E2E_HARNESS_BIN:-}" ]]; then
     exit 0
 fi
 
+RESIZE_SEED="${RESIZE_SEED:-0}"
+RESIZE_ENV_JSONL="$E2E_LOG_DIR/resize_env_$(date +%Y%m%d_%H%M%S).jsonl"
+mkdir -p "$E2E_LOG_DIR"
+cat > "$RESIZE_ENV_JSONL" <<EOF
+{"event":"env","timestamp":"$(date -Iseconds)","seed":$RESIZE_SEED,"term":"${TERM:-}","colorterm":"${COLORTERM:-}","no_color":"${NO_COLOR:-}"}
+{"event":"rust","rustc":"$(rustc --version 2>/dev/null || echo 'N/A')","cargo":"$(cargo --version 2>/dev/null || echo 'N/A')"}
+{"event":"git","commit":"$(git rev-parse HEAD 2>/dev/null || echo 'N/A')","branch":"$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'N/A')"}
+EOF
+
+PTY_JSONL_DEFAULT="${PTY_JSONL:-$E2E_LOG_DIR/resize_pty.jsonl}"
+
 run_case() {
     local name="$1"
     shift
@@ -64,6 +75,9 @@ resize_small() {
     FTUI_HARNESS_LOG_LINES=5 \
     FTUI_HARNESS_SUPPRESS_WELCOME=1 \
     PTY_TIMEOUT=3 \
+    PTY_CANONICALIZE=1 \
+    PTY_TEST_NAME="resize_small" \
+    PTY_JSONL="$PTY_JSONL_DEFAULT" \
         pty_run "$output_file" "$E2E_HARNESS_BIN"
 
     # Should have substantial output
@@ -90,6 +104,9 @@ resize_wide() {
     FTUI_HARNESS_LOG_LINES=5 \
     FTUI_HARNESS_SUPPRESS_WELCOME=1 \
     PTY_TIMEOUT=3 \
+    PTY_CANONICALIZE=1 \
+    PTY_TEST_NAME="resize_wide" \
+    PTY_JSONL="$PTY_JSONL_DEFAULT" \
         pty_run "$output_file" "$E2E_HARNESS_BIN"
 
     # Should have substantial output
@@ -116,6 +133,9 @@ resize_tall() {
     FTUI_HARNESS_LOG_LINES=20 \
     FTUI_HARNESS_SUPPRESS_WELCOME=1 \
     PTY_TIMEOUT=3 \
+    PTY_CANONICALIZE=1 \
+    PTY_TEST_NAME="resize_tall" \
+    PTY_JSONL="$PTY_JSONL_DEFAULT" \
         pty_run "$output_file" "$E2E_HARNESS_BIN"
 
     # Should have substantial output
@@ -152,6 +172,9 @@ resize_scroll_region() {
     FTUI_HARNESS_UI_HEIGHT=6 \
     FTUI_HARNESS_SUPPRESS_WELCOME=1 \
     PTY_TIMEOUT=4 \
+    PTY_CANONICALIZE=1 \
+    PTY_TEST_NAME="resize_scroll_region" \
+    PTY_JSONL="$PTY_JSONL_DEFAULT" \
         pty_run "$output_file" "$E2E_HARNESS_BIN"
 
     # Should have output
@@ -206,6 +229,9 @@ resize_scroll_region_bounds() {
     FTUI_HARNESS_LOG_LINES=25 \
     FTUI_HARNESS_EXIT_AFTER_MS=1600 \
     PTY_TIMEOUT=5 \
+    PTY_CANONICALIZE=1 \
+    PTY_TEST_NAME="resize_scroll_region_bounds" \
+    PTY_JSONL="$PTY_JSONL_DEFAULT" \
         pty_run "$output_file" "$E2E_HARNESS_BIN"
 
     log_info "Observed resize lines (raw PTY capture)"
@@ -253,6 +279,9 @@ resize_cleanup_reset() {
     FTUI_HARNESS_SCREEN_MODE=inline \
     FTUI_HARNESS_SUPPRESS_WELCOME=1 \
     PTY_TIMEOUT=3 \
+    PTY_CANONICALIZE=1 \
+    PTY_TEST_NAME="resize_cleanup_reset" \
+    PTY_JSONL="$PTY_JSONL_DEFAULT" \
         pty_run "$output_file" "$E2E_HARNESS_BIN"
 
     # Should have output
@@ -286,6 +315,9 @@ resize_minimum() {
     FTUI_HARNESS_LOG_LINES=2 \
     FTUI_HARNESS_SUPPRESS_WELCOME=1 \
     PTY_TIMEOUT=3 \
+    PTY_CANONICALIZE=1 \
+    PTY_TEST_NAME="resize_minimum" \
+    PTY_JSONL="$PTY_JSONL_DEFAULT" \
         pty_run "$output_file" "$E2E_HARNESS_BIN"
 
     # Should have some output (even if layout is degraded)
@@ -309,6 +341,9 @@ resize_large() {
     FTUI_HARNESS_LOG_LINES=30 \
     FTUI_HARNESS_SUPPRESS_WELCOME=1 \
     PTY_TIMEOUT=4 \
+    PTY_CANONICALIZE=1 \
+    PTY_TEST_NAME="resize_large" \
+    PTY_JSONL="$PTY_JSONL_DEFAULT" \
         pty_run "$output_file" "$E2E_HARNESS_BIN"
 
     # Should have substantial output
