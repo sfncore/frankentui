@@ -2319,17 +2319,19 @@ mod tests {
     // ========== Dirty Row Tracking Tests (bd-4kq0.1.1) ==========
 
     #[test]
-    fn dirty_rows_start_clean() {
+    fn dirty_rows_start_dirty() {
+        // All rows start dirty to ensure initial diffs see all content.
         let buf = Buffer::new(10, 5);
-        assert_eq!(buf.dirty_row_count(), 0);
+        assert_eq!(buf.dirty_row_count(), 5);
         for y in 0..5 {
-            assert!(!buf.is_row_dirty(y));
+            assert!(buf.is_row_dirty(y));
         }
     }
 
     #[test]
     fn set_marks_row_dirty() {
         let mut buf = Buffer::new(10, 5);
+        buf.clear_dirty(); // Reset initial dirty state
         buf.set(3, 2, Cell::from_char('X'));
         assert!(buf.is_row_dirty(2));
         assert!(!buf.is_row_dirty(0));
@@ -2341,6 +2343,7 @@ mod tests {
     #[test]
     fn set_raw_marks_row_dirty() {
         let mut buf = Buffer::new(10, 5);
+        buf.clear_dirty(); // Reset initial dirty state
         buf.set_raw(0, 4, Cell::from_char('Z'));
         assert!(buf.is_row_dirty(4));
         assert_eq!(buf.dirty_row_count(), 1);
@@ -2356,6 +2359,12 @@ mod tests {
     #[test]
     fn clear_dirty_resets_flags() {
         let mut buf = Buffer::new(10, 5);
+        // All rows start dirty; clear_dirty should reset all of them.
+        assert_eq!(buf.dirty_row_count(), 5);
+        buf.clear_dirty();
+        assert_eq!(buf.dirty_row_count(), 0);
+
+        // Now mark specific rows dirty and verify clear_dirty resets again.
         buf.set(0, 0, Cell::from_char('A'));
         buf.set(0, 3, Cell::from_char('B'));
         assert_eq!(buf.dirty_row_count(), 2);
@@ -2367,6 +2376,7 @@ mod tests {
     #[test]
     fn fill_marks_affected_rows_dirty() {
         let mut buf = Buffer::new(10, 10);
+        buf.clear_dirty(); // Reset initial dirty state
         buf.fill(Rect::new(0, 2, 5, 3), Cell::from_char('.'));
         // Rows 2, 3, 4 should be dirty
         assert!(!buf.is_row_dirty(0));
@@ -2380,6 +2390,7 @@ mod tests {
     #[test]
     fn get_mut_marks_row_dirty() {
         let mut buf = Buffer::new(10, 5);
+        buf.clear_dirty(); // Reset initial dirty state
         if let Some(cell) = buf.get_mut(5, 3) {
             cell.fg = PackedRgba::rgb(255, 0, 0);
         }
@@ -2403,6 +2414,7 @@ mod tests {
     #[test]
     fn out_of_bounds_set_does_not_dirty() {
         let mut buf = Buffer::new(10, 5);
+        buf.clear_dirty(); // Reset initial dirty state
         buf.set(100, 100, Cell::from_char('X'));
         assert_eq!(buf.dirty_row_count(), 0);
     }
@@ -2430,6 +2442,13 @@ mod tests {
     fn dirty_clear_between_frames() {
         // Simulates frame transition: render, diff, clear, render again.
         let mut buf = Buffer::new(10, 5);
+
+        // All rows start dirty (initial frame needs full diff).
+        assert_eq!(buf.dirty_row_count(), 5);
+
+        // Diff consumes dirty state after initial frame.
+        buf.clear_dirty();
+        assert_eq!(buf.dirty_row_count(), 0);
 
         // Frame 1: write to rows 0, 2
         buf.set(0, 0, Cell::from_char('A'));
