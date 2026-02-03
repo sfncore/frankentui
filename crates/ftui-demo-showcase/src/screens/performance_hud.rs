@@ -33,7 +33,10 @@ const MAX_SAMPLES: usize = 120;
 
 /// Braille characters for sparkline rows (each encodes 4 vertical dots).
 /// Index maps to dot pattern for 0..=8 inclusive height levels.
-const BRAILLE_BLOCKS: [char; 9] = [' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}', '\u{2588}'];
+const BRAILLE_BLOCKS: [char; 9] = [
+    ' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}',
+    '\u{2588}',
+];
 
 /// Degradation tier based on estimated FPS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,22 +237,55 @@ impl PerformanceHud {
         };
 
         let lines: Vec<(String, Style)> = vec![
-            (format!("  Est. FPS:   {est_fps:>8.1}{paused_tag}"), Style::new().fg(fps_color)),
-            (format!("  Tick Rate:  {tps:>8.1} tps"), Style::new().fg(theme::fg::PRIMARY)),
+            (
+                format!("  Est. FPS:   {est_fps:>8.1}{paused_tag}"),
+                Style::new().fg(fps_color),
+            ),
+            (
+                format!("  Tick Rate:  {tps:>8.1} tps"),
+                Style::new().fg(theme::fg::PRIMARY),
+            ),
             (String::new(), Style::new()),
-            ("  Latency (ms)".into(), Style::new().fg(theme::fg::SECONDARY)),
-            (format!("  avg:  {avg_ms:>8.2}"), Style::new().fg(theme::fg::PRIMARY)),
-            (format!("  p50:  {p50_ms:>8.2}"), Style::new().fg(theme::fg::PRIMARY)),
+            (
+                "  Latency (ms)".into(),
+                Style::new().fg(theme::fg::SECONDARY),
+            ),
+            (
+                format!("  avg:  {avg_ms:>8.2}"),
+                Style::new().fg(theme::fg::PRIMARY),
+            ),
+            (
+                format!("  p50:  {p50_ms:>8.2}"),
+                Style::new().fg(theme::fg::PRIMARY),
+            ),
             (format!("  p95:  {p95_ms:>8.2}"), p95_style),
             (format!("  p99:  {p99_ms:>8.2}"), p99_style),
-            (format!("  min:  {min_ms:>8.2}"), Style::new().fg(theme::fg::MUTED)),
-            (format!("  max:  {max_ms:>8.2}"), Style::new().fg(theme::fg::MUTED)),
+            (
+                format!("  min:  {min_ms:>8.2}"),
+                Style::new().fg(theme::fg::MUTED),
+            ),
+            (
+                format!("  max:  {max_ms:>8.2}"),
+                Style::new().fg(theme::fg::MUTED),
+            ),
             (String::new(), Style::new()),
             ("  Counters".into(), Style::new().fg(theme::fg::SECONDARY)),
-            (format!("  Views:      {views:>8}"), Style::new().fg(theme::fg::PRIMARY)),
-            (format!("  Ticks:      {:>8}", self.tick_count), Style::new().fg(theme::fg::PRIMARY)),
-            (format!("  Samples:    {:>8}", self.tick_times_us.len()), Style::new().fg(theme::fg::MUTED)),
-            (format!("  V/Tick:     {:>8.2}", self.views_per_tick), Style::new().fg(theme::fg::MUTED)),
+            (
+                format!("  Views:      {views:>8}"),
+                Style::new().fg(theme::fg::PRIMARY),
+            ),
+            (
+                format!("  Ticks:      {:>8}", self.tick_count),
+                Style::new().fg(theme::fg::PRIMARY),
+            ),
+            (
+                format!("  Samples:    {:>8}", self.tick_times_us.len()),
+                Style::new().fg(theme::fg::MUTED),
+            ),
+            (
+                format!("  V/Tick:     {:>8.2}", self.views_per_tick),
+                Style::new().fg(theme::fg::MUTED),
+            ),
         ];
 
         for (i, (text, style)) in lines.iter().enumerate() {
@@ -284,9 +320,7 @@ impl PerformanceHud {
 
         // Compute values for sparkline
         let values: Vec<f64> = match self.sparkline_mode {
-            SparklineMode::Intervals => {
-                self.tick_times_us.iter().map(|&v| v as f64).collect()
-            }
+            SparklineMode::Intervals => self.tick_times_us.iter().map(|&v| v as f64).collect(),
             SparklineMode::Fps => {
                 // Rolling FPS estimate: 1_000_000 / interval_us
                 self.tick_times_us
@@ -325,7 +359,8 @@ impl PerformanceHud {
                 let ch = if row < filled {
                     let level = if row == filled.saturating_sub(1) {
                         // Top of bar: partial fill
-                        let frac = ((val - v_min) / range * height as f64) - (filled.saturating_sub(1)) as f64;
+                        let frac = ((val - v_min) / range * height as f64)
+                            - (filled.saturating_sub(1)) as f64;
                         (frac * 8.0).round() as usize
                     } else {
                         8
@@ -414,7 +449,11 @@ impl PerformanceHud {
 
         let lines: Vec<(String, Style)> = vec![
             (
-                format!("  Budget: {:.2}ms ({:.0}fps target)", self.budget_ms, 1000.0 / self.budget_ms),
+                format!(
+                    "  Budget: {:.2}ms ({:.0}fps target)",
+                    self.budget_ms,
+                    1000.0 / self.budget_ms
+                ),
                 Style::new().fg(theme::fg::SECONDARY),
             ),
             (
@@ -436,10 +475,7 @@ impl PerformanceHud {
                 },
             ),
             (String::new(), Style::new()),
-            (
-                "  Budget Bar".into(),
-                Style::new().fg(theme::fg::SECONDARY),
-            ),
+            ("  Budget Bar".into(), Style::new().fg(theme::fg::SECONDARY)),
         ];
 
         for (i, (text, style)) in lines.iter().enumerate() {
@@ -501,14 +537,15 @@ impl PerformanceHud {
                 Style::new().fg(tier_color),
             ),
             (String::new(), Style::new()),
-            (
-                "  Thresholds".into(),
-                Style::new().fg(theme::fg::MUTED),
-            ),
+            ("  Thresholds".into(), Style::new().fg(theme::fg::MUTED)),
             (
                 format!(
                     "  {} Full     \u{2265}50fps",
-                    if tier == DegradationTier::Full { "\u{25c6}" } else { "\u{25c7}" }
+                    if tier == DegradationTier::Full {
+                        "\u{25c6}"
+                    } else {
+                        "\u{25c7}"
+                    }
                 ),
                 if tier == DegradationTier::Full {
                     Style::new().fg(theme::accent::SUCCESS)
@@ -519,7 +556,11 @@ impl PerformanceHud {
             (
                 format!(
                     "  {} Reduced  20\u{2013}49fps",
-                    if tier == DegradationTier::Reduced { "\u{25c6}" } else { "\u{25c7}" }
+                    if tier == DegradationTier::Reduced {
+                        "\u{25c6}"
+                    } else {
+                        "\u{25c7}"
+                    }
                 ),
                 if tier == DegradationTier::Reduced {
                     Style::new().fg(theme::accent::WARNING)
@@ -530,7 +571,11 @@ impl PerformanceHud {
             (
                 format!(
                     "  {} Minimal  5\u{2013}19fps",
-                    if tier == DegradationTier::Minimal { "\u{25c6}" } else { "\u{25c7}" }
+                    if tier == DegradationTier::Minimal {
+                        "\u{25c6}"
+                    } else {
+                        "\u{25c7}"
+                    }
                 ),
                 if tier == DegradationTier::Minimal {
                     Style::new().fg(theme::accent::ERROR)
@@ -541,7 +586,11 @@ impl PerformanceHud {
             (
                 format!(
                     "  {} Safety   <5fps",
-                    if tier == DegradationTier::Safety { "\u{25c6}" } else { "\u{25c7}" }
+                    if tier == DegradationTier::Safety {
+                        "\u{25c6}"
+                    } else {
+                        "\u{25c7}"
+                    }
                 ),
                 if tier == DegradationTier::Safety {
                     Style::new().fg(theme::accent::ERROR)
@@ -696,6 +745,7 @@ impl Screen for PerformanceHud {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ftui_render::grapheme_pool::GraphemePool;
 
     fn press(code: KeyCode) -> Event {
         Event::Key(KeyEvent {
@@ -814,7 +864,8 @@ mod tests {
     #[test]
     fn render_no_panic_empty_area() {
         let hud = PerformanceHud::new();
-        let mut frame = Frame::new(0, 0);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(1, 1, &mut pool);
         let area = Rect::new(0, 0, 0, 0);
         hud.view(&mut frame, area);
     }
@@ -822,7 +873,8 @@ mod tests {
     #[test]
     fn render_no_panic_small_area() {
         let hud = PerformanceHud::new();
-        let mut frame = Frame::new(40, 10);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(40, 10, &mut pool);
         let area = Rect::new(0, 0, 40, 10);
         hud.view(&mut frame, area);
     }
@@ -834,7 +886,8 @@ mod tests {
         for _ in 0..60 {
             hud.tick_times_us.push_back(100_000);
         }
-        let mut frame = Frame::new(120, 40);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(120, 40, &mut pool);
         let area = Rect::new(0, 0, 120, 40);
         hud.view(&mut frame, area);
     }
@@ -846,7 +899,8 @@ mod tests {
         for i in 0..30 {
             hud.tick_times_us.push_back(80_000 + i * 1000);
         }
-        let mut frame = Frame::new(80, 24);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(80, 24, &mut pool);
         let area = Rect::new(0, 0, 80, 24);
         hud.view(&mut frame, area);
     }
@@ -855,7 +909,8 @@ mod tests {
     fn view_counter_increments() {
         let hud = PerformanceHud::new();
         assert_eq!(hud.view_counter.get(), 0);
-        let mut frame = Frame::new(80, 24);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(80, 24, &mut pool);
         let area = Rect::new(0, 0, 80, 24);
         hud.view(&mut frame, area);
         assert_eq!(hud.view_counter.get(), 1);
