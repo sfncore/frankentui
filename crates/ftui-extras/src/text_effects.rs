@@ -86,6 +86,17 @@ pub fn hsv_to_rgb(h: f64, s: f64, v: f64) -> PackedRgba {
     )
 }
 
+/// Simple xorshift hash for deterministic pseudo-random values.
+///
+/// Used for effects like flicker and glitch that need fast, reproducible
+/// randomness without pulling in external RNG crates.
+fn simple_hash(mut x: u64) -> u64 {
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+}
+
 // =============================================================================
 // Organic Breathing Pulse (bd-27kx)
 // =============================================================================
@@ -1933,6 +1944,38 @@ pub enum TextEffect {
         /// Oscillation speed (cycles per second) when animated.
         speed: f64,
     },
+
+    // --- CRT / Retro Effects (bd-3r87) ---
+    /// Scanline / CRT monitor effect.
+    ///
+    /// Simulates the look of old CRT monitors by dimming every Nth row.
+    /// Supports scrolling scanlines for an animated CRT feel and
+    /// optional flicker for authentic phosphor simulation.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// StyledText::new("RETRO")
+    ///     .effect(TextEffect::Scanline {
+    ///         intensity: 0.3,
+    ///         line_gap: 2,
+    ///         scroll: true,
+    ///         scroll_speed: 1.0,
+    ///         flicker: 0.05,
+    ///     })
+    /// ```
+    Scanline {
+        /// How dark the scanlines are (0.0-1.0). 0.3 is typical.
+        intensity: f64,
+        /// Every Nth row is dimmed (2 = every other row).
+        line_gap: u8,
+        /// Whether scanlines scroll slowly for CRT feel.
+        scroll: bool,
+        /// Rows per second if scrolling.
+        scroll_speed: f64,
+        /// Random brightness variation (0.0-1.0) for flicker.
+        flicker: f64,
+    },
 }
 
 // =============================================================================
@@ -2244,6 +2287,7 @@ impl StyledText {
             | TextEffect::Shake { .. }
             | TextEffect::Cascade { .. }
             | TextEffect::Cursor { .. }
+            | TextEffect::Scanline { .. }
             | TextEffect::Reveal { .. } => base,
 
             TextEffect::RevealMask {
@@ -2338,6 +2382,30 @@ impl StyledText {
                     base.g(),
                     (base.b() as i16 + blue_boost as i16).clamp(0, 255) as u8,
                 )
+            }
+
+            TextEffect::Scanline {
+                intensity,
+                line_gap: _,
+                scroll: _,
+                scroll_speed: _,
+                flicker,
+            } => {
+                // For single-line text, we can only apply the flicker component
+                // (row-based scanlines need multi-line context via char_color_2d)
+                if *flicker > 0.0 {
+                    // Use time-based pseudo-random flicker
+                    let flicker_seed = (self.time * 60.0) as u64; // ~60Hz flicker
+                    let hash = flicker_seed
+                        .wrapping_mul(2654435761)
+                        .wrapping_add(idx as u64 * 2246822519);
+                    let rand = (hash % 10000) as f64 / 10000.0;
+                    let flicker_factor = 1.0 - (*flicker * rand);
+                    apply_alpha(base, flicker_factor)
+                } else {
+                    // No flicker, apply subtle phosphor-like dimming
+                    apply_alpha(base, 1.0 - intensity * 0.5)
+                }
             }
         }
     }
@@ -2450,7 +2518,8 @@ impl StyledText {
                 | TextEffect::Bounce { .. }
                 | TextEffect::Shake { .. }
                 | TextEffect::Cascade { .. }
-                | TextEffect::Cursor { .. } => {}
+                | TextEffect::Cursor { .. }
+                | TextEffect::Scanline { .. } => {}
             }
         }
 
