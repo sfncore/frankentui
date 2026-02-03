@@ -1614,8 +1614,12 @@ impl StyledText {
                         return PackedRgba::TRANSPARENT;
                     }
                     // Apply partial alpha from soft edge
+                    // Use the channel with the highest value to avoid division issues
+                    // when a channel is 0 (e.g., pure green has r=0)
                     if mask_color != color {
-                        alpha_multiplier *= mask_color.r() as f64 / color.r().max(1) as f64;
+                        let max_original = color.r().max(color.g()).max(color.b()).max(1) as f64;
+                        let max_masked = mask_color.r().max(mask_color.g()).max(mask_color.b()) as f64;
+                        alpha_multiplier *= max_masked / max_original;
                     }
                 }
 
@@ -1895,11 +1899,25 @@ impl StyledText {
             CursorPosition::End => Some(total),
             CursorPosition::AtIndex(idx) => Some((*idx).min(total)),
             CursorPosition::AfterReveal => {
-                // Find the reveal position from Typewriter or Cascade effects
+                // Find the reveal position from Typewriter, Reveal, or Cascade effects
                 for effect in &self.effects {
                     match effect {
                         TextEffect::Typewriter { visible_chars } => {
                             return Some((*visible_chars as usize).min(total));
+                        }
+                        TextEffect::Reveal { mode, progress, .. } => {
+                            // For LeftToRight, cursor follows the reveal edge
+                            // For other modes, approximate with progress * total
+                            let revealed = match mode {
+                                RevealMode::LeftToRight => (*progress * total as f64) as usize,
+                                RevealMode::RightToLeft => {
+                                    // Cursor at the left edge of revealed portion
+                                    let hidden = ((1.0 - *progress) * total as f64) as usize;
+                                    hidden
+                                }
+                                _ => (*progress * total as f64) as usize,
+                            };
+                            return Some(revealed.min(total));
                         }
                         TextEffect::Cascade { speed, stagger, .. } => {
                             let revealed = (self.time * speed / stagger.max(0.001)) as usize;
@@ -4546,8 +4564,16 @@ mod tests {
         let c10 = text.char_color(10, 11);
 
         assert_eq!(c0, PackedRgba::TRANSPARENT, "First char should be hidden");
-        assert_eq!(c4, PackedRgba::TRANSPARENT, "5th char (idx 4) should be hidden");
-        assert_ne!(c5, PackedRgba::TRANSPARENT, "6th char (idx 5) should be visible");
+        assert_eq!(
+            c4,
+            PackedRgba::TRANSPARENT,
+            "5th char (idx 4) should be hidden"
+        );
+        assert_ne!(
+            c5,
+            PackedRgba::TRANSPARENT,
+            "6th char (idx 5) should be visible"
+        );
         assert_ne!(c10, PackedRgba::TRANSPARENT, "Last char should be visible");
     }
 
@@ -4588,9 +4614,21 @@ mod tests {
         let c8 = text.char_color(8, 9); // Right edge
         let c4 = text.char_color(4, 9); // Center
 
-        assert_ne!(c0, PackedRgba::TRANSPARENT, "Left edge should be visible first");
-        assert_ne!(c8, PackedRgba::TRANSPARENT, "Right edge should be visible first");
-        assert_eq!(c4, PackedRgba::TRANSPARENT, "Center should be hidden at low progress");
+        assert_ne!(
+            c0,
+            PackedRgba::TRANSPARENT,
+            "Left edge should be visible first"
+        );
+        assert_ne!(
+            c8,
+            PackedRgba::TRANSPARENT,
+            "Right edge should be visible first"
+        );
+        assert_eq!(
+            c4,
+            PackedRgba::TRANSPARENT,
+            "Center should be hidden at low progress"
+        );
     }
 
     #[test]
@@ -4616,7 +4654,10 @@ mod tests {
         for i in 0..11 {
             let c1 = text1.char_color(i, 11);
             let c2 = text2.char_color(i, 11);
-            assert_eq!(c1, c2, "Same seed should produce same visibility at idx {i}");
+            assert_eq!(
+                c1, c2,
+                "Same seed should produce same visibility at idx {i}"
+            );
         }
     }
 
@@ -4633,7 +4674,11 @@ mod tests {
 
         for i in 0..11 {
             let c = text.char_color(i, 11);
-            assert_ne!(c, PackedRgba::TRANSPARENT, "All chars visible at progress=1.0");
+            assert_ne!(
+                c,
+                PackedRgba::TRANSPARENT,
+                "All chars visible at progress=1.0"
+            );
         }
     }
 
