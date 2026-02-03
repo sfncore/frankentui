@@ -93,10 +93,10 @@ pub fn sgr_flags<W: Write>(w: &mut W, flags: StyleFlags) -> io::Result<()> {
     }
 
     let bits = flags.bits();
-    if bits.is_power_of_two() {
-        if let Some(seq) = sgr_single_flag_seq(bits) {
-            return w.write_all(seq);
-        }
+    if bits.is_power_of_two()
+        && let Some(seq) = sgr_single_flag_seq(bits)
+    {
+        return w.write_all(seq);
     }
 
     w.write_all(b"\x1b[")?;
@@ -177,17 +177,17 @@ pub fn sgr_flags_off<W: Write>(
     }
 
     let disable_bits = flags_to_disable.bits();
-    if disable_bits.is_power_of_two() {
-        if let Some(seq) = sgr_single_flag_off_seq(disable_bits) {
-            w.write_all(seq)?;
-            if disable_bits == StyleFlags::BOLD.bits() && flags_to_keep.contains(StyleFlags::DIM) {
-                return Ok(StyleFlags::DIM);
-            }
-            if disable_bits == StyleFlags::DIM.bits() && flags_to_keep.contains(StyleFlags::BOLD) {
-                return Ok(StyleFlags::BOLD);
-            }
-            return Ok(StyleFlags::empty());
+    if disable_bits.is_power_of_two()
+        && let Some(seq) = sgr_single_flag_off_seq(disable_bits)
+    {
+        w.write_all(seq)?;
+        if disable_bits == StyleFlags::BOLD.bits() && flags_to_keep.contains(StyleFlags::DIM) {
+            return Ok(StyleFlags::DIM);
         }
+        if disable_bits == StyleFlags::DIM.bits() && flags_to_keep.contains(StyleFlags::BOLD) {
+            return Ok(StyleFlags::BOLD);
+        }
+        return Ok(StyleFlags::empty());
     }
 
     let mut collateral = StyleFlags::empty();

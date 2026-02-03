@@ -2638,7 +2638,7 @@ mod tests {
             .unwrap_or(200);
 
         let mut styles = Vec::with_capacity(128);
-        let mut rng = 0xA5A5_1EAF_42_u64;
+        let mut rng = 0x00A5_A51E_AF42_u64;
         let mut next = || -> u64 {
             rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
             rng
