@@ -1252,6 +1252,29 @@ mod tests {
     }
 
     #[test]
+    fn inline_auto_resize_clears_cached_height() {
+        let output = Vec::new();
+        let mut writer = TerminalWriter::new(
+            output,
+            ScreenMode::InlineAuto {
+                min_height: 3,
+                max_height: 8,
+            },
+            UiAnchor::Bottom,
+            basic_caps(),
+        );
+
+        writer.set_size(80, 24);
+        writer.set_auto_ui_height(6);
+        assert_eq!(writer.auto_ui_height(), Some(6));
+        assert_eq!(writer.render_height_hint(), 6);
+
+        writer.set_size(100, 30);
+        assert_eq!(writer.auto_ui_height(), None);
+        assert_eq!(writer.render_height_hint(), 8);
+    }
+
+    #[test]
     fn drop_cleanup_restores_cursor() {
         let mut output = Vec::new();
         {

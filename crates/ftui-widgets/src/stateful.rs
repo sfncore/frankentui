@@ -828,4 +828,215 @@ mod tests {
         assert_eq!(vs.version, 1);
         assert_eq!(vs.data, ScrollState::default());
     }
+
+    // ── Migration System tests ─────────────────────────────────────────
+
+    #[test]
+    fn migration_error_display() {
+        let err = MigrationError::NoPathFound { from: 1, to: 3 };
+        assert_eq!(err.to_string(), "no migration path from version 1 to 3");
+
+        let err = MigrationError::MigrationFailed {
+            from: 2,
+            to: 3,
+            message: "data corrupt".into(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "migration from 2 to 3 failed: data corrupt"
+        );
+
+        let err = MigrationError::InvalidVersionRange { from: 5, to: 2 };
+        assert_eq!(err.to_string(), "invalid version range: 5 to 2");
+    }
+
+    #[test]
+    fn migration_chain_new_is_empty() {
+        let chain = MigrationChain::<ScrollState>::new();
+        assert!(!chain.has_path(1, 2));
+    }
+
+    // Test migration from v1 ScrollState (just offset) to v2 (with hypothetical field)
+    #[derive(Debug, Clone, Default)]
+    struct ScrollStateV1 {
+        scroll_offset: u16,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct ScrollStateV2 {
+        scroll_offset: u16,
+        velocity: f32, // Added in v2
+    }
+
+    struct V1ToV2Migration;
+
+    impl ErasedMigration<ScrollStateV2> for V1ToV2Migration {
+        fn from_version(&self) -> u32 {
+            1
+        }
+        fn to_version(&self) -> u32 {
+            2
+        }
+        fn migrate_erased(
+            &self,
+            old: Box<dyn core::any::Any + Send>,
+        ) -> Result<Box<dyn core::any::Any + Send>, String> {
+            let v1 = old
+                .downcast::<ScrollStateV1>()
+                .map_err(|_| "invalid state type")?;
+            Ok(Box::new(ScrollStateV2 {
+                scroll_offset: v1.scroll_offset,
+                velocity: 0.0,
+            }))
+        }
+    }
+
+    #[test]
+    fn migration_chain_register_and_has_path() {
+        let mut chain = MigrationChain::<ScrollStateV2>::new();
+        chain.register(Box::new(V1ToV2Migration));
+
+        assert!(chain.has_path(1, 2));
+        assert!(chain.has_path(1, 1)); // Same version is valid
+        assert!(chain.has_path(2, 2)); // Same version is valid
+        assert!(!chain.has_path(1, 3)); // No migration to v3
+    }
+
+    #[test]
+    #[should_panic(expected = "migration must increment version by exactly 1")]
+    fn migration_chain_rejects_non_sequential_migration() {
+        struct BadMigration;
+        impl ErasedMigration<ScrollStateV2> for BadMigration {
+            fn from_version(&self) -> u32 {
+                1
+            }
+            fn to_version(&self) -> u32 {
+                3
+            } // Skips v2!
+            fn migrate_erased(
+                &self,
+                _: Box<dyn core::any::Any + Send>,
+            ) -> Result<Box<dyn core::any::Any + Send>, String> {
+                unreachable!()
+            }
+        }
+
+        let mut chain = MigrationChain::<ScrollStateV2>::new();
+        chain.register(Box::new(BadMigration));
+    }
+
+    #[test]
+    #[should_panic(expected = "migration for version 1 already registered")]
+    fn migration_chain_rejects_duplicate_registration() {
+        let mut chain = MigrationChain::<ScrollStateV2>::new();
+        chain.register(Box::new(V1ToV2Migration));
+        chain.register(Box::new(V1ToV2Migration)); // Duplicate!
+    }
+
+    #[test]
+    fn migration_chain_migrate_success() {
+        let mut chain = MigrationChain::<ScrollStateV2>::new();
+        chain.register(Box::new(V1ToV2Migration));
+
+        let old_state = Box::new(ScrollStateV1 { scroll_offset: 42 });
+        let result = chain.migrate(old_state, 1, 2);
+
+        assert!(result.is_ok());
+        let migrated = result
+            .unwrap()
+            .downcast::<ScrollStateV2>()
+            .expect("should be ScrollStateV2");
+        assert_eq!(migrated.scroll_offset, 42);
+        assert_eq!(migrated.velocity, 0.0);
+    }
+
+    #[test]
+    fn migration_chain_migrate_same_version() {
+        let chain = MigrationChain::<ScrollStateV2>::new();
+        let state = Box::new(ScrollStateV2 {
+            scroll_offset: 10,
+            velocity: 1.5,
+        });
+
+        let result = chain.migrate(state, 2, 2);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn migration_chain_migrate_no_path() {
+        let chain = MigrationChain::<ScrollStateV2>::new();
+        let state: Box<dyn core::any::Any + Send> = Box::new(ScrollStateV1 { scroll_offset: 0 });
+
+        let result = chain.migrate(state, 1, 2);
+        assert!(matches!(
+            result,
+            Err(MigrationError::NoPathFound { from: 1, to: 2 })
+        ));
+    }
+
+    #[test]
+    fn migration_chain_migrate_invalid_range() {
+        let chain = MigrationChain::<ScrollStateV2>::new();
+        let state: Box<dyn core::any::Any + Send> = Box::new(ScrollStateV2::default());
+
+        let result = chain.migrate(state, 3, 1);
+        assert!(matches!(
+            result,
+            Err(MigrationError::InvalidVersionRange { from: 3, to: 1 })
+        ));
+    }
+
+    #[test]
+    fn restore_result_into_state() {
+        let direct = RestoreResult::Direct(ScrollState { scroll_offset: 10 });
+        assert_eq!(direct.into_state().scroll_offset, 10);
+
+        let migrated = RestoreResult::Migrated {
+            state: ScrollState { scroll_offset: 20 },
+            from_version: 1,
+        };
+        assert_eq!(migrated.into_state().scroll_offset, 20);
+
+        let fallback = RestoreResult::DefaultFallback {
+            error: MigrationError::NoPathFound { from: 1, to: 2 },
+            default: ScrollState { scroll_offset: 0 },
+        };
+        assert_eq!(fallback.into_state().scroll_offset, 0);
+    }
+
+    #[test]
+    fn restore_result_was_migrated() {
+        let direct = RestoreResult::Direct(ScrollState::default());
+        assert!(!direct.was_migrated());
+
+        let migrated = RestoreResult::Migrated::<ScrollState> {
+            state: ScrollState::default(),
+            from_version: 1,
+        };
+        assert!(migrated.was_migrated());
+
+        let fallback = RestoreResult::DefaultFallback::<ScrollState> {
+            error: MigrationError::NoPathFound { from: 1, to: 2 },
+            default: ScrollState::default(),
+        };
+        assert!(!fallback.was_migrated());
+    }
+
+    #[test]
+    fn restore_result_is_fallback() {
+        let direct = RestoreResult::Direct(ScrollState::default());
+        assert!(!direct.is_fallback());
+
+        let migrated = RestoreResult::Migrated::<ScrollState> {
+            state: ScrollState::default(),
+            from_version: 1,
+        };
+        assert!(!migrated.is_fallback());
+
+        let fallback = RestoreResult::DefaultFallback::<ScrollState> {
+            error: MigrationError::NoPathFound { from: 1, to: 2 },
+            default: ScrollState::default(),
+        };
+        assert!(fallback.is_fallback());
+    }
 }

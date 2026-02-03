@@ -24,6 +24,13 @@ ALL_CASES=(
     resize_scroll_region_inline_auto
 )
 
+jsonl_log() {
+    local file="$1"
+    local line="$2"
+    mkdir -p "$(dirname "$file")"
+    printf '%s\n' "$line" >> "$file"
+}
+
 if [[ ! -x "${E2E_HARNESS_BIN:-}" ]]; then
     LOG_FILE="$E2E_LOG_DIR/resize_missing.log"
     for t in "${ALL_CASES[@]}"; do
@@ -98,12 +105,15 @@ resize_scroll_region_inline_auto() {
     LOG_FILE="$E2E_LOG_DIR/resize_scroll_region_inline_auto.log"
     local output_file="$E2E_LOG_DIR/resize_scroll_region_inline_auto.pty"
     local jsonl_file="$E2E_LOG_DIR/resize_scroll_region_inline_auto.jsonl"
+    local run_id="resize_scroll_region_inline_auto_$(date +%Y%m%d_%H%M%S)_$$"
+    local seed="${FTUI_HARNESS_SEED:-0}"
+    local input_mode="${FTUI_HARNESS_INPUT_MODE:-runtime}"
     local start_ms
     start_ms="$(date +%s%3N)"
 
     log_test_start "resize_scroll_region_inline_auto"
 
-    echo "{\"ts_ms\":${start_ms},\"event\":\"start\",\"seed\":0,\"initial_cols\":80,\"initial_rows\":24,\"resize_cols\":100,\"resize_rows\":30}" >> "$jsonl_file"
+    jsonl_log "$jsonl_file" "{\"run_id\":\"$run_id\",\"ts_ms\":${start_ms},\"event\":\"start\",\"seed\":\"$seed\",\"initial_cols\":80,\"initial_rows\":24,\"resize_cols\":100,\"resize_rows\":30,\"capabilities\":{\"screen_mode\":\"inline\",\"auto_ui_height\":true,\"ui_height\":6,\"input_mode\":\"$input_mode\"}}"
 
     TERM="xterm-256color" \
     PTY_COLS=80 \
@@ -125,8 +135,12 @@ resize_scroll_region_inline_auto() {
     local end_ms
     end_ms="$(date +%s%3N)"
     local duration_ms=$((end_ms - start_ms))
+    local content_changed=false
+    if grep -a -q "Resize: 100x30" "$output_file"; then
+        content_changed=true
+    fi
 
-    echo "{\"ts_ms\":${end_ms},\"event\":\"summary\",\"bytes\":${size},\"checksum\":\"${checksum}\",\"duration_ms\":${duration_ms}}" >> "$jsonl_file"
+    jsonl_log "$jsonl_file" "{\"run_id\":\"$run_id\",\"ts_ms\":${end_ms},\"event\":\"summary\",\"bytes\":${size},\"checksum\":\"${checksum}\",\"duration_ms\":${duration_ms},\"content_changed\":${content_changed}}"
 
     # Ensure UI rendered.
     grep -a -q "claude-3.5" "$output_file" || return 1
