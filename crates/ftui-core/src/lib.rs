@@ -11,6 +11,7 @@ pub mod inline_mode;
 pub mod input_parser;
 pub mod logging;
 pub mod mux_passthrough;
+pub mod semantic_event;
 pub mod terminal_capabilities;
 pub mod terminal_session;
 
