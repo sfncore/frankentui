@@ -59,6 +59,25 @@ const FEATURE_SPOTLIGHT: &[&str] = &[
     "Frame budget · graceful degradation",
 ];
 
+const QUERY_SNIPPETS: &[&str] = &[
+    "SELECT play, line, speaker\nFROM shakespeare\nWHERE line LIKE '%love%'\nORDER BY line;\n",
+    "WITH ranked AS (\n  SELECT line, rank() OVER (ORDER BY length(line) DESC) AS r\n  FROM shakespeare\n)\nSELECT * FROM ranked WHERE r <= 5;\n",
+    "SELECT speaker, count(*) AS lines\nFROM shakespeare\nGROUP BY speaker\nORDER BY lines DESC\nLIMIT 5;\n",
+];
+
+const RESULT_PREVIEWS: &[&str] = &[
+    "rows=128 · p95=2.4ms · cache=99%",
+    "rows=5 · p95=0.9ms · cache=97%",
+    "rows=5 · p95=1.6ms · cache=95%",
+];
+
+const PLAN_GRAPH: &[&str] = &[
+    "SCAN shakespeare",
+    " ├─ FILTER line LIKE ?",
+    " ├─ PROJECT speaker,line",
+    " └─ SORT (line, speaker)",
+];
+
 /// C language tokenizer configuration.
 fn c_tokenizer() -> GenericTokenizer {
     GenericTokenizer::new(GenericTokenizerConfig {
@@ -419,6 +438,14 @@ impl CodeExplorer {
         }
     }
 
+    fn reset_sidebar_layouts(&self) {
+        self.layout_info.set(Rect::default());
+        self.layout_context.set(Rect::default());
+        self.layout_hotspots.set(Rect::default());
+        self.layout_radar.set(Rect::default());
+        self.layout_spotlight.set(Rect::default());
+    }
+
     fn update_match_density(&mut self) {
         let buckets = 48usize;
         let mut density = vec![0.0; buckets];
@@ -751,7 +778,11 @@ impl Screen for CodeExplorer {
 
         self.layout_code.set(h_chunks[0]);
         self.render_code_panel(frame, h_chunks[0]);
-        self.render_sidebar(frame, h_chunks[1]);
+        match self.mode {
+            ExplorerMode::Source => self.render_sidebar_source(frame, h_chunks[1]),
+            ExplorerMode::QueryLab => self.render_sidebar_query_lab(frame, h_chunks[1]),
+            ExplorerMode::ExecutionPlan => self.render_sidebar_exec_plan(frame, h_chunks[1]),
+        }
         self.render_status_bar(frame, status_area);
 
         chrome::register_pane_hit(frame, h_chunks[0], ScreenId::CodeExplorer);
@@ -1172,7 +1203,8 @@ impl CodeExplorer {
         StatefulWidget::render(&scrollbar, scrollbar_area, frame, &mut scrollbar_state);
     }
 
-    fn render_sidebar(&self, frame: &mut Frame, area: Rect) {
+    fn render_sidebar_source(&self, frame: &mut Frame, area: Rect) {
+        self.reset_sidebar_layouts();
         let rows = if area.height >= 28 {
             Flex::vertical()
                 .constraints([
@@ -1204,6 +1236,7 @@ impl CodeExplorer {
 
         // Panel 1: JSON metadata
         self.layout_info.set(rows[0]);
+        chrome::register_pane_hit(frame, rows[0], ScreenId::CodeExplorer);
         let json_block = Block::new()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -1225,6 +1258,7 @@ impl CodeExplorer {
 
         // Panel 2: Context
         self.layout_context.set(rows[1]);
+        chrome::register_pane_hit(frame, rows[1], ScreenId::CodeExplorer);
         let ctx_block = Block::new()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -1250,10 +1284,12 @@ impl CodeExplorer {
         if rows.len() == 5 {
             // Panel 3: Hotspots
             self.layout_hotspots.set(rows[2]);
+            chrome::register_pane_hit(frame, rows[2], ScreenId::CodeExplorer);
             self.render_hotspot_panel(frame, rows[2]);
 
             // Panel 4: Match radar
             self.layout_radar.set(rows[3]);
+            chrome::register_pane_hit(frame, rows[3], ScreenId::CodeExplorer);
             let radar_block = Block::new()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
@@ -1269,6 +1305,7 @@ impl CodeExplorer {
 
             // Panel 5: Feature spotlight
             self.layout_spotlight.set(rows[4]);
+            chrome::register_pane_hit(frame, rows[4], ScreenId::CodeExplorer);
             let feature_block = Block::new()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
@@ -1284,11 +1321,13 @@ impl CodeExplorer {
         } else if rows.len() == 4 {
             // Panel 3: Hotspots
             self.layout_hotspots.set(rows[2]);
+            chrome::register_pane_hit(frame, rows[2], ScreenId::CodeExplorer);
             self.render_hotspot_panel(frame, rows[2]);
 
             // Panel 4: combined radar + spotlight
             self.layout_radar.set(rows[3]);
             self.layout_spotlight.set(rows[3]);
+            chrome::register_pane_hit(frame, rows[3], ScreenId::CodeExplorer);
             let combo_block = Block::new()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
@@ -1310,6 +1349,7 @@ impl CodeExplorer {
             self.layout_hotspots.set(rows[2]);
             self.layout_radar.set(rows[2]);
             self.layout_spotlight.set(rows[2]);
+            chrome::register_pane_hit(frame, rows[2], ScreenId::CodeExplorer);
             let combo_block = Block::new()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
