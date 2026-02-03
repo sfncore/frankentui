@@ -17,7 +17,7 @@ use ftui_core::event::{Event, KeyCode, KeyEvent, KeyEventKind, Modifiers};
 use ftui_core::geometry::Rect;
 use ftui_demo_showcase::app::{AppModel, AppMsg};
 use ftui_demo_showcase::screens::Screen;
-use ftui_demo_showcase::theme;
+use ftui_demo_showcase::theme::{self, ScopedThemeLock};
 use ftui_harness::assert_snapshot;
 use ftui_render::frame::Frame;
 use ftui_render::grapheme_pool::GraphemePool;
@@ -210,7 +210,7 @@ impl A11yTestContext {
         } else {
             theme::ThemeId::CyberpunkAurora
         };
-        theme::set_theme(theme_id);
+        let _theme_lock = ScopedThemeLock::new(theme_id);
         theme::set_motion_scale(if self.app.a11y.reduced_motion {
             0.0
         } else {
@@ -268,7 +268,7 @@ fn render_screen_with_a11y<S: Screen>(
     } else {
         theme::ThemeId::CyberpunkAurora
     };
-    theme::set_theme(theme_id);
+    let _theme_lock = ScopedThemeLock::new(theme_id);
     theme::set_motion_scale(if a11y.reduced_motion { 0.0 } else { 1.0 });
     theme::set_large_text(a11y.large_text);
 
@@ -297,7 +297,7 @@ fn render_transition_step(
     } else {
         theme::ThemeId::CyberpunkAurora
     };
-    theme::set_theme(theme_id);
+    let _theme_lock = ScopedThemeLock::new(theme_id);
     theme::set_motion_scale(if app.a11y.reduced_motion { 0.0 } else { 1.0 });
     theme::set_large_text(app.a11y.large_text);
 
@@ -682,9 +682,9 @@ fn a11y_dashboard_screen_reduced_motion_80x24() {
 #[test]
 fn a11y_zero_area_high_contrast() {
     let _guard = a11y_guard();
+    let _theme_lock = ScopedThemeLock::new(theme::ThemeId::Darcula);
     let mut app = AppModel::new();
     app.a11y.high_contrast = true;
-    theme::set_theme(theme::ThemeId::Darcula);
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(1, 1, &mut pool);
     app.view(&mut frame);
@@ -706,9 +706,9 @@ fn a11y_zero_area_large_text() {
 #[test]
 fn a11y_zero_area_all_modes() {
     let _guard = a11y_guard();
+    let _theme_lock = ScopedThemeLock::new(theme::ThemeId::Darcula);
     let mut app = AppModel::new();
     app.a11y = theme::A11ySettings::all();
-    theme::set_theme(theme::ThemeId::Darcula);
     theme::set_motion_scale(0.0);
     theme::set_large_text(true);
     let mut pool = GraphemePool::new();
@@ -1031,8 +1031,8 @@ fn a11y_transition_all_modes_roundtrip() {
 
 #[test]
 fn a11y_panel_visible_80x24() {
-    // Set theme explicitly for test isolation
-    theme::set_theme(theme::ThemeId::CyberpunkAurora);
+    // Acquire scoped theme lock for test isolation in parallel test execution
+    let _guard = theme::ScopedThemeLock::new(theme::ThemeId::CyberpunkAurora);
     theme::set_motion_scale(1.0);
     theme::set_large_text(false);
     let mut app = AppModel::new();
@@ -1045,8 +1045,8 @@ fn a11y_panel_visible_80x24() {
 
 #[test]
 fn a11y_panel_visible_120x40() {
-    // Set theme explicitly for test isolation
-    theme::set_theme(theme::ThemeId::CyberpunkAurora);
+    // Acquire scoped theme lock for test isolation in parallel test execution
+    let _guard = theme::ScopedThemeLock::new(theme::ThemeId::CyberpunkAurora);
     theme::set_motion_scale(1.0);
     theme::set_large_text(false);
     let mut app = AppModel::new();
@@ -1059,10 +1059,13 @@ fn a11y_panel_visible_120x40() {
 
 #[test]
 fn a11y_panel_with_high_contrast_120x40() {
+    // Acquire scoped theme lock for test isolation in parallel test execution
+    let _guard = theme::ScopedThemeLock::new(theme::ThemeId::Darcula);
+    theme::set_motion_scale(1.0);
+    theme::set_large_text(false);
     let mut app = AppModel::new();
     app.a11y_panel_visible = true;
     app.a11y.high_contrast = true;
-    theme::set_theme(theme::ThemeId::Darcula);
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(120, 40, &mut pool);
     app.view(&mut frame);
@@ -1071,12 +1074,13 @@ fn a11y_panel_with_high_contrast_120x40() {
 
 #[test]
 fn a11y_panel_with_all_modes_120x40() {
+    // Acquire scoped theme lock for test isolation in parallel test execution
+    let _guard = theme::ScopedThemeLock::new(theme::ThemeId::Darcula);
+    theme::set_large_text(true);
+    theme::set_motion_scale(0.0);
     let mut app = AppModel::new();
     app.a11y_panel_visible = true;
     app.a11y = theme::A11ySettings::all();
-    theme::set_theme(theme::ThemeId::Darcula);
-    theme::set_motion_scale(0.0);
-    theme::set_large_text(true);
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(120, 40, &mut pool);
     app.view(&mut frame);
@@ -1090,10 +1094,10 @@ fn a11y_panel_with_all_modes_120x40() {
 #[test]
 fn a11y_determinism_high_contrast() {
     let _guard = a11y_guard();
+    let _theme_lock = ScopedThemeLock::new(theme::ThemeId::Darcula);
     // Render twice and verify identical output
     let mut app1 = AppModel::new();
     app1.a11y.high_contrast = true;
-    theme::set_theme(theme::ThemeId::Darcula);
     let mut pool1 = GraphemePool::new();
     let mut frame1 = Frame::new(80, 24, &mut pool1);
     app1.view(&mut frame1);
@@ -1101,7 +1105,6 @@ fn a11y_determinism_high_contrast() {
 
     let mut app2 = AppModel::new();
     app2.a11y.high_contrast = true;
-    theme::set_theme(theme::ThemeId::Darcula);
     let mut pool2 = GraphemePool::new();
     let mut frame2 = Frame::new(80, 24, &mut pool2);
     app2.view(&mut frame2);
@@ -1116,10 +1119,10 @@ fn a11y_determinism_high_contrast() {
 #[test]
 fn a11y_determinism_all_modes() {
     let _guard = a11y_guard();
+    let _theme_lock = ScopedThemeLock::new(theme::ThemeId::Darcula);
     // Render twice with all a11y modes and verify identical output
     let mut app1 = AppModel::new();
     app1.a11y = theme::A11ySettings::all();
-    theme::set_theme(theme::ThemeId::Darcula);
     theme::set_motion_scale(0.0);
     theme::set_large_text(true);
     let mut pool1 = GraphemePool::new();
@@ -1129,7 +1132,6 @@ fn a11y_determinism_all_modes() {
 
     let mut app2 = AppModel::new();
     app2.a11y = theme::A11ySettings::all();
-    theme::set_theme(theme::ThemeId::Darcula);
     theme::set_motion_scale(0.0);
     theme::set_large_text(true);
     let mut pool2 = GraphemePool::new();

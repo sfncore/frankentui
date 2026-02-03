@@ -13,7 +13,7 @@ use ftui_core::geometry::Rect;
 use ftui_core::terminal_capabilities::TerminalProfile;
 use ftui_demo_showcase::app::{AppModel, ScreenId};
 use ftui_demo_showcase::screens::Screen;
-use ftui_demo_showcase::theme::{ThemeId, set_theme};
+use ftui_demo_showcase::theme::{ScopedThemeLock, ThemeId};
 use ftui_harness::assert_snapshot;
 use ftui_render::frame::Frame;
 use ftui_render::grapheme_pool::GraphemePool;
@@ -614,7 +614,7 @@ fn markdown_tiny_40x10() {
 /// Required by bd-l8x9.7: snapshot tests across at least two theme variants.
 #[test]
 fn markdown_backdrop_light_theme_120x40() {
-    set_theme(ThemeId::LumenLight);
+    let _theme_guard = ScopedThemeLock::new(ThemeId::LumenLight);
     let mut screen = ftui_demo_showcase::screens::markdown_rich_text::MarkdownRichText::new();
     screen.apply_theme();
     let mut pool = GraphemePool::new();
@@ -622,15 +622,13 @@ fn markdown_backdrop_light_theme_120x40() {
     let area = Rect::new(0, 0, 120, 40);
     screen.view(&mut frame, area);
     assert_snapshot!("markdown_backdrop_light_theme_120x40", &frame.buffer);
-    // Restore default theme for other tests.
-    set_theme(ThemeId::CyberpunkAurora);
 }
 
 /// Verify markdown-over-backdrop readability with the NordicFrost theme.
 /// Provides a third theme variant for bd-l8x9.7 snapshot regression coverage.
 #[test]
 fn markdown_backdrop_nordic_theme_120x40() {
-    set_theme(ThemeId::NordicFrost);
+    let _theme_guard = ScopedThemeLock::new(ThemeId::NordicFrost);
     let mut screen = ftui_demo_showcase::screens::markdown_rich_text::MarkdownRichText::new();
     screen.apply_theme();
     let mut pool = GraphemePool::new();
@@ -638,8 +636,6 @@ fn markdown_backdrop_nordic_theme_120x40() {
     let area = Rect::new(0, 0, 120, 40);
     screen.view(&mut frame, area);
     assert_snapshot!("markdown_backdrop_nordic_theme_120x40", &frame.buffer);
-    // Restore default theme for other tests.
-    set_theme(ThemeId::CyberpunkAurora);
 }
 
 // ============================================================================
@@ -762,6 +758,7 @@ fn performance_tiny_40x10() {
 
 #[test]
 fn app_dashboard_full_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let app = AppModel::new();
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(120, 40, &mut pool);
@@ -771,6 +768,7 @@ fn app_dashboard_full_120x40() {
 
 #[test]
 fn app_shakespeare_full_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut app = AppModel::new();
     app.current_screen = ScreenId::Shakespeare;
     let mut pool = GraphemePool::new();
@@ -781,6 +779,7 @@ fn app_shakespeare_full_120x40() {
 
 #[test]
 fn app_help_overlay_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut app = AppModel::new();
     app.help_visible = true;
     let mut pool = GraphemePool::new();
@@ -791,6 +790,7 @@ fn app_help_overlay_120x40() {
 
 #[test]
 fn app_debug_overlay_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut app = AppModel::new();
     app.debug_visible = true;
     app.terminal_width = 120;
@@ -803,6 +803,7 @@ fn app_debug_overlay_120x40() {
 
 #[test]
 fn app_all_screens_80x24() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     for &id in ScreenId::ALL {
         let mut app = AppModel::new();
         app.current_screen = id;
@@ -1249,6 +1250,7 @@ fn action_timeline_title() {
 
 #[test]
 fn theme_studio_initial_80x24() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let screen = ftui_demo_showcase::screens::theme_studio::ThemeStudioDemo::new();
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(80, 24, &mut pool);
@@ -1259,6 +1261,7 @@ fn theme_studio_initial_80x24() {
 
 #[test]
 fn theme_studio_initial_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let screen = ftui_demo_showcase::screens::theme_studio::ThemeStudioDemo::new();
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(120, 40, &mut pool);
@@ -1269,6 +1272,7 @@ fn theme_studio_initial_120x40() {
 
 #[test]
 fn theme_studio_tiny_40x10() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let screen = ftui_demo_showcase::screens::theme_studio::ThemeStudioDemo::new();
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(40, 10, &mut pool);
@@ -1279,6 +1283,7 @@ fn theme_studio_tiny_40x10() {
 
 #[test]
 fn theme_studio_wide_200x50() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let screen = ftui_demo_showcase::screens::theme_studio::ThemeStudioDemo::new();
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(200, 50, &mut pool);
@@ -1289,6 +1294,7 @@ fn theme_studio_wide_200x50() {
 
 #[test]
 fn theme_studio_navigate_tokens_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::theme_studio::ThemeStudioDemo::new();
     // Switch to token inspector panel
     screen.update(&press(KeyCode::Tab));
@@ -1305,6 +1311,7 @@ fn theme_studio_navigate_tokens_120x40() {
 
 #[test]
 fn theme_studio_vim_navigation_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::theme_studio::ThemeStudioDemo::new();
     // Use vim-style j/k navigation in presets panel
     for _ in 0..3 {
@@ -1336,6 +1343,7 @@ fn theme_studio_title() {
 
 #[test]
 fn theme_studio_focus_token_inspector_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::theme_studio::ThemeStudioDemo::new();
     // Switch focus to token inspector panel (tests focus indicator)
     screen.update(&press(KeyCode::Tab));
@@ -1348,6 +1356,7 @@ fn theme_studio_focus_token_inspector_120x40() {
 
 #[test]
 fn theme_studio_home_key_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::theme_studio::ThemeStudioDemo::new();
     // Navigate down then use Home to jump to first
     for _ in 0..5 {
@@ -1363,6 +1372,7 @@ fn theme_studio_home_key_120x40() {
 
 #[test]
 fn theme_studio_end_key_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::theme_studio::ThemeStudioDemo::new();
     // Use End to jump to last preset
     screen.update(&press(KeyCode::End));
@@ -1375,6 +1385,7 @@ fn theme_studio_end_key_120x40() {
 
 #[test]
 fn theme_studio_page_down_tokens_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::theme_studio::ThemeStudioDemo::new();
     // Switch to token inspector and use PageDown
     screen.update(&press(KeyCode::Tab));
@@ -1392,6 +1403,7 @@ fn theme_studio_page_down_tokens_120x40() {
 
 #[test]
 fn snapshot_player_initial_80x24() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(80, 24, &mut pool);
@@ -1402,6 +1414,7 @@ fn snapshot_player_initial_80x24() {
 
 #[test]
 fn snapshot_player_initial_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(120, 40, &mut pool);
@@ -1412,6 +1425,7 @@ fn snapshot_player_initial_120x40() {
 
 #[test]
 fn snapshot_player_tiny_40x10() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(40, 10, &mut pool);
@@ -1422,6 +1436,7 @@ fn snapshot_player_tiny_40x10() {
 
 #[test]
 fn snapshot_player_wide_200x50() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     let mut pool = GraphemePool::new();
     let mut frame = Frame::new(200, 50, &mut pool);
@@ -1432,6 +1447,7 @@ fn snapshot_player_wide_200x50() {
 
 #[test]
 fn snapshot_player_step_forward_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     // Step forward several frames
     for _ in 0..5 {
@@ -1446,6 +1462,7 @@ fn snapshot_player_step_forward_120x40() {
 
 #[test]
 fn snapshot_player_end_key_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     // Jump to last frame
     screen.update(&press(KeyCode::End));
@@ -1458,6 +1475,7 @@ fn snapshot_player_end_key_120x40() {
 
 #[test]
 fn snapshot_player_home_key_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     // Go to end then back to start
     screen.update(&press(KeyCode::End));
@@ -1471,6 +1489,7 @@ fn snapshot_player_home_key_120x40() {
 
 #[test]
 fn snapshot_player_playing_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     // Start playback
     screen.update(&press(KeyCode::Char(' ')));
@@ -1483,6 +1502,7 @@ fn snapshot_player_playing_120x40() {
 
 #[test]
 fn snapshot_player_with_marker_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     // Step forward and add a marker
     for _ in 0..10 {
@@ -1498,6 +1518,7 @@ fn snapshot_player_with_marker_120x40() {
 
 #[test]
 fn snapshot_player_after_tick_playback_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     // Start playback and advance with ticks
     screen.update(&press(KeyCode::Char(' ')));
@@ -1513,6 +1534,7 @@ fn snapshot_player_after_tick_playback_120x40() {
 
 #[test]
 fn snapshot_player_vim_navigation_120x40() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     // Use vim-style h/l navigation
     for _ in 0..5 {
@@ -1527,6 +1549,7 @@ fn snapshot_player_vim_navigation_120x40() {
 
 #[test]
 fn snapshot_player_middle_frame_80x24() {
+    let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
     let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
     // Navigate to middle of timeline
     for _ in 0..25 {

@@ -32,8 +32,10 @@ pub use core_theme::{
     semantic_styles, status, status_badge, syntax, syntax_theme, theme_count, with_alpha,
     with_opacity,
 };
-pub use core_theme::{palette, set_theme};
+pub use core_theme::{ScopedThemeLock, palette, set_theme};
 
+#[cfg(test)]
+use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 // ---------------------------------------------------------------------------
@@ -77,9 +79,22 @@ impl A11ySettings {
     }
 }
 
+fn set_large_text_internal(enabled: bool) {
+    LARGE_TEXT_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
 /// Set the global large text mode.
 pub fn set_large_text(enabled: bool) {
-    LARGE_TEXT_ENABLED.store(enabled, Ordering::Relaxed);
+    #[cfg(test)]
+    {
+        let held = A11Y_LOCK_HELD.with(|h| h.get());
+        if !held {
+            let _guard = GLOBAL_A11Y_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            set_large_text_internal(enabled);
+            return;
+        }
+    }
+    set_large_text_internal(enabled);
 }
 
 /// Returns true if large text mode is enabled.
@@ -87,11 +102,24 @@ pub fn large_text_enabled() -> bool {
     LARGE_TEXT_ENABLED.load(Ordering::Relaxed)
 }
 
-/// Set the global motion scale (0.0 = stopped, 1.0 = full speed).
-pub fn set_motion_scale(scale: f32) {
+fn set_motion_scale_internal(scale: f32) {
     let clamped = scale.clamp(0.0, 1.0);
     let percent = (clamped * 100.0).round() as u8;
     MOTION_SCALE_PERCENT.store(percent, Ordering::Relaxed);
+}
+
+/// Set the global motion scale (0.0 = stopped, 1.0 = full speed).
+pub fn set_motion_scale(scale: f32) {
+    #[cfg(test)]
+    {
+        let held = A11Y_LOCK_HELD.with(|h| h.get());
+        if !held {
+            let _guard = GLOBAL_A11Y_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            set_motion_scale_internal(scale);
+            return;
+        }
+    }
+    set_motion_scale_internal(scale);
 }
 
 /// Get the current global motion scale (0.0..=1.0).
@@ -793,6 +821,108 @@ pub fn selection_indicator(is_selected: bool) -> &'static str {
 #[cfg(test)]
 static GLOBAL_A11Y_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+// Thread-local flag to track if current thread holds GLOBAL_A11Y_LOCK.
+// Used for reentrant-style locking in set_large_text/set_motion_scale when
+// called from within ScopedA11yLock.
+#[cfg(test)]
+thread_local! {
+    static A11Y_LOCK_HELD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// RAII guard that locks accessibility state for the duration of a test.
+///
+/// Acquires `GLOBAL_A11Y_LOCK` and sets accessibility settings to specific values,
+/// restoring the previous values when dropped. Use this in tests that depend on
+/// deterministic accessibility state (e.g., render determinism tests).
+///
+/// # Example
+///
+/// ```ignore
+/// let _guard = ScopedA11yLock::new(false, 1.0);
+/// // Accessibility state is now pinned: large_text=false, motion_scale=1.0
+/// // ... test code ...
+/// // State is restored when _guard goes out of scope
+/// ```
+#[cfg(test)]
+pub struct ScopedA11yLock {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    prev_large_text: bool,
+    prev_motion_scale: f32,
+}
+
+#[cfg(test)]
+impl ScopedA11yLock {
+    /// Create a new scoped accessibility lock with the specified settings.
+    ///
+    /// This acquires the global accessibility lock and sets the accessibility
+    /// settings to the provided values. The previous values are saved and will
+    /// be restored when this guard is dropped.
+    pub fn new(large_text: bool, new_motion_scale: f32) -> Self {
+        let guard = GLOBAL_A11Y_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        A11Y_LOCK_HELD.with(|h| h.set(true));
+        let prev_large_text = large_text_enabled();
+        let prev_motion_scale = motion_scale();
+        set_large_text(large_text);
+        set_motion_scale(new_motion_scale);
+        Self {
+            _guard: guard,
+            prev_large_text,
+            prev_motion_scale,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for ScopedA11yLock {
+    fn drop(&mut self) {
+        set_large_text(self.prev_large_text);
+        set_motion_scale(self.prev_motion_scale);
+        A11Y_LOCK_HELD.with(|h| h.set(false));
+    }
+}
+
+/// RAII guard that locks BOTH theme AND accessibility state for render determinism tests.
+///
+/// This combined guard ensures complete isolation from parallel tests by:
+/// 1. Acquiring the theme lock (prevents theme changes)
+/// 2. Acquiring the accessibility lock (prevents a11y setting changes)
+/// 3. Setting both to known deterministic values
+///
+/// Use this for any test that requires deterministic rendering output.
+///
+/// # Example
+///
+/// ```ignore
+/// let _guard = ScopedRenderLock::new(ThemeId::CyberpunkAurora, false, 1.0);
+/// // Both theme and a11y state are now pinned
+/// let checksum1 = render_to_checksum();
+/// let checksum2 = render_to_checksum();
+/// assert_eq!(checksum1, checksum2); // Will always pass
+/// ```
+#[cfg(test)]
+pub struct ScopedRenderLock<'a> {
+    _theme_guard: ScopedThemeLock<'a>,
+    _a11y_guard: ScopedA11yLock,
+}
+
+#[cfg(test)]
+impl<'a> ScopedRenderLock<'a> {
+    /// Create a new combined render lock with the specified theme and accessibility settings.
+    ///
+    /// This acquires both the theme and accessibility locks, ensuring complete isolation
+    /// for render determinism tests.
+    pub fn new(theme: ThemeId, large_text: bool, motion_scale: f32) -> Self {
+        // Acquire theme lock first (blocks if another test holds it)
+        let theme_guard = ScopedThemeLock::new(theme);
+        // Then acquire a11y lock
+        let a11y_guard = ScopedA11yLock::new(large_text, motion_scale);
+        Self {
+            _theme_guard: theme_guard,
+            _a11y_guard: a11y_guard,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1185,7 +1315,7 @@ mod tests {
     #[test]
     fn primary_fg_on_base_bg_meets_wcag_aa() {
         for theme in ThemeId::ALL {
-            set_theme(theme);
+            let _guard = ScopedThemeLock::new(theme);
             let ratio = cr(fg::PRIMARY, bg::BASE);
             assert!(
                 ratio >= WCAG_AA_NORMAL,
@@ -1197,7 +1327,7 @@ mod tests {
     #[test]
     fn secondary_fg_on_base_bg_meets_wcag_aa() {
         for theme in ThemeId::ALL {
-            set_theme(theme);
+            let _guard = ScopedThemeLock::new(theme);
             let ratio = cr(fg::SECONDARY, bg::BASE);
             assert!(
                 ratio >= WCAG_AA_NORMAL,
@@ -1211,7 +1341,7 @@ mod tests {
         // Muted text is typically used at large size or for decorative purposes,
         // so we use the relaxed 3:1 threshold.
         for theme in ThemeId::ALL {
-            set_theme(theme);
+            let _guard = ScopedThemeLock::new(theme);
             let ratio = cr(fg::MUTED, bg::BASE);
             assert!(
                 ratio >= WCAG_AA_LARGE,
@@ -1223,7 +1353,7 @@ mod tests {
     #[test]
     fn accent_error_on_base_bg_meets_wcag_aa() {
         for theme in ThemeId::ALL {
-            set_theme(theme);
+            let _guard = ScopedThemeLock::new(theme);
             let ratio = cr(accent::ERROR, bg::BASE);
             assert!(
                 ratio >= WCAG_AA_NORMAL,
@@ -1235,7 +1365,7 @@ mod tests {
     #[test]
     fn accent_success_on_base_bg_meets_wcag_aa() {
         for theme in ThemeId::ALL {
-            set_theme(theme);
+            let _guard = ScopedThemeLock::new(theme);
             let ratio = cr(accent::SUCCESS, bg::BASE);
             assert!(
                 ratio >= WCAG_AA_NORMAL,
@@ -1247,7 +1377,7 @@ mod tests {
     #[test]
     fn accent_warning_on_base_bg_meets_wcag_aa_large() {
         for theme in ThemeId::ALL {
-            set_theme(theme);
+            let _guard = ScopedThemeLock::new(theme);
             let ratio = cr(accent::WARNING, bg::BASE);
             assert!(
                 ratio >= WCAG_AA_LARGE,
@@ -1259,7 +1389,7 @@ mod tests {
     #[test]
     fn accent_info_on_base_bg_meets_wcag_aa() {
         for theme in ThemeId::ALL {
-            set_theme(theme);
+            let _guard = ScopedThemeLock::new(theme);
             let ratio = cr(accent::INFO, bg::BASE);
             assert!(
                 ratio >= WCAG_AA_LARGE,
@@ -1277,7 +1407,7 @@ mod tests {
             ("StatusClosed", ColorToken::StatusClosed),
         ];
         for theme in ThemeId::ALL {
-            set_theme(theme);
+            let _guard = ScopedThemeLock::new(theme);
             for (name, token) in status_tokens {
                 let ratio = cr(token, bg::BASE);
                 assert!(
@@ -1298,7 +1428,7 @@ mod tests {
             ("P4", ColorToken::PriorityP4),
         ];
         for theme in ThemeId::ALL {
-            set_theme(theme);
+            let _guard = ScopedThemeLock::new(theme);
             for (name, token) in priority_tokens {
                 let ratio = cr(token, bg::BASE);
                 assert!(
@@ -1323,7 +1453,7 @@ mod tests {
             ("ACTION_TIMELINE", screen_accent::ACTION_TIMELINE),
         ];
         for theme in ThemeId::ALL {
-            set_theme(theme);
+            let _guard = ScopedThemeLock::new(theme);
             for (name, token) in screens {
                 let ratio = cr(*token, bg::DEEP);
                 assert!(

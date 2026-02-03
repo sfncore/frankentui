@@ -20,6 +20,8 @@ use ftui_widgets::borders::{BorderType, Borders};
 use ftui_widgets::paragraph::Paragraph;
 
 use super::{HelpEntry, Screen};
+#[cfg(test)]
+use crate::theme::ScopedThemeLock;
 use crate::theme::{self, ThemeId};
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1630,9 +1632,11 @@ mod tests {
 
     #[test]
     fn ctrl_t_cycles_theme() {
+        // Hold lock for entire test to prevent races with parallel tests
+        let _guard = ScopedThemeLock::new(ThemeId::CyberpunkAurora);
         let mut demo = ThemeStudioDemo::new();
         demo.update(&ctrl_press(KeyCode::Char('t')));
-        // Preset index should update to match global theme
+        // Preset index should update to match global theme (Darcula after cycling)
         assert_eq!(demo.preset_index, theme::current_theme().index());
         assert!(demo.export_status.is_some(), "Should show status message");
     }
