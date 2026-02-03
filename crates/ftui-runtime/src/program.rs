@@ -956,9 +956,11 @@ impl<M: Model, W: Write + Send> Program<M, W> {
     /// Classify an event for fairness tracking.
     fn classify_event_for_fairness(event: &Event) -> FairnessEventType {
         match event {
-            Event::Key(_) | Event::Mouse(_) | Event::Paste(_) | Event::Focus(_) => {
-                FairnessEventType::Input
-            }
+            Event::Key(_)
+            | Event::Mouse(_)
+            | Event::Paste(_)
+            | Event::Focus(_)
+            | Event::Clipboard(_) => FairnessEventType::Input,
             Event::Resize { .. } => FairnessEventType::Resize,
             Event::Tick => FairnessEventType::Tick,
         }
