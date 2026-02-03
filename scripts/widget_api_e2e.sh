@@ -200,7 +200,7 @@ log_step "Testing feature combinations"
     echo "Feature combination tests - $(date -Iseconds)"
     echo ""
 
-    # ftui-extras features
+    # ftui-extras base features
     EXTRAS_FEATURES=("canvas" "charts" "forms" "markdown" "export" "clipboard" "syntax" "image")
 
     for feature in "${EXTRAS_FEATURES[@]}"; do
@@ -210,6 +210,59 @@ log_step "Testing feature combinations"
         else
             echo "  [FAIL] $feature"
             exit 1
+        fi
+    done
+
+    echo ""
+    echo "=== Visual FX Feature Matrix (bd-l8x9.8.4) ==="
+    echo ""
+
+    # Visual FX features - CPU path (required)
+    VISUAL_FX_FEATURES=(
+        "visual-fx"
+        "visual-fx-metaballs"
+        "visual-fx-plasma"
+        "visual-fx,canvas"
+        "visual-fx-metaballs,canvas"
+        "visual-fx-plasma,canvas"
+    )
+
+    for feature in "${VISUAL_FX_FEATURES[@]}"; do
+        echo "Testing ftui-extras --features $feature ..."
+        CMD="cargo check -p ftui-extras --features $feature"
+        echo "  Command: $CMD"
+        if $CMD 2>&1; then
+            echo "  [PASS] $feature"
+        else
+            echo "  [FAIL] $feature"
+            echo "  Exit code: $?"
+            echo "  Last 200 lines of output:"
+            tail -200
+            exit 1
+        fi
+    done
+
+    echo ""
+    echo "=== GPU Feature Matrix (optional, may fail without GPU) ==="
+    echo ""
+
+    # GPU features - optional, log but don't fail if wgpu not available
+    GPU_FEATURES=(
+        "fx-gpu,visual-fx"
+        "fx-gpu,visual-fx-metaballs"
+        "fx-gpu,visual-fx,canvas"
+    )
+
+    for feature in "${GPU_FEATURES[@]}"; do
+        echo "Testing ftui-extras --features $feature ..."
+        CMD="cargo check -p ftui-extras --features $feature"
+        echo "  Command: $CMD"
+        if $CMD 2>&1; then
+            echo "  [PASS] $feature (GPU path compiles)"
+        else
+            # GPU features may fail on systems without wgpu support
+            # Log but don't fail - GPU is strictly optional
+            echo "  [WARN] $feature (GPU path not available - this is OK)"
         fi
     done
 

@@ -97,7 +97,7 @@ run_case() {
         output_sha="$(sha256_file "$output_file")"
         log_test_pass "$name"
         record_result "$name" "passed" "$duration_ms" "$LOG_FILE"
-        jsonl_log "{\"run_id\":\"$RUN_ID\",\"case\":\"$name\",\"status\":\"passed\",\"duration_ms\":$duration_ms,\"output_bytes\":$size,\"output_sha256\":\"$output_sha\",\"send\":\"$send_label\",\"cols\":120,\"rows\":40,\"seed\":\"$SEED\",\"term\":\"${TERM:-}\",\"colorterm\":\"${COLORTERM:-}\",\"no_color\":\"${NO_COLOR:-}\"}"
+        jsonl_log "{\"run_id\":\"$RUN_ID\",\"case\":\"$name\",\"status\":\"passed\",\"duration_ms\":$duration_ms,\"output_bytes\":$size,\"output_sha256\":\"$output_sha\",\"send\":\"$send_label\",\"cols\":120,\"rows\":40,\"seed\":\"$SEED\",\"screen\":\"${THEME_STUDIO_SCREEN:-}\",\"term\":\"${TERM:-}\",\"colorterm\":\"${COLORTERM:-}\",\"no_color\":\"${NO_COLOR:-}\"}"
         return 0
     fi
 
@@ -108,7 +108,7 @@ run_case() {
     output_sha="$(sha256_file "$output_file")"
     log_test_fail "$name" "assertion failed"
     record_result "$name" "failed" "$duration_ms" "$LOG_FILE" "assertion failed"
-    jsonl_log "{\"run_id\":\"$RUN_ID\",\"case\":\"$name\",\"status\":\"failed\",\"duration_ms\":$duration_ms,\"output_sha256\":\"$output_sha\",\"send\":\"$send_label\",\"cols\":120,\"rows\":40,\"seed\":\"$SEED\",\"term\":\"${TERM:-}\",\"colorterm\":\"${COLORTERM:-}\",\"no_color\":\"${NO_COLOR:-}\"}"
+    jsonl_log "{\"run_id\":\"$RUN_ID\",\"case\":\"$name\",\"status\":\"failed\",\"duration_ms\":$duration_ms,\"output_sha256\":\"$output_sha\",\"send\":\"$send_label\",\"cols\":120,\"rows\":40,\"seed\":\"$SEED\",\"screen\":\"${THEME_STUDIO_SCREEN:-}\",\"term\":\"${TERM:-}\",\"colorterm\":\"${COLORTERM:-}\",\"no_color\":\"${NO_COLOR:-}\"}"
     return 1
 }
 
@@ -118,7 +118,7 @@ if [[ -z "$DEMO_BIN" ]]; then
     for t in theme_studio_smoke theme_studio_cycle; do
         log_test_skip "$t" "ftui-demo-showcase binary missing"
         record_result "$t" "skipped" 0 "$LOG_FILE" "binary missing"
-        jsonl_log "{\"run_id\":\"$RUN_ID\",\"case\":\"$t\",\"status\":\"skipped\",\"reason\":\"binary missing\",\"seed\":\"$SEED\",\"term\":\"${TERM:-}\",\"colorterm\":\"${COLORTERM:-}\",\"no_color\":\"${NO_COLOR:-}\"}"
+        jsonl_log "{\"run_id\":\"$RUN_ID\",\"case\":\"$t\",\"status\":\"skipped\",\"reason\":\"binary missing\",\"seed\":\"$SEED\",\"screen\":\"${THEME_STUDIO_SCREEN:-}\",\"term\":\"${TERM:-}\",\"colorterm\":\"${COLORTERM:-}\",\"no_color\":\"${NO_COLOR:-}\"}"
     done
     exit 0
 fi
@@ -129,7 +129,7 @@ if [[ -z "$THEME_STUDIO_SCREEN" ]]; then
     for t in theme_studio_smoke theme_studio_cycle; do
         log_test_skip "$t" "Theme Studio screen not registered in --help"
         record_result "$t" "skipped" 0 "$LOG_FILE" "screen missing"
-        jsonl_log "{\"run_id\":\"$RUN_ID\",\"case\":\"$t\",\"status\":\"skipped\",\"reason\":\"screen missing\",\"seed\":\"$SEED\",\"term\":\"${TERM:-}\",\"colorterm\":\"${COLORTERM:-}\",\"no_color\":\"${NO_COLOR:-}\"}"
+        jsonl_log "{\"run_id\":\"$RUN_ID\",\"case\":\"$t\",\"status\":\"skipped\",\"reason\":\"screen missing\",\"seed\":\"$SEED\",\"screen\":\"${THEME_STUDIO_SCREEN:-}\",\"term\":\"${TERM:-}\",\"colorterm\":\"${COLORTERM:-}\",\"no_color\":\"${NO_COLOR:-}\"}"
     done
     exit 0
 fi
@@ -155,7 +155,7 @@ theme_studio_smoke() {
     size=$(wc -c < "$output_file" | tr -d ' ')
     [[ "$size" -gt 300 ]] || return 1
     # Expect the screen title to appear in the output
-    grep -a -qi "Theme" "$output_file" || return 1
+    grep -a -qi "Theme Studio" "$output_file" || return 1
 }
 
 # Test 2: Cycle theme via Ctrl+T
