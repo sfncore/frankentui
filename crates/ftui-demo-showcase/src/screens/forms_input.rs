@@ -936,12 +936,38 @@ impl Screen for FormsInput {
             return Cmd::None;
         }
         if let Event::Key(KeyEvent {
+            code: KeyCode::Down,
+            modifiers,
+            kind: KeyEventKind::Press,
+            ..
+        }) = event
+            && modifiers.contains(Modifiers::ALT)
+        {
+            self.focus = self.focus.next();
+            self.update_focus_states();
+            self.update_status();
+            return Cmd::None;
+        }
+        if let Event::Key(KeyEvent {
             code: KeyCode::Left,
             modifiers,
             kind: KeyEventKind::Press,
             ..
         }) = event
             && modifiers.contains(Modifiers::CTRL)
+        {
+            self.focus = self.focus.prev();
+            self.update_focus_states();
+            self.update_status();
+            return Cmd::None;
+        }
+        if let Event::Key(KeyEvent {
+            code: KeyCode::Up,
+            modifiers,
+            kind: KeyEventKind::Press,
+            ..
+        }) = event
+            && modifiers.contains(Modifiers::ALT)
         {
             self.focus = self.focus.prev();
             self.update_focus_states();
@@ -1022,7 +1048,7 @@ impl Screen for FormsInput {
     fn keybindings(&self) -> Vec<HelpEntry> {
         vec![
             HelpEntry {
-                key: "Ctrl+\u{2190}/\u{2192}",
+                key: "Ctrl+\u{2190}/\u{2192} or Alt+\u{2191}/\u{2193}",
                 action: "Switch panel",
             },
             HelpEntry {
@@ -1116,6 +1142,14 @@ mod tests {
         })
     }
 
+    fn alt_press(code: KeyCode) -> Event {
+        Event::Key(KeyEvent {
+            code,
+            modifiers: Modifiers::ALT,
+            kind: KeyEventKind::Press,
+        })
+    }
+
     #[test]
     fn initial_state() {
         let screen = FormsInput::new();
@@ -1154,6 +1188,15 @@ mod tests {
         let mut screen = FormsInput::new();
         screen.update(&ctrl_press(KeyCode::Left));
         assert_eq!(screen.focus, FocusPanel::TextEditor);
+    }
+
+    #[test]
+    fn alt_arrow_switches_panel() {
+        let mut screen = FormsInput::new();
+        screen.update(&alt_press(KeyCode::Down));
+        assert_eq!(screen.focus, FocusPanel::SearchInput);
+        screen.update(&alt_press(KeyCode::Up));
+        assert_eq!(screen.focus, FocusPanel::Form);
     }
 
     #[test]

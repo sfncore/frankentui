@@ -67,7 +67,8 @@ impl StopSignal {
     /// Check if the stop signal has been triggered.
     pub fn is_stopped(&self) -> bool {
         let (lock, _) = &*self.inner;
-        *lock.lock().unwrap()
+        // Recover from poisoned mutex - if a thread panicked, we still want to check the flag
+        *lock.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Wait for either the stop signal or a timeout.
@@ -77,7 +78,8 @@ impl StopSignal {
     /// Handles spurious wakeups by looping until condition met or timeout expired.
     pub fn wait_timeout(&self, duration: Duration) -> bool {
         let (lock, cvar) = &*self.inner;
-        let mut stopped = lock.lock().unwrap();
+        // Recover from poisoned mutex - if a thread panicked, we still need to check/wait
+        let mut stopped = lock.lock().unwrap_or_else(|e| e.into_inner());
         if *stopped {
             return true;
         }
@@ -86,7 +88,10 @@ impl StopSignal {
         let mut remaining = duration;
 
         loop {
-            let (guard, result) = cvar.wait_timeout(stopped, remaining).unwrap();
+            // Recover from poisoned mutex on wait_timeout as well
+            let (guard, result) = cvar
+                .wait_timeout(stopped, remaining)
+                .unwrap_or_else(|e| e.into_inner());
             stopped = guard;
             if *stopped {
                 return true;
@@ -113,7 +118,8 @@ impl StopTrigger {
     /// Signal the subscription to stop.
     pub(crate) fn stop(&self) {
         let (lock, cvar) = &*self.inner;
-        let mut stopped = lock.lock().unwrap();
+        // Recover from poisoned mutex - we must set the stop flag regardless
+        let mut stopped = lock.lock().unwrap_or_else(|e| e.into_inner());
         *stopped = true;
         cvar.notify_all();
     }

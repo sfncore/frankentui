@@ -71,6 +71,11 @@ use std::collections::VecDeque;
 /// Minimum e-value floor to prevent permanent zero-lock.
 const E_MIN: f64 = 1e-12;
 
+/// Maximum e-value ceiling to prevent overflow to infinity.
+/// This is the inverse of E_MIN for symmetry - if we reach this value,
+/// we're already well above any reasonable alert threshold.
+const E_MAX: f64 = 1e12;
+
 /// Minimum calibration samples before using conformal threshold.
 const MIN_CALIBRATION: usize = 10;
 
@@ -400,8 +405,9 @@ impl ConformalAlert {
         let z_centered = z_score - self.config.mu_0;
         let exponent =
             self.lambda * z_centered - (self.lambda.powi(2) * self.config.sigma_0.powi(2)) / 2.0;
-        let e_factor = exponent.exp();
-        self.e_value = (self.e_value * e_factor).max(E_MIN);
+        // Clamp exponent to prevent exp() overflow to infinity (exp(709) ≈ 8.2e307)
+        let e_factor = exponent.clamp(-700.0, 700.0).exp();
+        self.e_value = (self.e_value * e_factor).clamp(E_MIN, E_MAX);
 
         let eprocess_alert = self.e_value > self.e_threshold;
 
@@ -1238,5 +1244,68 @@ mod tests {
         assert!(summary.contains("res="));
         assert!(summary.contains("E="));
         assert!(summary.contains("alert="));
+    }
+
+    #[test]
+    fn evalue_ceiling_prevents_overflow() {
+        // Test that extremely large z-scores don't cause e-value to overflow to infinity
+        let mut config = test_config();
+        config.hysteresis = f64::MAX; // Prevent alerts from resetting e-value
+        config.alert_cooldown = 0;
+        let mut alerter = ConformalAlert::new(config);
+
+        // Calibrate with tight distribution around 0
+        for _ in 0..10 {
+            alerter.calibrate(0.0);
+        }
+
+        // Observe astronomically large value that would cause overflow without ceiling
+        // Without the fix, exp(lambda * z_score) would be infinity
+        let decision = alerter.observe(1e100);
+
+        // E-value should be capped at E_MAX (1e12), not infinity
+        assert!(
+            decision.evidence.e_value.is_finite(),
+            "E-value should be finite, got {}",
+            decision.evidence.e_value
+        );
+        assert!(
+            decision.evidence.e_value <= E_MAX,
+            "E-value {} should be <= E_MAX {}",
+            decision.evidence.e_value,
+            E_MAX
+        );
+        assert!(
+            decision.evidence.e_value > 0.0,
+            "E-value should be positive"
+        );
+    }
+
+    #[test]
+    fn evalue_floor_prevents_underflow() {
+        // Test that extremely negative z-scores don't cause e-value to underflow to zero
+        let mut config = test_config();
+        config.hysteresis = f64::MAX;
+        let mut alerter = ConformalAlert::new(config);
+
+        // Calibrate with values around a large number
+        for _ in 0..10 {
+            alerter.calibrate(1e100);
+        }
+
+        // Observe zero - this creates a massive negative z-score
+        let decision = alerter.observe(0.0);
+
+        // E-value should be floored at E_MIN, not zero or subnormal
+        assert!(
+            decision.evidence.e_value >= E_MIN,
+            "E-value {} should be >= E_MIN {}",
+            decision.evidence.e_value,
+            E_MIN
+        );
+        assert!(
+            decision.evidence.e_value.is_finite(),
+            "E-value should be finite"
+        );
     }
 }

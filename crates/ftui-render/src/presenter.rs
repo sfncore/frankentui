@@ -175,7 +175,7 @@ mod cost_model {
             let move_cost = cheapest_move_cost(cursor_x, cursor_y, run.x0, run.y);
             let cells = (run.x1 - run.x0 + 1) as usize;
             sparse_cost += move_cost + cells;
-            cursor_x = Some(run.x1 + 1); // cursor advances past run
+            cursor_x = Some(run.x1.saturating_add(1)); // cursor advances past run
             cursor_y = Some(row_y);
         }
 

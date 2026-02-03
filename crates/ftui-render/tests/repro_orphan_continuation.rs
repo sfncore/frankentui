@@ -28,11 +28,17 @@ fn copy_from_slices_wide_char_end() {
     src.set(0, 0, Cell::from_char('中'));
 
     let mut dst = Buffer::new(5, 1);
-    // Copy only the head (x=0, width=1)
+    // Copy only the head (x=0, width=1) - tail doesn't fit in copy region
     dst.copy_from(&src, Rect::new(0, 0, 1, 1), 0, 0);
 
-    // dst[0] gets Head. dst[1] gets Tail (automatically written by set).
-    // This is the "extrapolation" behavior.
-    assert_eq!(dst.get(0, 0).unwrap().content.as_char(), Some('中'));
-    assert!(dst.get(1, 0).unwrap().is_continuation());
+    // With atomic rejection: wide char head should NOT be written if tail is clipped.
+    // This prevents orphan continuations and partial wide chars.
+    assert!(
+        dst.get(0, 0).unwrap().is_empty(),
+        "Wide char head should not be written if tail is clipped"
+    );
+    assert!(
+        dst.get(1, 0).unwrap().is_empty(),
+        "No continuation should exist since head was rejected"
+    );
 }
