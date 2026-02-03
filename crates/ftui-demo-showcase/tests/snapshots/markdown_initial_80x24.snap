@@ -12,7 +12,7 @@
 │                          ││                          ││The quick brown fox   │
 │  ∑ᵢ₌₁ⁿ xᵢ = n(n+1)/2     ││                          ││jumps over the lazy   │
 │                          ││                          ││dog.                  │
-│f(x) = ∫_{−∞}^{∞}         ││                          ││Supercalifragilisticex│
+│  f(x) = ∫_{−∞}^{∞}       ││                          ││Supercalifragilisticex│
 │e^{−x²} dx = √{π}         ││                          ││is quite a long word  │
 │                          ││                          ││that tests            │
 │Greek letters: α, β, γ, δ,││                          ││character-level       │

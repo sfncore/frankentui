@@ -13,6 +13,7 @@ use ftui_core::geometry::Rect;
 use ftui_core::terminal_capabilities::TerminalProfile;
 use ftui_demo_showcase::app::{AppModel, ScreenId};
 use ftui_demo_showcase::screens::Screen;
+use ftui_demo_showcase::theme::{ThemeId, set_theme};
 use ftui_harness::assert_snapshot;
 use ftui_render::frame::Frame;
 use ftui_render::grapheme_pool::GraphemePool;
@@ -606,6 +607,39 @@ fn markdown_tiny_40x10() {
     let area = Rect::new(0, 0, 40, 10);
     screen.view(&mut frame, area);
     assert_snapshot!("markdown_tiny_40x10", &frame.buffer);
+}
+
+/// Verify markdown-over-backdrop readability with a light theme (LumenLight).
+/// Complements `markdown_initial_120x40` which uses the default dark theme.
+/// Required by bd-l8x9.7: snapshot tests across at least two theme variants.
+#[test]
+fn markdown_backdrop_light_theme_120x40() {
+    set_theme(ThemeId::LumenLight);
+    let mut screen = ftui_demo_showcase::screens::markdown_rich_text::MarkdownRichText::new();
+    screen.apply_theme();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("markdown_backdrop_light_theme_120x40", &frame.buffer);
+    // Restore default theme for other tests.
+    set_theme(ThemeId::CyberpunkAurora);
+}
+
+/// Verify markdown-over-backdrop readability with the NordicFrost theme.
+/// Provides a third theme variant for bd-l8x9.7 snapshot regression coverage.
+#[test]
+fn markdown_backdrop_nordic_theme_120x40() {
+    set_theme(ThemeId::NordicFrost);
+    let mut screen = ftui_demo_showcase::screens::markdown_rich_text::MarkdownRichText::new();
+    screen.apply_theme();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("markdown_backdrop_nordic_theme_120x40", &frame.buffer);
+    // Restore default theme for other tests.
+    set_theme(ThemeId::CyberpunkAurora);
 }
 
 // ============================================================================

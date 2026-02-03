@@ -42,6 +42,10 @@ use ftui_widgets::columns::Columns;
 use ftui_widgets::paragraph::Paragraph;
 use std::path::Path;
 
+fn golden_base_dir() -> &'static Path {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+}
+
 // ============================================================================
 // Breakpoint Test Utilities
 // ============================================================================
@@ -222,8 +226,8 @@ fn run_reflow_test(name: &str, widths: &[(u16, u16)], base_dir: &Path) -> Reflow
 #[test]
 fn golden_reflow_breakpoint_xs() {
     let sizes = [(40, 24), (35, 20), (45, 30)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_breakpoint_xs", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_breakpoint_xs", &sizes, base_dir);
     assert!(
         result.passed,
         "Breakpoint Xs test failed at index {:?}",
@@ -234,8 +238,8 @@ fn golden_reflow_breakpoint_xs() {
 #[test]
 fn golden_reflow_breakpoint_sm() {
     let sizes = [(60, 24), (55, 20), (75, 30)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_breakpoint_sm", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_breakpoint_sm", &sizes, base_dir);
     assert!(
         result.passed,
         "Breakpoint Sm test failed at index {:?}",
@@ -246,8 +250,8 @@ fn golden_reflow_breakpoint_sm() {
 #[test]
 fn golden_reflow_breakpoint_md() {
     let sizes = [(80, 24), (85, 25), (115, 35)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_breakpoint_md", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_breakpoint_md", &sizes, base_dir);
     assert!(
         result.passed,
         "Breakpoint Md test failed at index {:?}",
@@ -258,8 +262,8 @@ fn golden_reflow_breakpoint_md() {
 #[test]
 fn golden_reflow_breakpoint_lg() {
     let sizes = [(120, 40), (130, 45), (155, 50)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_breakpoint_lg", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_breakpoint_lg", &sizes, base_dir);
     assert!(
         result.passed,
         "Breakpoint Lg test failed at index {:?}",
@@ -270,8 +274,8 @@ fn golden_reflow_breakpoint_lg() {
 #[test]
 fn golden_reflow_breakpoint_xl() {
     let sizes = [(160, 50), (180, 55), (200, 60)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_breakpoint_xl", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_breakpoint_xl", &sizes, base_dir);
     assert!(
         result.passed,
         "Breakpoint Xl test failed at index {:?}",
@@ -287,8 +291,8 @@ fn golden_reflow_breakpoint_xl() {
 fn golden_reflow_transition_grow_xs_to_md() {
     // Test growing from Xs through Sm to Md
     let sizes = [(40, 24), (60, 24), (80, 24)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_transition_grow_xs_to_md", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_transition_grow_xs_to_md", &sizes, base_dir);
     assert!(
         result.passed,
         "Grow transition Xs→Md failed at index {:?}",
@@ -300,8 +304,8 @@ fn golden_reflow_transition_grow_xs_to_md() {
 fn golden_reflow_transition_grow_md_to_xl() {
     // Test growing from Md through Lg to Xl
     let sizes = [(80, 24), (120, 40), (160, 50)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_transition_grow_md_to_xl", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_transition_grow_md_to_xl", &sizes, base_dir);
     assert!(
         result.passed,
         "Grow transition Md→Xl failed at index {:?}",
@@ -313,8 +317,8 @@ fn golden_reflow_transition_grow_md_to_xl() {
 fn golden_reflow_transition_shrink_xl_to_md() {
     // Test shrinking from Xl through Lg to Md
     let sizes = [(160, 50), (120, 40), (80, 24)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_transition_shrink_xl_to_md", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_transition_shrink_xl_to_md", &sizes, base_dir);
     assert!(
         result.passed,
         "Shrink transition Xl→Md failed at index {:?}",
@@ -326,8 +330,8 @@ fn golden_reflow_transition_shrink_xl_to_md() {
 fn golden_reflow_transition_shrink_md_to_xs() {
     // Test shrinking from Md through Sm to Xs
     let sizes = [(80, 24), (60, 24), (40, 24)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_transition_shrink_md_to_xs", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_transition_shrink_md_to_xs", &sizes, base_dir);
     assert!(
         result.passed,
         "Shrink transition Md→Xs failed at index {:?}",
@@ -343,8 +347,8 @@ fn golden_reflow_transition_shrink_md_to_xs() {
 fn golden_reflow_at_boundary_sm() {
     // Test exactly at and around the Sm boundary (60 pixels)
     let sizes = [(59, 24), (60, 24), (61, 24)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_boundary_sm", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_boundary_sm", &sizes, base_dir);
     assert!(
         result.passed,
         "Boundary Sm test failed at index {:?}",
@@ -356,8 +360,8 @@ fn golden_reflow_at_boundary_sm() {
 fn golden_reflow_at_boundary_md() {
     // Test exactly at and around the Md boundary (80 pixels)
     let sizes = [(79, 24), (80, 24), (81, 24)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_boundary_md", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_boundary_md", &sizes, base_dir);
     assert!(
         result.passed,
         "Boundary Md test failed at index {:?}",
@@ -369,8 +373,8 @@ fn golden_reflow_at_boundary_md() {
 fn golden_reflow_at_boundary_lg() {
     // Test exactly at and around the Lg boundary (120 pixels)
     let sizes = [(119, 40), (120, 40), (121, 40)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_boundary_lg", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_boundary_lg", &sizes, base_dir);
     assert!(
         result.passed,
         "Boundary Lg test failed at index {:?}",
@@ -382,8 +386,8 @@ fn golden_reflow_at_boundary_lg() {
 fn golden_reflow_at_boundary_xl() {
     // Test exactly at and around the Xl boundary (160 pixels)
     let sizes = [(159, 50), (160, 50), (161, 50)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_boundary_xl", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_boundary_xl", &sizes, base_dir);
     assert!(
         result.passed,
         "Boundary Xl test failed at index {:?}",
@@ -399,8 +403,8 @@ fn golden_reflow_at_boundary_xl() {
 fn golden_reflow_rapid_resize_jitter() {
     // Test rapid resize back and forth (simulates window drag)
     let sizes = [(80, 24), (82, 24), (78, 24), (80, 24), (85, 24), (75, 24)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_rapid_jitter", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_rapid_jitter", &sizes, base_dir);
     assert!(
         result.passed,
         "Rapid jitter test failed at index {:?}",
@@ -412,8 +416,8 @@ fn golden_reflow_rapid_resize_jitter() {
 fn golden_reflow_rapid_boundary_cross() {
     // Test rapid crossing of breakpoint boundaries
     let sizes = [(79, 24), (81, 24), (79, 24), (81, 24)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_rapid_boundary_cross", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_rapid_boundary_cross", &sizes, base_dir);
     assert!(
         result.passed,
         "Rapid boundary cross test failed at index {:?}",
@@ -429,8 +433,8 @@ fn golden_reflow_rapid_boundary_cross() {
 fn golden_reflow_height_variations() {
     // Test same width at different heights
     let sizes = [(80, 10), (80, 24), (80, 40), (80, 60)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_height_variations", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_height_variations", &sizes, base_dir);
     assert!(
         result.passed,
         "Height variations test failed at index {:?}",
@@ -442,8 +446,8 @@ fn golden_reflow_height_variations() {
 fn golden_reflow_minimum_viable_size() {
     // Test at minimum viable terminal sizes
     let sizes = [(20, 5), (30, 8), (40, 10)];
-    let base_dir = std::env::temp_dir().join("ftui_golden_reflow");
-    let result = run_reflow_test("reflow_minimum_viable", &sizes, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_reflow_test("reflow_minimum_viable", &sizes, base_dir);
     assert!(
         result.passed,
         "Minimum viable size test failed at index {:?}",

@@ -40,6 +40,10 @@ use ftui_widgets::borders::Borders;
 use ftui_widgets::paragraph::Paragraph;
 use std::path::Path;
 
+fn golden_base_dir() -> &'static Path {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+}
+
 /// Render a simple test pattern into a buffer.
 fn render_test_pattern(buf: &mut Buffer, width: u16, height: u16) {
     // Border
@@ -122,40 +126,40 @@ fn run_golden_scenario(scenario: &ResizeScenario, base_dir: &Path) -> GoldenResu
 #[test]
 fn golden_fixed_80x24() {
     let scenario = ResizeScenario::fixed("fixed_80x24", 80, 24);
-    let base_dir = std::env::temp_dir().join("ftui_golden_tests");
-    let result = run_golden_scenario(&scenario, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_golden_scenario(&scenario, base_dir);
     assert!(result.is_pass(), "{}", result.format());
 }
 
 #[test]
 fn golden_fixed_120x40() {
     let scenario = ResizeScenario::fixed("fixed_120x40", 120, 40);
-    let base_dir = std::env::temp_dir().join("ftui_golden_tests");
-    let result = run_golden_scenario(&scenario, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_golden_scenario(&scenario, base_dir);
     assert!(result.is_pass(), "{}", result.format());
 }
 
 #[test]
 fn golden_fixed_60x15() {
     let scenario = ResizeScenario::fixed("fixed_60x15", 60, 15);
-    let base_dir = std::env::temp_dir().join("ftui_golden_tests");
-    let result = run_golden_scenario(&scenario, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_golden_scenario(&scenario, base_dir);
     assert!(result.is_pass(), "{}", result.format());
 }
 
 #[test]
 fn golden_fixed_40x10() {
     let scenario = ResizeScenario::fixed("fixed_40x10", 40, 10);
-    let base_dir = std::env::temp_dir().join("ftui_golden_tests");
-    let result = run_golden_scenario(&scenario, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_golden_scenario(&scenario, base_dir);
     assert!(result.is_pass(), "{}", result.format());
 }
 
 #[test]
 fn golden_fixed_200x60() {
     let scenario = ResizeScenario::fixed("fixed_200x60", 200, 60);
-    let base_dir = std::env::temp_dir().join("ftui_golden_tests");
-    let result = run_golden_scenario(&scenario, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_golden_scenario(&scenario, base_dir);
     assert!(result.is_pass(), "{}", result.format());
 }
 
@@ -166,32 +170,32 @@ fn golden_fixed_200x60() {
 #[test]
 fn golden_resize_80x24_to_120x40() {
     let scenario = ResizeScenario::resize("resize_80x24_to_120x40", 80, 24, 120, 40);
-    let base_dir = std::env::temp_dir().join("ftui_golden_tests");
-    let result = run_golden_scenario(&scenario, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_golden_scenario(&scenario, base_dir);
     assert!(result.is_pass(), "{}", result.format());
 }
 
 #[test]
 fn golden_resize_120x40_to_80x24() {
     let scenario = ResizeScenario::resize("resize_120x40_to_80x24", 120, 40, 80, 24);
-    let base_dir = std::env::temp_dir().join("ftui_golden_tests");
-    let result = run_golden_scenario(&scenario, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_golden_scenario(&scenario, base_dir);
     assert!(result.is_pass(), "{}", result.format());
 }
 
 #[test]
 fn golden_resize_80x24_to_40x10() {
     let scenario = ResizeScenario::resize("resize_80x24_to_40x10", 80, 24, 40, 10);
-    let base_dir = std::env::temp_dir().join("ftui_golden_tests");
-    let result = run_golden_scenario(&scenario, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_golden_scenario(&scenario, base_dir);
     assert!(result.is_pass(), "{}", result.format());
 }
 
 #[test]
 fn golden_resize_40x10_to_200x60() {
     let scenario = ResizeScenario::resize("resize_40x10_to_200x60", 40, 10, 200, 60);
-    let base_dir = std::env::temp_dir().join("ftui_golden_tests");
-    let result = run_golden_scenario(&scenario, &base_dir);
+    let base_dir = golden_base_dir();
+    let result = run_golden_scenario(&scenario, base_dir);
     assert!(result.is_pass(), "{}", result.format());
 }
 
@@ -296,12 +300,12 @@ fn golden_widget_paragraph_80x24() {
 #[test]
 fn golden_all_standard_scenarios() {
     let scenarios = standard_resize_scenarios();
-    let base_dir = std::env::temp_dir().join("ftui_golden_tests");
+    let base_dir = golden_base_dir();
 
     let mut failures = Vec::new();
 
     for scenario in &scenarios {
-        let result = run_golden_scenario(scenario, &base_dir);
+        let result = run_golden_scenario(scenario, base_dir);
         if !result.is_pass() {
             failures.push(result.format());
         }

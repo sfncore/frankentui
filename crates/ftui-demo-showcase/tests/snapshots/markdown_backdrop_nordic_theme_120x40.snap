@@ -1,0 +1,40 @@
+╭───────────Markdown Renderer────────────╮╭LLM Streaming Simulation | Streaming... ╮╭──────────Style Sampler───────────╮
+│GitHub-Flavored Markdown                ││▌                                       ││Bold  Dim  Italic  Underline      │
+│                                        ││                                        ││Strikethrough  Reverse  Blink     │
+│Math & LaTeX Support                    ││                                        ││Dbl-Underline  Curly-Underline  [H│
+│                                        ││                                        ││                                  │
+│Inline math like E = mc² and α + β = γ  ││                                        ││Error  Success  Warning  Link  Cod│
+│renders to Unicode.                     ││                                        ││                                  │
+│                                        ││                                        │╰──────────────────────────────────╯
+│Display math for complex equations:     ││                                        │────────────────────────────────────
+│                                        ││                                        │╭─────Wrap: Word | Align: Left─────╮
+│  ∑ᵢ₌₁ⁿ xᵢ = n(n+1)/2                   ││                                        ││w: cycle wrap | a: cycle alignment│
+│                                        ││                                        ││The quick brown fox jumps over the│
+│  f(x) = ∫_{−∞}^{∞} e^{−x²} dx = √{π}   ││                                        ││lazy dog.                         │
+│                                        ││                                        ││Supercalifragilisticexpialidocious│
+│Greek letters: α, β, γ, δ, ε            ││                                        ││is quite a long word that tests   │
+│                                        ││                                        ││character-level wrapping behavior.│
+│Operators: ×, ÷, ±, ≤, ≥, ≠, ≈          ││                                        ││???? contains CJK characters  │
+│                                        ││                                        ││that are double-width. ? Ferris  │
+│Task Lists                              ││                                        ││says hello!                       │
+│✓ Implement markdown parser             ││                                        ││                                  │
+│✓ Add LaTeX to Unicode conversion       ││                                        ││                                  │
+│✓ Support task list checkboxes          ││                                        ││                                  │
+│☐ Add syntax highlighting               ││                                        ││                                  │
+│☐ Write comprehensive tests             ││                                        ││                                  │
+│                                        ││                                        ││                                  │
+│Admonitions                             ││                                        ││                                  │
+│                                        ││                                        ││                                  │
+│?  NOTE                                ││                                        ││                                  │
+│┃ This is an informational note with    ││                                        ││                                  │
+│helpful context.                        ││                                        ││                                  │
+│                                        ││                                        ││                                  │
+│? TIP                                  ││                                        ││                                  │
+│┃ Pro tip: Use keyboard shortcuts for   ││                                        ││                                  │
+│faster navigation.                      ││                                        ││                                  │
+│                                        ││                                        ││                                  │
+│? IMPORTANT                            ││  [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]││                                  │
+│┃ Critical information that users need  ││  Detection: 0 indicators | Uncertain   ││                                  │
+│to know.                                ││  Confidence: 0% | Chars: 0/1304        ││                                  │
+│                                        ││  Space: play/pause | r: restart | ↑↓: s││                                  │
+╰────────────────────────────────────────╯╰────────────────────────────────────────╯╰──────────────────────────────────╯

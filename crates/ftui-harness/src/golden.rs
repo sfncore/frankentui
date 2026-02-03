@@ -27,6 +27,29 @@
 //! ```sh
 //! GOLDEN_SEED=42 cargo test golden_
 //! ```
+//!
+//! # Isomorphism Proof Template
+//!
+//! When a golden checksum changes, record the proof alongside the update:
+//!
+//! ```text
+//! Change:
+//!   - What changed?
+//!   - Why is the new output equivalent?
+//! Old checksums:
+//!   - [list]
+//! New checksums:
+//!   - [list]
+//! Preserved invariants:
+//!   - Deterministic ordering
+//!   - Stable tie-breaking
+//!   - Seeded randomness only
+//!   - Buffer dimensions/content rules
+//! Justification:
+//!   - Explain the equivalence and why drift is acceptable.
+//! Approved by:
+//!   - Name + date
+//! ```
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -434,6 +457,14 @@ pub fn is_bless_mode() -> bool {
     std::env::var("BLESS").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
+/// Check if golden checksums are enforced (CI or explicit env).
+pub fn is_golden_enforced() -> bool {
+    let explicit = std::env::var("FTUI_GOLDEN_ENFORCE")
+        .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    let ci = std::env::var("CI").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    explicit || ci
+}
+
 // ============================================================================
 // Golden Test Runner
 // ============================================================================
@@ -460,7 +491,9 @@ impl GoldenResult {
         match self.outcome {
             GoldenOutcome::Pass => format!("PASS: {} ({}ms)", self.scenario, self.duration_ms),
             GoldenOutcome::Fail => {
-                if let Some(idx) = self.mismatch_index {
+                if self.expected_checksums.is_empty() {
+                    format!("FAIL: {} - missing golden checksums", self.scenario)
+                } else if let Some(idx) = self.mismatch_index {
                     format!(
                         "FAIL: {} - checksum mismatch at frame {}\n  expected: {}\n  actual: {}",
                         self.scenario,
@@ -482,7 +515,10 @@ impl GoldenResult {
 /// Verify checksums against expected values.
 pub fn verify_checksums(actual: &[String], expected: &[String]) -> (GoldenOutcome, Option<usize>) {
     if expected.is_empty() {
-        // No expected checksums - pass if we have actual checksums
+        // No expected checksums - optionally enforce in CI
+        if is_golden_enforced() {
+            return (GoldenOutcome::Fail, None);
+        }
         return (GoldenOutcome::Pass, None);
     }
 

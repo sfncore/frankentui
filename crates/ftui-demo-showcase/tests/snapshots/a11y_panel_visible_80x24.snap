@@ -13,7 +13,7 @@
 ││⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿││                             ││78x20                    ││
 │╰──────────────────╯╰────────────────────╔══════════════ A11y ══════════════╗╯│
 │╭─────────Statistics──────────╮╭─────────║ Theme: Cyberpunk Aurora──────────║╮│
-││24S 45W 7E                   ││- 00:02 C║U spike detected on core 3        ║││
+││26S 45W 7E                   ││- 00:02 C║U spike detected on core 3        ║││
 ││                             ││         ║ [H] High Contrast: OFF           ║││
 ││                             ││         ║ [M] Reduced Motion: OFF          ║││
 ││                             ││         ║ [L] Large Text: OFF              ║││
@@ -21,4 +21,4 @@
 │╰─────────────────────────────╯╰─────────╚══════════════════════════════════╝╯│
 │1-9:screens | Tab:next | t:theme | ?:help | q:quit                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- Dashboard [1/24]  Darcula                tick:0 frm:0                0x0 00:00 
+ Dashboard [1/26]  High Contrast             tick:0 frm:0             0x0 00:00 

@@ -13,8 +13,9 @@
 //!
 //! Naming convention: `a11y_{mode}_{screen}_{WIDTHxHEIGHT}`
 
+use ftui_core::event::{Event, KeyCode, KeyEvent, KeyEventKind, Modifiers};
 use ftui_core::geometry::Rect;
-use ftui_demo_showcase::app::AppModel;
+use ftui_demo_showcase::app::{AppModel, AppMsg};
 use ftui_demo_showcase::screens::Screen;
 use ftui_demo_showcase::theme;
 use ftui_harness::assert_snapshot;
@@ -1140,4 +1141,183 @@ fn a11y_determinism_all_modes() {
         hash1, hash2,
         "All a11y modes should produce deterministic output"
     );
+}
+
+// ============================================================================
+// UX/A11y Review Tests (bd-2o55.6)
+// ============================================================================
+
+fn log_ux_jsonl(test: &str, check: &str, passed: bool, notes: &str) {
+    if std::env::var("E2E_JSONL").is_ok() || std::env::var("CI").is_ok() {
+        eprintln!(r#"{{"test":"{test}","check":"{check}","passed":{passed},"notes":"{notes}"}}"#);
+    }
+}
+
+fn shift_key(ch: char) -> Event {
+    Event::Key(KeyEvent {
+        code: KeyCode::Char(ch),
+        modifiers: Modifiers::SHIFT,
+        kind: KeyEventKind::Press,
+    })
+}
+
+fn key_press(code: KeyCode) -> Event {
+    Event::Key(KeyEvent {
+        code,
+        modifiers: Modifiers::empty(),
+        kind: KeyEventKind::Press,
+    })
+}
+
+fn frame_contains(app: &AppModel, width: u16, height: u16, needle: &str) -> bool {
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(width, height, &mut pool);
+    app.view(&mut frame);
+
+    let mut text = String::new();
+    for y in 0..height {
+        for x in 0..width {
+            if let Some(cell) = frame.buffer.get(x, y)
+                && let Some(ch) = cell.content.as_char()
+            {
+                text.push(ch);
+            }
+        }
+    }
+    text.contains(needle)
+}
+
+#[test]
+fn a11y_keybinding_shift_a_toggles_panel() {
+    let mut app = AppModel::new();
+    assert!(!app.a11y_panel_visible);
+
+    let _ = app.update(AppMsg::ScreenEvent(shift_key('A')));
+    log_ux_jsonl(
+        "keybinding_shift_a",
+        "toggle_on",
+        app.a11y_panel_visible,
+        "Shift+A opens the A11y panel",
+    );
+    assert!(app.a11y_panel_visible);
+
+    let _ = app.update(AppMsg::ScreenEvent(shift_key('A')));
+    log_ux_jsonl(
+        "keybinding_shift_a",
+        "toggle_off",
+        !app.a11y_panel_visible,
+        "Shift+A closes the A11y panel",
+    );
+    assert!(!app.a11y_panel_visible);
+}
+
+#[test]
+fn a11y_panel_escape_closes() {
+    let mut app = AppModel::new();
+    app.a11y_panel_visible = true;
+
+    let _ = app.update(AppMsg::ScreenEvent(key_press(KeyCode::Escape)));
+    log_ux_jsonl(
+        "keybinding_escape",
+        "close_panel",
+        !app.a11y_panel_visible,
+        "Escape closes the A11y panel",
+    );
+    assert!(!app.a11y_panel_visible);
+}
+
+#[test]
+fn a11y_panel_toggle_keys_apply_states() {
+    let mut app = AppModel::new();
+    app.a11y_panel_visible = true;
+
+    let _ = app.update(AppMsg::ScreenEvent(shift_key('H')));
+    let _ = app.update(AppMsg::ScreenEvent(shift_key('M')));
+    let _ = app.update(AppMsg::ScreenEvent(shift_key('L')));
+
+    log_ux_jsonl(
+        "a11y_toggles",
+        "states_enabled",
+        app.a11y.high_contrast && app.a11y.reduced_motion && app.a11y.large_text,
+        "H/M/L toggles enable high contrast, reduced motion, and large text",
+    );
+
+    assert!(app.a11y.high_contrast);
+    assert!(app.a11y.reduced_motion);
+    assert!(app.a11y.large_text);
+}
+
+#[test]
+fn a11y_panel_non_modal_allows_help_overlay() {
+    let mut app = AppModel::new();
+    app.a11y_panel_visible = true;
+
+    let _ = app.update(AppMsg::ScreenEvent(key_press(KeyCode::Char('?'))));
+    log_ux_jsonl(
+        "focus_order",
+        "help_overlay",
+        app.help_visible,
+        "Help overlay still toggles while A11y panel is visible",
+    );
+    assert!(app.help_visible);
+}
+
+#[test]
+fn a11y_help_overlay_documents_keybindings() {
+    let mut app = AppModel::new();
+    app.help_visible = true;
+
+    let has_panel_entry = frame_contains(&app, 120, 40, "Toggle A11y panel");
+    let has_modes_entry = frame_contains(&app, 120, 40, "A11y: high contrast");
+
+    log_ux_jsonl(
+        "help_overlay",
+        "a11y_entries",
+        has_panel_entry && has_modes_entry,
+        "Help overlay documents A11y keybindings",
+    );
+
+    assert!(has_panel_entry);
+    assert!(has_modes_entry);
+}
+
+#[test]
+fn a11y_panel_text_indicators_visible() {
+    let mut app = AppModel::new();
+    app.a11y_panel_visible = true;
+    app.a11y.high_contrast = true;
+    app.a11y.reduced_motion = true;
+    app.a11y.large_text = true;
+
+    let has_high_contrast = frame_contains(&app, 120, 40, "High Contrast: ON");
+    let has_reduced_motion = frame_contains(&app, 120, 40, "Reduced Motion: ON");
+    let has_large_text = frame_contains(&app, 120, 40, "Large Text: ON");
+
+    log_ux_jsonl(
+        "legibility",
+        "text_indicators",
+        has_high_contrast && has_reduced_motion && has_large_text,
+        "Panel includes ON/OFF text indicators (not color-only)",
+    );
+
+    assert!(has_high_contrast);
+    assert!(has_reduced_motion);
+    assert!(has_large_text);
+}
+
+#[test]
+fn a11y_status_bar_indicator_shows_flags() {
+    let mut app = AppModel::new();
+    app.a11y.high_contrast = true;
+    app.a11y.reduced_motion = true;
+    app.a11y.large_text = false;
+
+    let has_indicator = frame_contains(&app, 120, 40, "A11y:HC RM");
+    log_ux_jsonl(
+        "status_bar",
+        "a11y_flags",
+        has_indicator,
+        "Status bar shows text flags for active accessibility modes",
+    );
+    assert!(has_indicator);
 }

@@ -1,4 +1,4 @@
- 1: Dash │ 2: Shakes │ 3: Code │ 4: Widgets │ 5: Layout │ 6: Forms │ 7: DataViz │ 8: Files │ 9: Adv │ 0: Perf │         
+ 1: Dash │ 2: Shakes │ 3: Code │ 4: Widgets │ 5: Layout │ 6: Forms │ 7: DataViz │ 8: Files │ 9: Adv │ 0: Perf │ -: Caps 
 ╭────────────────────────────────────────────────────Forms & Input─────────────────────────────────────────────────────╮
 │╭────────────────────Registration Form────────────────────╮╭───────────────────────Text Inputs───────────────────────╮│
 ││ DRAFT   REQ 0/3   ERR 0   FIELDS 3/6                    ││ Search   Search...                                      ││
@@ -37,4 +37,4 @@
 │╰─────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────╯│
 │Editing: Name (field 1/6) | Required: 0/3 | Undo:0 Redo:0 | Errors: 0 | Ctrl+U: Show history                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- Forms & Input [6/24]  Darcula A11y:HC                            tick:0 frm:0                             120x40 00:00 
+ Forms & Input [6/26]  Darcula A11y:HC                            tick:0 frm:0                             120x40 00:00 

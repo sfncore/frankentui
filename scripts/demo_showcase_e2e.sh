@@ -467,7 +467,7 @@ if $CAN_SMOKE; then
     # ────────────────────────────────────────────────────────────────────────
     # Step 10: VisualEffects Backdrop Test (bd-l8x9.8.2)
     #
-    # Targeted test for the VisualEffects screen (screen 13) which exercises
+    # Targeted test for the VisualEffects screen (screen 14) which exercises
     # backdrop blending, metaballs/plasma effects, and markdown-over-backdrop
     # composition paths. Runs at multiple sizes to verify determinism and
     # no panics under various render conditions.
@@ -479,66 +479,81 @@ if $CAN_SMOKE; then
 
     vfx_start=$(date +%s%N)
     {
-        echo "=== VisualEffects (Screen 13) Backdrop Blending Tests ==="
+        echo "=== VisualEffects (Screen 14) Backdrop Blending Tests ==="
         echo "Bead: bd-l8x9.8.2 - Targeted runs for metaballs/plasma/backdrop paths"
         echo ""
         VFX_FAILURES=0
 
-        # Test 1: Standard size (80x24)
-        echo "--- Test 1: Standard size (80x24) ---"
-        if run_in_pty "stty rows 24 cols 80 2>/dev/null; FTUI_DEMO_EXIT_AFTER_MS=2500 timeout 10 $DEMO_BIN --screen=13" 2>&1; then
-            echo "  80x24: OK"
-        else
-            vfx_exit=$?
-            if [ "$vfx_exit" -eq 124 ]; then
-                echo "  80x24: OK (timeout)"
-            else
-                echo "  80x24: FAILED (exit=$vfx_exit)"
-                VFX_FAILURES=$((VFX_FAILURES + 1))
-            fi
-        fi
+        tmux_present=0
+        zellij_present=0
+        kitty_present=0
+        wt_present=0
+        if [ -n "${TMUX:-}" ]; then tmux_present=1; fi
+        if [ -n "${ZELLIJ:-}" ]; then zellij_present=1; fi
+        if [ -n "${KITTY_WINDOW_ID:-}" ]; then kitty_present=1; fi
+        if [ -n "${WT_SESSION:-}" ]; then wt_present=1; fi
 
-        # Test 2: Large size (120x40) - stress test backdrop buffer scaling
-        echo "--- Test 2: Large size (120x40) ---"
-        if run_in_pty "stty rows 40 cols 120 2>/dev/null; FTUI_DEMO_EXIT_AFTER_MS=2500 timeout 10 $DEMO_BIN --screen=13" 2>&1; then
-            echo "  120x40: OK"
-        else
-            vfx_exit=$?
-            if [ "$vfx_exit" -eq 124 ]; then
-                echo "  120x40: OK (timeout)"
-            else
-                echo "  120x40: FAILED (exit=$vfx_exit)"
-                VFX_FAILURES=$((VFX_FAILURES + 1))
-            fi
-        fi
+        vfx_jsonl() {
+            local effect="$1"
+            local size="$2"
+            local outcome="$3"
+            local exit_code="$4"
+            local duration_ms="$5"
+            printf '{'
+            printf '"run_id":"%s",' "$TIMESTAMP"
+            printf '"step":"visual_effects_backdrop",'
+            printf '"effect":"%s",' "$effect"
+            printf '"size":"%s",' "$size"
+            printf '"screen":14,'
+            printf '"exit_code":%s,' "$exit_code"
+            printf '"duration_ms":%s,' "$duration_ms"
+            printf '"seed":null,'
+            printf '"outcome":"%s",' "$outcome"
+            printf '"env":{'
+            printf '"term":"%s","colorterm":"%s","tmux":%s,"zellij":%s,"kitty":%s,"wt":%s' \
+                "${TERM:-}" "${COLORTERM:-}" "$tmux_present" "$zellij_present" "$kitty_present" "$wt_present"
+            printf '},'
+            printf '"capabilities":{"markdown_overlay":true}'
+            printf '}\n'
+        }
 
-        # Test 3: Tiny size (40x10) - edge case for small backdrop areas
-        echo "--- Test 3: Tiny size (40x10) ---"
-        if run_in_pty "stty rows 10 cols 40 2>/dev/null; FTUI_DEMO_EXIT_AFTER_MS=2500 timeout 10 $DEMO_BIN --screen=13" 2>&1; then
-            echo "  40x10: OK"
-        else
-            vfx_exit=$?
-            if [ "$vfx_exit" -eq 124 ]; then
-                echo "  40x10: OK (timeout)"
-            else
-                echo "  40x10: FAILED (exit=$vfx_exit)"
-                VFX_FAILURES=$((VFX_FAILURES + 1))
-            fi
-        fi
+        run_vfx_case() {
+            local effect="$1"
+            local effect_env="$2"
+            local rows="$3"
+            local cols="$4"
+            local size="${cols}x${rows}"
+            local cmd="stty rows ${rows} cols ${cols} 2>/dev/null; FTUI_DEMO_EXIT_AFTER_MS=2500 ${effect_env} timeout 10 $DEMO_BIN --screen=14"
+            local start_ns end_ns dur_ms outcome exit_code
 
-        # Test 4: Very wide (200x24) - horizontal scaling
-        echo "--- Test 4: Very wide (200x24) ---"
-        if run_in_pty "stty rows 24 cols 200 2>/dev/null; FTUI_DEMO_EXIT_AFTER_MS=2500 timeout 10 $DEMO_BIN --screen=13" 2>&1; then
-            echo "  200x24: OK"
-        else
-            vfx_exit=$?
-            if [ "$vfx_exit" -eq 124 ]; then
-                echo "  200x24: OK (timeout)"
+            echo "--- ${effect} (${size}) ---"
+            start_ns=$(date +%s%N)
+            if run_in_pty "$cmd" 2>&1; then
+                outcome="pass"
+                exit_code=0
             else
-                echo "  200x24: FAILED (exit=$vfx_exit)"
-                VFX_FAILURES=$((VFX_FAILURES + 1))
+                exit_code=$?
+                if [ "$exit_code" -eq 124 ]; then
+                    outcome="timeout"
+                else
+                    outcome="fail"
+                    VFX_FAILURES=$((VFX_FAILURES + 1))
+                fi
             fi
-        fi
+            end_ns=$(date +%s%N)
+            dur_ms=$(( (end_ns - start_ns) / 1000000 ))
+            vfx_jsonl "$effect" "$size" "$outcome" "$exit_code" "$dur_ms"
+        }
+
+        # Metaballs (default effect) — full size matrix
+        run_vfx_case "metaballs" "" 24 80
+        run_vfx_case "metaballs" "" 40 120
+        run_vfx_case "metaballs" "" 10 40
+        run_vfx_case "metaballs" "" 24 200
+
+        # Plasma — explicit effect override
+        run_vfx_case "plasma" "FTUI_DEMO_VFX_EFFECT=plasma" 24 80
+        run_vfx_case "plasma" "FTUI_DEMO_VFX_EFFECT=plasma" 40 120
 
         echo ""
         echo "VisualEffects tests with failures: $VFX_FAILURES"

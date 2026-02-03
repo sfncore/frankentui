@@ -310,23 +310,31 @@ fn keybindings_prev_match_navigation() {
 // Focus Order Tests
 // =============================================================================
 
-/// Ctrl+Right should cycle focus when search is visible.
+/// Ctrl+Right should cycle focus forward when search is visible.
 #[test]
 fn focus_order_ctrl_right_cycles() {
     let mut editor = AdvancedTextEditor::new();
 
     // Open search to enable focus cycling
     editor.update(&ctrl_key(KeyCode::Char('f')));
+    assert_eq!(editor.focus_panel(), "search");
 
-    // Cycle focus forward multiple times
-    for _ in 0..6 {
-        editor.update(&ctrl_key(KeyCode::Right));
-        render_frame(&editor, 80, 24);
-    }
+    // Ctrl+Right: Search → Replace
+    editor.update(&ctrl_key(KeyCode::Right));
+    assert_eq!(editor.focus_panel(), "replace");
+
+    // Ctrl+Right: Replace → Editor
+    editor.update(&ctrl_key(KeyCode::Right));
+    assert_eq!(editor.focus_panel(), "editor");
+
+    // Ctrl+Right: Editor → Search (full cycle)
+    editor.update(&ctrl_key(KeyCode::Right));
+    assert_eq!(editor.focus_panel(), "search");
+
+    render_frame(&editor, 80, 24);
 
     log_jsonl(&serde_json::json!({
         "test": "focus_order_ctrl_right_cycles",
-        "cycles": 6,
         "result": "passed",
     }));
 }
@@ -338,36 +346,102 @@ fn focus_order_ctrl_left_cycles() {
 
     // Open search to enable focus cycling
     editor.update(&ctrl_key(KeyCode::Char('f')));
+    assert_eq!(editor.focus_panel(), "search");
 
-    // Cycle focus backward multiple times
-    for _ in 0..6 {
-        editor.update(&ctrl_key(KeyCode::Left));
-        render_frame(&editor, 80, 24);
-    }
+    // Ctrl+Left: Search → Editor (backward)
+    editor.update(&ctrl_key(KeyCode::Left));
+    assert_eq!(editor.focus_panel(), "editor");
+
+    // Ctrl+Left: Editor → Replace (backward)
+    editor.update(&ctrl_key(KeyCode::Left));
+    assert_eq!(editor.focus_panel(), "replace");
+
+    // Ctrl+Left: Replace → Search (full reverse cycle)
+    editor.update(&ctrl_key(KeyCode::Left));
+    assert_eq!(editor.focus_panel(), "search");
+
+    render_frame(&editor, 80, 24);
 
     log_jsonl(&serde_json::json!({
         "test": "focus_order_ctrl_left_cycles",
-        "cycles": 6,
         "result": "passed",
     }));
 }
 
-/// Tab should cycle focus when search is visible.
+/// Tab should cycle focus forward when search is visible.
 #[test]
 fn focus_order_tab_cycles() {
     let mut editor = AdvancedTextEditor::new();
 
-    // Open search
+    // Open search — focus starts on Search
     editor.update(&ctrl_key(KeyCode::Char('f')));
+    assert_eq!(editor.focus_panel(), "search");
 
-    // Tab through focus areas
-    for _ in 0..6 {
-        editor.update(&simple_key(KeyCode::Tab));
-        render_frame(&editor, 80, 24);
-    }
+    // Tab: Search → Replace
+    editor.update(&simple_key(KeyCode::Tab));
+    assert_eq!(editor.focus_panel(), "replace");
+
+    // Tab: Replace → Editor
+    editor.update(&simple_key(KeyCode::Tab));
+    assert_eq!(editor.focus_panel(), "editor");
+
+    // Tab: Editor → Search (full cycle)
+    editor.update(&simple_key(KeyCode::Tab));
+    assert_eq!(editor.focus_panel(), "search");
+
+    render_frame(&editor, 80, 24);
 
     log_jsonl(&serde_json::json!({
         "test": "focus_order_tab_cycles",
+        "result": "passed",
+    }));
+}
+
+/// Shift+Tab should cycle focus backward when search is visible.
+#[test]
+fn focus_order_shift_tab_cycles_backward() {
+    let mut editor = AdvancedTextEditor::new();
+
+    // Open search — focus starts on Search
+    editor.update(&ctrl_key(KeyCode::Char('f')));
+    assert_eq!(editor.focus_panel(), "search");
+
+    // Shift+Tab: Search → Editor (backward)
+    editor.update(&shift_key(KeyCode::Tab));
+    assert_eq!(editor.focus_panel(), "editor");
+
+    // Shift+Tab: Editor → Replace (backward)
+    editor.update(&shift_key(KeyCode::Tab));
+    assert_eq!(editor.focus_panel(), "replace");
+
+    // Shift+Tab: Replace → Search (full reverse cycle)
+    editor.update(&shift_key(KeyCode::Tab));
+    assert_eq!(editor.focus_panel(), "search");
+
+    render_frame(&editor, 80, 24);
+
+    log_jsonl(&serde_json::json!({
+        "test": "focus_order_shift_tab_cycles_backward",
+        "result": "passed",
+    }));
+}
+
+/// Tab should NOT cycle focus when search is hidden (editor-only mode).
+#[test]
+fn focus_order_tab_noop_without_search() {
+    let mut editor = AdvancedTextEditor::new();
+
+    // Search not visible — Tab should go to widget, not cycle focus
+    assert_eq!(editor.focus_panel(), "editor");
+    assert!(!editor.is_search_visible());
+
+    editor.update(&simple_key(KeyCode::Tab));
+    assert_eq!(editor.focus_panel(), "editor"); // Still editor
+
+    render_frame(&editor, 80, 24);
+
+    log_jsonl(&serde_json::json!({
+        "test": "focus_order_tab_noop_without_search",
         "result": "passed",
     }));
 }
@@ -722,6 +796,161 @@ fn regression_both_panels_visible() {
 
     log_jsonl(&serde_json::json!({
         "test": "regression_both_panels_visible",
+        "result": "passed",
+    }));
+}
+
+// =============================================================================
+// Context-Dependent Behavior Tests
+// =============================================================================
+
+/// Escape should close search when open, not clear selection.
+#[test]
+fn context_escape_closes_search_first() {
+    let mut editor = AdvancedTextEditor::new();
+
+    // Open search
+    editor.update(&ctrl_key(KeyCode::Char('f')));
+    assert!(editor.is_search_visible());
+    assert_eq!(editor.focus_panel(), "search");
+
+    // Escape closes search, returns focus to editor
+    editor.update(&simple_key(KeyCode::Escape));
+    assert!(!editor.is_search_visible());
+    assert_eq!(editor.focus_panel(), "editor");
+
+    log_jsonl(&serde_json::json!({
+        "test": "context_escape_closes_search_first",
+        "result": "passed",
+    }));
+}
+
+/// Escape without search open should clear selection (not crash).
+#[test]
+fn context_escape_clears_selection_when_no_search() {
+    let mut editor = AdvancedTextEditor::new();
+
+    // No search visible
+    assert!(!editor.is_search_visible());
+
+    // Escape should not crash and editor stays focused
+    editor.update(&simple_key(KeyCode::Escape));
+    assert_eq!(editor.focus_panel(), "editor");
+
+    render_frame(&editor, 80, 24);
+
+    log_jsonl(&serde_json::json!({
+        "test": "context_escape_clears_selection_when_no_search",
+        "result": "passed",
+    }));
+}
+
+/// Ctrl+Shift+G should navigate to previous match (alternative shortcut).
+#[test]
+fn keybindings_ctrl_shift_g_prev_match() {
+    let mut editor = AdvancedTextEditor::new();
+
+    // Open search and type a query
+    editor.update(&ctrl_key(KeyCode::Char('f')));
+    for c in "the".chars() {
+        editor.update(&simple_key(KeyCode::Char(c)));
+    }
+
+    // Navigate with Ctrl+Shift+G
+    editor.update(&ctrl_shift_key(KeyCode::Char('G')));
+
+    // Should not panic
+    render_frame(&editor, 80, 24);
+
+    log_jsonl(&serde_json::json!({
+        "test": "keybindings_ctrl_shift_g_prev_match",
+        "result": "passed",
+    }));
+}
+
+/// Enter in replace focus should replace current match (not insert newline).
+#[test]
+fn context_enter_in_replace_replaces() {
+    let mut editor = AdvancedTextEditor::new();
+
+    // Open replace panel directly with Ctrl+H (focuses Replace)
+    editor.update(&ctrl_key(KeyCode::Char('h')));
+    assert_eq!(editor.focus_panel(), "replace");
+
+    // Enter in replace mode should not crash
+    editor.update(&simple_key(KeyCode::Enter));
+
+    render_frame(&editor, 80, 24);
+
+    log_jsonl(&serde_json::json!({
+        "test": "context_enter_in_replace_replaces",
+        "result": "passed",
+    }));
+}
+
+/// Shift+Enter in search focus should find previous match.
+#[test]
+fn context_shift_enter_in_search_finds_prev() {
+    let mut editor = AdvancedTextEditor::new();
+    editor.update(&ctrl_key(KeyCode::Char('f')));
+    assert_eq!(editor.focus_panel(), "search");
+
+    // Type a query
+    for c in "text".chars() {
+        editor.update(&simple_key(KeyCode::Char(c)));
+    }
+
+    // Shift+Enter should find previous match
+    editor.update(&shift_key(KeyCode::Enter));
+
+    render_frame(&editor, 80, 24);
+
+    log_jsonl(&serde_json::json!({
+        "test": "context_shift_enter_in_search_finds_prev",
+        "result": "passed",
+    }));
+}
+
+/// Keybindings list should include Tab/Shift+Tab and focus cycling entries.
+#[test]
+fn a11y_keybindings_include_focus_cycling() {
+    let editor = AdvancedTextEditor::new();
+    let keybindings = editor.keybindings();
+    let keys: Vec<_> = keybindings.iter().map(|h| h.key).collect();
+
+    assert!(
+        keys.iter().any(|k| k.contains("Tab")),
+        "Tab focus cycling should be documented in keybindings"
+    );
+    assert!(
+        keys.iter().any(|k| k.contains("Ctrl+Left")),
+        "Ctrl+Left/Right focus cycling should be documented"
+    );
+
+    log_jsonl(&serde_json::json!({
+        "test": "a11y_keybindings_include_focus_cycling",
+        "result": "passed",
+    }));
+}
+
+/// Keybindings should document Enter behavior in search/replace.
+#[test]
+fn a11y_keybindings_include_enter_actions() {
+    let editor = AdvancedTextEditor::new();
+    let keybindings = editor.keybindings();
+    let actions: Vec<_> = keybindings.iter().map(|h| h.action).collect();
+
+    assert!(
+        actions.iter().any(|a| a.contains("Find next")),
+        "Enter (search) → Find next should be documented"
+    );
+    assert!(
+        actions.iter().any(|a| a.contains("Find previous")),
+        "Shift+Enter (search) → Find previous should be documented"
+    );
+
+    log_jsonl(&serde_json::json!({
+        "test": "a11y_keybindings_include_enter_actions",
         "result": "passed",
     }));
 }

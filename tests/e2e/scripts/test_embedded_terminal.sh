@@ -24,6 +24,7 @@ source "$LIB_DIR/pty.sh"
 E2E_SUITE_SCRIPT="$SCRIPT_DIR/test_embedded_terminal.sh"
 export E2E_SUITE_SCRIPT
 ONLY_CASE="${E2E_ONLY_CASE:-}"
+REAL_PROGS="${E2E_REAL_PROGS:-1}"
 
 # JSONL log for structured output analysis
 E2E_JSONL_LOG="${E2E_JSONL_LOG:-$E2E_LOG_DIR/embedded_terminal.jsonl}"
@@ -44,6 +45,14 @@ ALL_CASES=(
     term_input_bracketed_paste
     term_resize_sigwinch
     term_resize_rapid_stability
+    term_programs_bash_interactive
+    term_programs_zsh_interactive
+    term_programs_vim_render
+    term_programs_nano_render
+    term_programs_htop_live
+    term_programs_top_batch
+    term_programs_less_scroll
+    term_programs_more_scroll
 )
 
 if [[ ! -x "${E2E_HARNESS_BIN:-}" ]]; then
@@ -72,6 +81,29 @@ jsonl_log() {
     printf '}\n' >> "$E2E_JSONL_LOG"
 }
 
+skip_case() {
+    local reason="$1"
+    E2E_SKIP_REASON="$reason"
+    return 2
+}
+
+require_real_progs() {
+    if [[ "$REAL_PROGS" != "1" ]]; then
+        skip_case "real program tests disabled (E2E_REAL_PROGS=$REAL_PROGS)"
+        return $?
+    fi
+    return 0
+}
+
+require_program() {
+    local program="$1"
+    if ! command -v "$program" >/dev/null 2>&1; then
+        skip_case "missing program: $program"
+        return $?
+    fi
+    return 0
+}
+
 run_case() {
     local name="$1"
     shift
@@ -92,6 +124,16 @@ run_case() {
         log_test_pass "$name"
         record_result "$name" "passed" "$duration_ms" "$LOG_FILE"
         jsonl_log "pass" "$name" "duration_ms" "$duration_ms"
+        return 0
+    fi
+
+    local exit_code=$?
+    if [[ "$exit_code" -eq 2 ]]; then
+        local reason="${E2E_SKIP_REASON:-skipped}"
+        log_test_skip "$name" "$reason"
+        record_result "$name" "skipped" 0 "$LOG_FILE" "$reason"
+        jsonl_log "skip" "$name" "reason" "$reason"
+        E2E_SKIP_REASON=""
         return 0
     fi
 
@@ -463,6 +505,193 @@ term_resize_rapid_stability() {
 }
 
 # ============================================================================
+# Real Program Tests
+# ============================================================================
+
+term_programs_bash_interactive() {
+    LOG_FILE="$E2E_LOG_DIR/term_programs_bash.log"
+    local output_file="$E2E_LOG_DIR/term_programs_bash.pty"
+
+    log_test_start "term_programs_bash_interactive"
+
+    require_real_progs || return $?
+    require_program bash || return $?
+
+    PTY_COLS=80 \
+    PTY_ROWS=24 \
+    PTY_TIMEOUT=4 \
+    PTY_SEND="echo BASH_OK\nexit\n" \
+    PTY_SEND_DELAY_MS=200 \
+        pty_run "$output_file" bash --noprofile --norc -i
+
+    local size
+    size=$(wc -c < "$output_file" | tr -d ' ')
+    jsonl_log "output" "term_programs_bash" "size_bytes" "$size"
+    [[ "$size" -gt 10 ]] || return 1
+    grep -a -q "BASH_OK" "$output_file" || return 1
+}
+
+term_programs_zsh_interactive() {
+    LOG_FILE="$E2E_LOG_DIR/term_programs_zsh.log"
+    local output_file="$E2E_LOG_DIR/term_programs_zsh.pty"
+
+    log_test_start "term_programs_zsh_interactive"
+
+    require_real_progs || return $?
+    require_program zsh || return $?
+
+    PTY_COLS=80 \
+    PTY_ROWS=24 \
+    PTY_TIMEOUT=4 \
+    PTY_SEND="echo ZSH_OK\nexit\n" \
+    PTY_SEND_DELAY_MS=200 \
+        pty_run "$output_file" zsh -i
+
+    local size
+    size=$(wc -c < "$output_file" | tr -d ' ')
+    jsonl_log "output" "term_programs_zsh" "size_bytes" "$size"
+    [[ "$size" -gt 10 ]] || return 1
+    grep -a -q "ZSH_OK" "$output_file" || return 1
+}
+
+term_programs_vim_render() {
+    LOG_FILE="$E2E_LOG_DIR/term_programs_vim.log"
+    local output_file="$E2E_LOG_DIR/term_programs_vim.pty"
+
+    log_test_start "term_programs_vim_render"
+
+    require_real_progs || return $?
+    local vim_bin=""
+    if command -v vim >/dev/null 2>&1; then
+        vim_bin="vim"
+    elif command -v nvim >/dev/null 2>&1; then
+        vim_bin="nvim"
+    else
+        skip_case "missing program: vim/nvim"
+        return $?
+    fi
+
+    PTY_COLS=80 \
+    PTY_ROWS=24 \
+    PTY_TIMEOUT=4 \
+        pty_run "$output_file" "$vim_bin" -Nu NONE -n -es +'set nomore' +'put =\"VIM_OK\"' +'%print' +q
+
+    local size
+    size=$(wc -c < "$output_file" | tr -d ' ')
+    jsonl_log "output" "term_programs_vim" "size_bytes" "$size"
+    [[ "$size" -gt 5 ]] || return 1
+    grep -a -q "VIM_OK" "$output_file" || return 1
+}
+
+term_programs_nano_render() {
+    LOG_FILE="$E2E_LOG_DIR/term_programs_nano.log"
+    local output_file="$E2E_LOG_DIR/term_programs_nano.pty"
+
+    log_test_start "term_programs_nano_render"
+
+    require_real_progs || return $?
+    require_program nano || return $?
+
+    local nano_file="$E2E_LOG_DIR/nano_input.txt"
+    printf "NANO_OK\n" > "$nano_file"
+
+    PTY_COLS=80 \
+    PTY_ROWS=24 \
+    PTY_TIMEOUT=4 \
+    PTY_SEND=$'\x18n' \
+    PTY_SEND_DELAY_MS=400 \
+        pty_run "$output_file" nano "$nano_file"
+
+    local size
+    size=$(wc -c < "$output_file" | tr -d ' ')
+    jsonl_log "output" "term_programs_nano" "size_bytes" "$size"
+    [[ "$size" -gt 10 ]] || return 1
+}
+
+term_programs_htop_live() {
+    LOG_FILE="$E2E_LOG_DIR/term_programs_htop.log"
+    local output_file="$E2E_LOG_DIR/term_programs_htop.pty"
+
+    log_test_start "term_programs_htop_live"
+
+    require_real_progs || return $?
+    require_program htop || return $?
+
+    PTY_COLS=80 \
+    PTY_ROWS=24 \
+    PTY_TIMEOUT=4 \
+    PTY_SEND="q" \
+    PTY_SEND_DELAY_MS=600 \
+        pty_run "$output_file" htop -d 10
+
+    local size
+    size=$(wc -c < "$output_file" | tr -d ' ')
+    jsonl_log "output" "term_programs_htop" "size_bytes" "$size"
+    [[ "$size" -gt 10 ]] || return 1
+}
+
+term_programs_top_batch() {
+    LOG_FILE="$E2E_LOG_DIR/term_programs_top.log"
+    local output_file="$E2E_LOG_DIR/term_programs_top.pty"
+
+    log_test_start "term_programs_top_batch"
+
+    require_real_progs || return $?
+    require_program top || return $?
+
+    PTY_COLS=80 \
+    PTY_ROWS=24 \
+    PTY_TIMEOUT=4 \
+        pty_run "$output_file" top -b -n 1
+
+    local size
+    size=$(wc -c < "$output_file" | tr -d ' ')
+    jsonl_log "output" "term_programs_top" "size_bytes" "$size"
+    [[ "$size" -gt 10 ]] || return 1
+}
+
+term_programs_less_scroll() {
+    LOG_FILE="$E2E_LOG_DIR/term_programs_less.log"
+    local output_file="$E2E_LOG_DIR/term_programs_less.pty"
+
+    log_test_start "term_programs_less_scroll"
+
+    require_real_progs || return $?
+    require_program less || return $?
+
+    PTY_COLS=80 \
+    PTY_ROWS=10 \
+    PTY_TIMEOUT=4 \
+    PTY_SEND="q" \
+    PTY_SEND_DELAY_MS=400 \
+        pty_run "$output_file" sh -c 'seq 1 200 | LESS=R less'
+
+    local size
+    size=$(wc -c < "$output_file" | tr -d ' ')
+    jsonl_log "output" "term_programs_less" "size_bytes" "$size"
+    [[ "$size" -gt 10 ]] || return 1
+}
+
+term_programs_more_scroll() {
+    LOG_FILE="$E2E_LOG_DIR/term_programs_more.log"
+    local output_file="$E2E_LOG_DIR/term_programs_more.pty"
+
+    log_test_start "term_programs_more_scroll"
+
+    require_real_progs || return $?
+    require_program more || return $?
+
+    PTY_COLS=80 \
+    PTY_ROWS=10 \
+    PTY_TIMEOUT=4 \
+        pty_run "$output_file" sh -c 'seq 1 200 | more'
+
+    local size
+    size=$(wc -c < "$output_file" | tr -d ' ')
+    jsonl_log "output" "term_programs_more" "size_bytes" "$size"
+    [[ "$size" -gt 10 ]] || return 1
+}
+# ============================================================================
 # Run All Tests
 # ============================================================================
 
@@ -495,6 +724,16 @@ run_case "term_input_bracketed_paste" term_input_bracketed_paste || FAILURES=$((
 # Resize Handling
 run_case "term_resize_sigwinch" term_resize_sigwinch || FAILURES=$((FAILURES + 1))
 run_case "term_resize_rapid_stability" term_resize_rapid_stability || FAILURES=$((FAILURES + 1))
+
+# Real Programs
+run_case "term_programs_bash_interactive" term_programs_bash_interactive || FAILURES=$((FAILURES + 1))
+run_case "term_programs_zsh_interactive" term_programs_zsh_interactive || FAILURES=$((FAILURES + 1))
+run_case "term_programs_vim_render" term_programs_vim_render || FAILURES=$((FAILURES + 1))
+run_case "term_programs_nano_render" term_programs_nano_render || FAILURES=$((FAILURES + 1))
+run_case "term_programs_htop_live" term_programs_htop_live || FAILURES=$((FAILURES + 1))
+run_case "term_programs_top_batch" term_programs_top_batch || FAILURES=$((FAILURES + 1))
+run_case "term_programs_less_scroll" term_programs_less_scroll || FAILURES=$((FAILURES + 1))
+run_case "term_programs_more_scroll" term_programs_more_scroll || FAILURES=$((FAILURES + 1))
 
 # Finalize JSONL log
 {
