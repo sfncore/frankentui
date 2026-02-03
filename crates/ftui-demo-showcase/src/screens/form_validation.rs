@@ -161,10 +161,10 @@ impl FormValidationDemo {
         .validate(
             3,
             Box::new(|field| {
-                if let FormField::Text { value, .. } = field {
-                    if value.is_empty() {
-                        return Some("Please confirm your password".into());
-                    }
+                if let FormField::Text { value, .. } = field
+                    && value.is_empty()
+                {
+                    return Some("Please confirm your password".into());
                 }
                 None
             }),
@@ -188,13 +188,13 @@ impl FormValidationDemo {
             5,
             Box::new(|field| {
                 // Bio max length
-                if let FormField::Text { value, .. } = field {
-                    if value.len() > 100 {
-                        return Some(format!(
-                            "Bio must be 100 characters or less ({} entered)",
-                            value.len()
-                        ));
-                    }
+                if let FormField::Text { value, .. } = field
+                    && value.len() > 100
+                {
+                    return Some(format!(
+                        "Bio must be 100 characters or less ({} entered)",
+                        value.len()
+                    ));
                 }
                 None
             }),
@@ -203,13 +203,12 @@ impl FormValidationDemo {
             6,
             Box::new(|field| {
                 // Website URL pattern (optional but must be valid if provided)
-                if let FormField::Text { value, .. } = field {
-                    if !value.is_empty()
-                        && !value.starts_with("http://")
-                        && !value.starts_with("https://")
-                    {
-                        return Some("Website must start with http:// or https://".into());
-                    }
+                if let FormField::Text { value, .. } = field
+                    && !value.is_empty()
+                    && !value.starts_with("http://")
+                    && !value.starts_with("https://")
+                {
+                    return Some("Website must start with http:// or https://".into());
                 }
                 None
             }),

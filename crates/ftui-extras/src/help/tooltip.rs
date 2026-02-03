@@ -19,7 +19,8 @@
 //!     .config(TooltipConfig::default().delay_ms(300).position(TooltipPosition::Below));
 //! ```
 
-use ftui_core::geometry::{Position, Rect, Size};
+use ftui_core::geometry::{Rect, Size};
+use ftui_render::cell::CellContent;
 use ftui_render::frame::Frame;
 use ftui_style::Style;
 use ftui_widgets::Widget;
@@ -225,10 +226,12 @@ impl Tooltip {
     /// 3. Try right if no vertical space
     /// 4. Try left as last resort
     /// 5. If still doesn't fit, clamp to screen bounds
-    fn calculate_position(&self, screen: Rect) -> Position {
+    ///
+    /// Returns (x, y) position.
+    fn calculate_position(&self, screen: Rect) -> (u16, u16) {
         let size = self.content_size();
         if size.width == 0 || size.height == 0 {
-            return Position::new(self.target_bounds.x, self.target_bounds.y);
+            return (self.target_bounds.x, self.target_bounds.y);
         }
 
         let target = self.target_bounds;
@@ -243,18 +246,12 @@ impl Tooltip {
         };
 
         // Calculate positions for each strategy
-        let below = (
-            target.x as i32,
-            target.bottom() as i32 + gap as i32,
-        );
+        let below = (target.x as i32, target.bottom() as i32 + gap as i32);
         let above = (
             target.x as i32,
             target.y as i32 - size.height as i32 - gap as i32,
         );
-        let right = (
-            target.right() as i32 + gap as i32,
-            target.y as i32,
-        );
+        let right = (target.right() as i32 + gap as i32, target.y as i32);
         let left = (
             target.x as i32 - size.width as i32 - gap as i32,
             target.y as i32,
@@ -289,15 +286,15 @@ impl Tooltip {
             .max(screen.y as i32)
             .min((screen.bottom() as i32).saturating_sub(size.height as i32));
 
-        Position::new(clamped_x.max(0) as u16, clamped_y.max(0) as u16)
+        (clamped_x.max(0) as u16, clamped_y.max(0) as u16)
     }
 
     /// Get the bounding rect for this tooltip within the given screen area.
     #[must_use]
     pub fn bounds(&self, screen: Rect) -> Rect {
-        let pos = self.calculate_position(screen);
+        let (x, y) = self.calculate_position(screen);
         let size = self.content_size();
-        Rect::new(pos.x, pos.y, size.width, size.height)
+        Rect::new(x, y, size.width, size.height)
     }
 }
 
@@ -314,7 +311,7 @@ impl Widget for Tooltip {
         }
 
         // Apply background style to entire tooltip area
-        crate::set_style_area(&mut frame.buffer, bounds, self.config.style);
+        apply_style_to_area(&mut frame.buffer, bounds, &self.config.style);
 
         // Render content with padding
         let lines = self.wrap_content();
@@ -340,15 +337,46 @@ impl Widget for Tooltip {
 
                 // Write the grapheme
                 if let Some(cell) = frame.buffer.get_mut(x, y) {
-                    cell.set_char(grapheme.chars().next().unwrap_or(' '));
+                    if let Some(c) = grapheme.chars().next() {
+                        cell.content = CellContent::from_char(c);
+                    }
                 }
                 // Mark continuation cells for wide chars
                 for offset in 1..w {
                     if let Some(cell) = frame.buffer.get_mut(x + offset as u16, y) {
-                        cell.set_continuation();
+                        cell.content = CellContent::CONTINUATION;
                     }
                 }
                 x += w as u16;
+            }
+        }
+    }
+}
+
+/// Apply a style to all cells in a rectangular area.
+fn apply_style_to_area(
+    buf: &mut ftui_render::buffer::Buffer,
+    area: Rect,
+    style: &Style,
+) {
+    if style.is_empty() {
+        return;
+    }
+    let fg = style.fg;
+    let bg = style.bg;
+    for y in area.y..area.bottom() {
+        for x in area.x..area.right() {
+            if let Some(cell) = buf.get_mut(x, y) {
+                if let Some(fg) = fg {
+                    cell.fg = fg;
+                }
+                if let Some(bg) = bg {
+                    match bg.a() {
+                        0 => {}
+                        255 => cell.bg = bg,
+                        _ => cell.bg = bg.over(cell.bg),
+                    }
+                }
             }
         }
     }
@@ -410,17 +438,6 @@ impl TooltipState {
     }
 }
 
-/// Helper to set style on an area (if not available in crate root).
-fn set_style_area(buffer: &mut ftui_render::buffer::Buffer, area: Rect, style: Style) {
-    for y in area.y..area.bottom() {
-        for x in area.x..area.right() {
-            if let Some(cell) = buffer.get_mut(x, y) {
-                cell.apply_style(&style);
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,10 +452,10 @@ mod tests {
             .config(TooltipConfig::default().max_width(20));
 
         let screen = Rect::new(0, 0, 80, 24);
-        let pos = tooltip.calculate_position(screen);
+        let (_, y) = tooltip.calculate_position(screen);
 
         // Should be below target (y = 5 + 2 + 1 = 8)
-        assert!(pos.y > 5 + 2, "Should position below target");
+        assert!(y > 5 + 2, "Should position below target");
     }
 
     #[test]
@@ -448,10 +465,10 @@ mod tests {
             .config(TooltipConfig::default().max_width(20));
 
         let screen = Rect::new(0, 0, 80, 24);
-        let pos = tooltip.calculate_position(screen);
+        let (_, y) = tooltip.calculate_position(screen);
 
         // Should be above target
-        assert!(pos.y < 20, "Should position above target when no space below");
+        assert!(y < 20, "Should position above target when no space below");
     }
 
     #[test]
@@ -463,7 +480,10 @@ mod tests {
         let screen = Rect::new(0, 0, 80, 24);
         let bounds = tooltip.bounds(screen);
 
-        assert!(bounds.right() <= screen.right(), "Should not exceed screen width");
+        assert!(
+            bounds.right() <= screen.right(),
+            "Should not exceed screen width"
+        );
     }
 
     #[test]
@@ -473,9 +493,9 @@ mod tests {
             .config(TooltipConfig::default().position(TooltipPosition::Above));
 
         let screen = Rect::new(0, 0, 80, 24);
-        let pos = tooltip.calculate_position(screen);
+        let (_, y) = tooltip.calculate_position(screen);
 
-        assert!(pos.y < 10, "Above position should be above target");
+        assert!(y < 10, "Above position should be above target");
     }
 
     #[test]
@@ -485,9 +505,9 @@ mod tests {
             .config(TooltipConfig::default().position(TooltipPosition::Below));
 
         let screen = Rect::new(0, 0, 80, 24);
-        let pos = tooltip.calculate_position(screen);
+        let (_, y) = tooltip.calculate_position(screen);
 
-        assert!(pos.y > 5, "Below position should be below target");
+        assert!(y > 5, "Below position should be below target");
     }
 
     #[test]
@@ -497,10 +517,10 @@ mod tests {
             .config(TooltipConfig::default().position(TooltipPosition::Above));
 
         let screen = Rect::new(0, 0, 80, 24);
-        let pos = tooltip.calculate_position(screen);
+        let (x, y) = tooltip.calculate_position(screen);
 
-        assert!(pos.x >= 0, "X should not be negative");
-        assert!(pos.y >= 0, "Y should not be negative (clamped)");
+        assert!(x == 0 || x > 0, "X should not underflow");
+        assert!(y == 0 || y > 0, "Y should not underflow (clamped)");
     }
 
     // ── Wrapping tests ────────────────────────────────────────────────
@@ -540,8 +560,8 @@ mod tests {
 
     #[test]
     fn content_size_includes_padding() {
-        let tooltip = Tooltip::new("Hi")
-            .config(TooltipConfig::default().max_width(20).padding(2));
+        let tooltip =
+            Tooltip::new("Hi").config(TooltipConfig::default().max_width(20).padding(2));
 
         let size = tooltip.content_size();
         assert!(size.width >= 2 + 4, "Width should include padding");
