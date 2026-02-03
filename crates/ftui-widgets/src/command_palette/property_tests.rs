@@ -181,9 +181,9 @@ fn whitespace_query_behavior() {
 fn unicode_search_correctness() {
     let scorer = BayesianScorer::new();
 
-    // Emoji match
+    // Emoji match - the emoji follows a space, so it's at a word boundary (WordStart)
     let result = scorer.score("🚀", "Launch 🚀");
-    assert_eq!(result.match_type, MatchType::Substring);
+    assert_eq!(result.match_type, MatchType::WordStart);
     assert!(result.score > 0.5);
 
     // CJK match

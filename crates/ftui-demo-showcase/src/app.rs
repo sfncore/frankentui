@@ -21,9 +21,7 @@ use ftui_layout::{Constraint, Flex};
 use ftui_render::cell::Cell as RenderCell;
 use ftui_render::frame::Frame;
 use ftui_runtime::undo::HistoryManager;
-use ftui_runtime::{
-    Cmd, Every, InlineAutoRemeasureConfig, Model, Subscription, VoiLogEntry, VoiSampler,
-};
+use ftui_runtime::{Cmd, Every, InlineAutoRemeasureConfig, Model, Subscription, VoiSampler};
 use ftui_style::Style;
 use ftui_widgets::Widget;
 use ftui_widgets::block::{Alignment, Block};
@@ -1039,8 +1037,8 @@ impl AppModel {
         );
         palette.register_action(
             ActionItem::new("cmd:toggle_evidence_ledger", "Toggle Evidence Ledger")
-                .with_description("Show scheduler decisions with Bayes factors (Galaxy-Brain)")
-                .with_tags(&["evidence", "bayes", "scheduler", "debug", "galaxy-brain"])
+                .with_description("Show VOI decisions with posterior math (Galaxy-Brain)")
+                .with_tags(&["evidence", "bayes", "voi", "debug", "galaxy-brain"])
                 .with_category("View"),
         );
         palette.register_action(
@@ -2113,14 +2111,14 @@ impl AppModel {
 
     /// Render the Evidence Ledger (Galaxy-Brain) debug overlay.
     ///
-    /// Shows scheduler decision evidence with Bayes factors and regime
-    /// information. This implements bd-1rz0.27.
+    /// Shows VOI sampling decisions with posterior math, Bayes factors,
+    /// and e-process evidence. This implements bd-1rz0.27.
     ///
     /// The overlay displays:
-    /// - Current scheduler regime (Steady/Burst)
-    /// - Recent decision log entries with evidence breakdown
-    /// - Bayes factor contributions (regime, timing, rate)
+    /// - Current posterior (alpha/beta, mean, variance)
+    /// - VOI calculation and decision equation
     /// - E-process confidence values
+    /// - Recent decision/observation ledger entries
     fn render_evidence_ledger(&self, frame: &mut Frame, area: Rect) {
         let _span = tracing::debug_span!(
             target: "ftui.evidence_ledger",
@@ -2130,10 +2128,10 @@ impl AppModel {
         .entered();
 
         // Size the overlay to fit substantial content
-        let overlay_width = 56u16.min(area.width.saturating_sub(4));
-        let overlay_height = 18u16.min(area.height.saturating_sub(4));
+        let overlay_width = 62u16.min(area.width.saturating_sub(4));
+        let overlay_height = 22u16.min(area.height.saturating_sub(4));
 
-        if overlay_width < 30 || overlay_height < 8 {
+        if overlay_width < 34 || overlay_height < 10 {
             tracing::trace!(
                 target: "ftui.evidence_ledger",
                 overlay_width,
@@ -2167,79 +2165,104 @@ impl AppModel {
             return;
         }
 
-        // Build evidence ledger content
-        // In a real integration, this would pull from ResizeCoalescer.logs()
-        // For now, show simulated/sample data that demonstrates the format
-        let mut lines = Vec::with_capacity(16);
+        // Build VOI evidence ledger content (posterior + decision ledger).
+        let mut lines = Vec::with_capacity(20);
+        let line_width = inner.width.saturating_sub(2) as usize;
 
-        // Header section
-        lines.push(format!("Scheduler State (tick {})", self.tick_count));
-        lines.push("─".repeat(inner.width.saturating_sub(2) as usize));
+        lines.push(format!("VOI Sampling (tick {})", self.tick_count));
+        lines.push("─".repeat(line_width));
 
-        // Simulate regime state based on terminal activity
-        let regime = if self.tick_count % 50 < 10 {
-            "Burst"
-        } else {
-            "Steady"
-        };
-        let event_rate = if regime == "Burst" {
-            12.0 + (self.tick_count % 8) as f64
-        } else {
-            2.0 + (self.tick_count % 3) as f64
-        };
-        lines.push(format!(
-            "Regime: {:<8} Rate: {:.1} evt/s",
-            regime, event_rate
-        ));
+        let (alpha, beta) = self.voi_sampler.posterior_params();
+        let mean = self.voi_sampler.posterior_mean();
+        let variance = self.voi_sampler.posterior_variance();
+        let expected_after = self.voi_sampler.expected_variance_after();
+        let voi_gain = (variance - expected_after).max(0.0);
 
-        // Simulated Bayes factor breakdown
-        let log_bf = if regime == "Burst" {
-            2.3 + (self.tick_count % 10) as f64 * 0.1
+        if let Some(decision) = self.voi_sampler.last_decision() {
+            let verdict = if decision.should_sample {
+                "SAMPLE"
+            } else {
+                "SKIP"
+            };
+            lines.push(format!(
+                "Decision: {:<6}  reason: {}",
+                verdict, decision.reason
+            ));
+            lines.push(format!(
+                "log10 BF: {:+.3}  score/cost",
+                decision.log_bayes_factor
+            ));
+            lines.push(format!(
+                "E: {:.3} / {:.2}  boundary: {:.3}",
+                decision.e_value, decision.e_threshold, decision.boundary_score
+            ));
         } else {
-            -1.5 + (self.tick_count % 5) as f64 * 0.2
-        };
-        let regime_contrib = log_bf * 0.4;
-        let timing_contrib = log_bf * 0.35;
-        let rate_contrib = log_bf * 0.25;
+            lines.push("Decision: —".to_string());
+        }
 
         lines.push(String::new());
-        lines.push("Decision Evidence".to_string());
-        lines.push("─".repeat(inner.width.saturating_sub(2) as usize));
-        lines.push(format!("Log Bayes Factor: {:+.3}", log_bf));
+        lines.push("Posterior Core".to_string());
+        lines.push("─".repeat(line_width));
+        lines.push(format!("p ~ Beta(α,β)  α={:.2}  β={:.2}", alpha, beta));
+        lines.push(format!("μ={:.4}  Var={:.6}", mean, variance));
+        lines.push("VOI = Var[p] − E[Var|1]".to_string());
         lines.push(format!(
-            "  Regime:  {:+.3}  Timing: {:+.3}",
-            regime_contrib, timing_contrib
-        ));
-        lines.push(format!("  Rate:    {:+.3}", rate_contrib));
-
-        // E-process confidence
-        let e_value = if regime == "Burst" {
-            0.95 + (self.tick_count % 5) as f64 * 0.01
-        } else {
-            0.12 + (self.tick_count % 8) as f64 * 0.02
-        };
-        let threshold = 0.95; // 1/alpha where alpha = 0.05
-
-        lines.push(String::new());
-        lines.push("Anytime-Valid Confidence".to_string());
-        lines.push("─".repeat(inner.width.saturating_sub(2) as usize));
-        let status = if e_value >= threshold {
-            "⚠ ALERT"
-        } else {
-            "✓ OK"
-        };
-        lines.push(format!(
-            "E-value: {:.3} / {:.2} {}",
-            e_value, threshold, status
+            "VOI = {:.6} − {:.6} = {:.6}",
+            variance, expected_after, voi_gain
         ));
 
-        // Decision history (last few decisions)
-        lines.push(String::new());
-        lines.push(format!(
-            "Recent: {} apply, {} coalesce",
-            self.tick_count / 10,
-            self.tick_count / 3
-        ));
+        if let Some(decision) = self.voi_sampler.last_decision() {
+            let cfg = self.voi_sampler.config();
+            lines.push(String::new());
+            lines.push("Decision Equation".to_string());
+            lines.push("─".repeat(line_width));
+            lines.push(format!(
+                "score = VOI × {:.2} × (1 + {:.2}·b)",
+                cfg.value_scale, cfg.boundary_weight
+            ));
+            lines.push(format!(
+                "score={:.6}  cost={:.6}",
+                decision.score, decision.cost
+            ));
+            lines.push(format!(
+                "log10 BF = log10({:.6}/{:.6}) = {:+.3}",
+                decision.score, decision.cost, decision.log_bayes_factor
+            ));
+        }
+
+        if let Some(observation) = self.voi_sampler.last_observation() {
+            lines.push(String::new());
+            lines.push("Last Sample".to_string());
+            lines.push("─".repeat(line_width));
+            lines.push(format!(
+                "violated: {}  α={:.1}  β={:.1}",
+                observation.violated, observation.alpha, observation.beta
+            ));
+        }
+
+        let recent = self.voi_sampler.logs();
+        if !recent.is_empty() {
+            lines.push(String::new());
+            lines.push("Evidence Ledger (Recent)".to_string());
+            lines.push("─".repeat(line_width));
+            for entry in recent.iter().rev().take(4).rev() {
+                match entry {
+                    VoiLogEntry::Decision(decision) => {
+                        let verdict = if decision.should_sample { "S" } else { "-" };
+                        lines.push(format!(
+                            "D#{:>3} {verdict} VOI={:.5} logBF={:+.2}",
+                            decision.event_idx, decision.voi_gain, decision.log_bayes_factor
+                        ));
+                    }
+                    VoiLogEntry::Observation(obs) => {
+                        lines.push(format!(
+                            "O#{:>3} viol={} μ={:.3}",
+                            obs.sample_idx, obs.violated, obs.posterior_mean
+                        ));
+                    }
+                }
+            }
+        }
 
         // Render the text
         let text = lines.join("\n");
