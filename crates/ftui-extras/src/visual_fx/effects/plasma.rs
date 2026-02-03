@@ -45,7 +45,9 @@ pub fn plasma_wave(nx: f64, ny: f64, time: f64) -> f64 {
 
     // Average and normalize from [-1, 1] to [0, 1]
     let value = (v1 + v2 + v3 + v4 + v5 + v6) / 6.0;
-    (value + 1.0) / 2.0
+    // Breathing envelope: slow amplitude modulation for organic feel
+    let breath = 0.85 + 0.15 * (time * 0.3).sin();
+    ((value * breath) + 1.0) / 2.0
 }
 
 /// Simplified plasma wave for low-quality rendering.
@@ -126,6 +128,8 @@ pub enum PlasmaPalette {
     Neon,
     /// Cyberpunk (hot pink -> purple -> cyan).
     Cyberpunk,
+    /// Galaxy (deep black -> indigo -> magenta -> white stars).
+    Galaxy,
 }
 
 impl PlasmaPalette {
@@ -154,6 +158,7 @@ impl PlasmaPalette {
             Self::Fire => Self::fire(t),
             Self::Neon => Self::neon(t),
             Self::Cyberpunk => Self::cyberpunk(t),
+            Self::Galaxy => Self::galaxy(t),
         }
     }
 
@@ -173,6 +178,7 @@ impl PlasmaPalette {
             Self::Fire => 5,
             Self::Neon => 6, // HSV cycle has 6 segments
             Self::Cyberpunk => 3,
+            Self::Galaxy => 4,
         }
     }
 
@@ -336,9 +342,9 @@ impl PlasmaPalette {
     }
 
     fn neon(t: f64) -> PackedRgba {
-        // Full hue cycle
+        // Full hue cycle with slightly reduced saturation for subtlety
         let hue = t * 360.0;
-        Self::hsv_to_rgb(hue, 1.0, 1.0)
+        Self::hsv_to_rgb(hue, 0.92, 1.0)
     }
 
     fn cyberpunk(t: f64) -> PackedRgba {
@@ -349,6 +355,24 @@ impl PlasmaPalette {
         } else {
             let s = (t - 0.5) / 0.5;
             Self::lerp_rgb((150, 50, 200), (50, 220, 255), s)
+        };
+        PackedRgba::rgb(r, g, b)
+    }
+
+    fn galaxy(t: f64) -> PackedRgba {
+        // Deep space -> indigo nebula -> magenta -> bright star white
+        let (r, g, b) = if t < 0.3 {
+            let s = t / 0.3;
+            Self::lerp_rgb((5, 2, 15), (40, 20, 100), s)
+        } else if t < 0.6 {
+            let s = (t - 0.3) / 0.3;
+            Self::lerp_rgb((40, 20, 100), (180, 50, 160), s)
+        } else if t < 0.85 {
+            let s = (t - 0.6) / 0.25;
+            Self::lerp_rgb((180, 50, 160), (220, 180, 255), s)
+        } else {
+            let s = (t - 0.85) / 0.15;
+            Self::lerp_rgb((220, 180, 255), (255, 250, 240), s)
         };
         PackedRgba::rgb(r, g, b)
     }
@@ -750,6 +774,7 @@ mod tests {
         assert!(!PlasmaPalette::Fire.is_theme_derived());
         assert!(!PlasmaPalette::Neon.is_theme_derived());
         assert!(!PlasmaPalette::Cyberpunk.is_theme_derived());
+        assert!(!PlasmaPalette::Galaxy.is_theme_derived());
     }
 
     #[test]

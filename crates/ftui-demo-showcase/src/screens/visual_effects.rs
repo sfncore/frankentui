@@ -711,12 +711,13 @@ fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
     )
 }
 
-const PLASMA_PALETTES: [PlasmaPalette; 5] = [
+const PLASMA_PALETTES: [PlasmaPalette; 6] = [
     PlasmaPalette::Sunset,
     PlasmaPalette::Ocean,
     PlasmaPalette::Fire,
     PlasmaPalette::Neon,
     PlasmaPalette::Cyberpunk,
+    PlasmaPalette::Galaxy,
 ];
 
 fn current_fx_theme() -> ThemeInputs {
@@ -797,9 +798,9 @@ impl Default for Shape3DState {
 
 impl Shape3DState {
     fn update(&mut self) {
-        self.rotation_x += 0.015;
-        self.rotation_y += 0.025;
-        self.rotation_z += 0.008;
+        self.rotation_x += 0.018;
+        self.rotation_y += 0.028;
+        self.rotation_z += 0.010;
         self.camera_z += 0.05;
 
         // Move stars towards camera (warp effect)
@@ -851,12 +852,19 @@ impl Shape3DState {
             let sx = (w / 2.0 + star.x * scale * w * 0.5) as i32;
             let sy = (h / 2.0 + star.y * scale * h * 0.5) as i32;
 
-            let brightness = (star.brightness * (1.0 - star.z / 6.0) * 255.0) as u8;
-            let twinkle = (1.0 + 0.3 * (time * 5.0 + star.x * 10.0).sin()) / 1.3;
+            let depth_fade = 1.0 - star.z / 6.0;
+            let brightness = (star.brightness * depth_fade * 255.0) as u8;
+            let twinkle = (1.0 + 0.35 * (time * 6.0 + star.x * 12.0 + star.y * 8.0).sin()) / 1.35;
             let b = (brightness as f64 * twinkle) as u8;
 
             if sx >= 0 && sx < width as i32 && sy >= 0 && sy < height as i32 {
-                painter.point_colored(sx, sy, PackedRgba::rgb(b, b, b.saturating_add(30)));
+                // Distant stars get a subtle blue tint for depth
+                let blue_tint = ((1.0 - depth_fade) * 40.0) as u8;
+                painter.point_colored(
+                    sx,
+                    sy,
+                    PackedRgba::rgb(b, b, b.saturating_add(30 + blue_tint)),
+                );
             }
         }
 
@@ -1153,7 +1161,7 @@ impl ParticleState {
         self.spawn_timer += 1.0;
 
         // Launch rockets periodically
-        if self.spawn_timer >= 30.0 {
+        if self.spawn_timer >= 22.0 {
             self.spawn_timer = 0.0;
             let x = 0.2 + rand_simple() * 0.6;
             self.particles.push(Particle {
@@ -1249,13 +1257,15 @@ impl ParticleState {
 
     fn render(&self, painter: &mut Painter, width: u16, height: u16) {
         for p in &self.particles {
-            // Draw trail
+            // Draw trail with hue shift along length for sparkle effect
             for (i, &(tx, ty)) in p.trail.iter().enumerate() {
-                let trail_life = i as f64 / p.trail.len() as f64 * p.life;
+                let trail_frac = i as f64 / p.trail.len() as f64;
+                let trail_life = trail_frac * p.life;
                 if trail_life > 0.1 {
                     let px = (tx * width as f64) as i32;
                     let py = (ty * height as f64) as i32;
-                    let (r, g, b) = hsv_to_rgb(p.hue * 360.0, 0.8, trail_life * 0.5);
+                    let trail_hue = (p.hue + trail_frac * 0.08).rem_euclid(1.0);
+                    let (r, g, b) = hsv_to_rgb(trail_hue * 360.0, 0.75, trail_life * 0.55);
                     painter.point_colored(px, py, PackedRgba::rgb(r, g, b));
                 }
             }
@@ -1270,13 +1280,15 @@ impl ParticleState {
 
             painter.point_colored(px, py, PackedRgba::rgb(r, g, b));
 
-            // Glow for bright particles
-            if brightness > 0.7 && !p.is_rocket {
-                let glow_b = (brightness * 0.5 * 255.0) as u8;
-                painter.point_colored(px + 1, py, PackedRgba::rgb(glow_b, glow_b, glow_b));
-                painter.point_colored(px - 1, py, PackedRgba::rgb(glow_b, glow_b, glow_b));
-                painter.point_colored(px, py + 1, PackedRgba::rgb(glow_b, glow_b, glow_b));
-                painter.point_colored(px, py - 1, PackedRgba::rgb(glow_b, glow_b, glow_b));
+            // Glow for bright particles — warm-tinted halo
+            if brightness > 0.65 && !p.is_rocket {
+                let glow_v = brightness * 0.45;
+                let (gr, gg, gb) = hsv_to_rgb(p.hue * 360.0, 0.3, glow_v);
+                let glow = PackedRgba::rgb(gr, gg, gb);
+                painter.point_colored(px + 1, py, glow);
+                painter.point_colored(px - 1, py, glow);
+                painter.point_colored(px, py + 1, glow);
+                painter.point_colored(px, py - 1, glow);
             }
         }
     }
