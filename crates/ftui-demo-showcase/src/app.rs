@@ -305,6 +305,8 @@ pub enum ScreenId {
     ThemeStudio,
     /// Snapshot/Time Travel Player (bd-3sa7).
     SnapshotPlayer,
+    /// Performance HUD + Render Budget Visualizer (bd-3k3x).
+    PerformanceHud,
 }
 
 impl ScreenId {
@@ -336,6 +338,7 @@ impl ScreenId {
         Self::AsyncTasks,
         Self::ThemeStudio,
         Self::SnapshotPlayer,
+        Self::PerformanceHud,
     ];
 
     /// 0-based index in the ALL array.
@@ -384,6 +387,7 @@ impl ScreenId {
             Self::AsyncTasks => "Async Tasks",
             Self::ThemeStudio => "Theme Studio",
             Self::SnapshotPlayer => "Snapshot Player",
+            Self::PerformanceHud => "Performance HUD",
         }
     }
 
@@ -416,6 +420,7 @@ impl ScreenId {
             Self::AsyncTasks => "Tasks",
             Self::ThemeStudio => "Themes",
             Self::SnapshotPlayer => "Snapshot",
+            Self::PerformanceHud => "PerfHUD",
         }
     }
 
@@ -448,6 +453,7 @@ impl ScreenId {
             Self::AsyncTasks => "AsyncTasks",
             Self::ThemeStudio => "ThemeStudio",
             Self::SnapshotPlayer => "SnapshotPlayer",
+            Self::PerformanceHud => "PerformanceHud",
         }
     }
 
@@ -521,9 +527,11 @@ pub struct ScreenStates {
     pub theme_studio: screens::theme_studio::ThemeStudioDemo,
     /// Snapshot/Time Travel Player screen state (bd-3sa7).
     pub snapshot_player: screens::snapshot_player::SnapshotPlayer,
+    /// Performance HUD + Render Budget Visualizer screen state (bd-3k3x).
+    pub performance_hud: screens::performance_hud::PerformanceHud,
     /// Tracks whether each screen has errored during rendering.
     /// Indexed by `ScreenId::index()`.
-    screen_errors: [Option<String>; 26],
+    screen_errors: [Option<String>; 27],
 }
 
 impl ScreenStates {
@@ -609,6 +617,9 @@ impl ScreenStates {
             ScreenId::SnapshotPlayer => {
                 self.snapshot_player.update(event);
             }
+            ScreenId::PerformanceHud => {
+                self.performance_hud.update(event);
+            }
         }
     }
 
@@ -641,6 +652,7 @@ impl ScreenStates {
         self.async_tasks.tick(tick_count);
         self.theme_studio.tick(tick_count);
         self.snapshot_player.tick(tick_count);
+        self.performance_hud.tick(tick_count);
     }
 
     fn apply_theme(&mut self) {
@@ -696,6 +708,7 @@ impl ScreenStates {
                 ScreenId::AsyncTasks => self.async_tasks.view(frame, area),
                 ScreenId::ThemeStudio => self.theme_studio.view(frame, area),
                 ScreenId::SnapshotPlayer => self.snapshot_player.view(frame, area),
+                ScreenId::PerformanceHud => self.performance_hud.view(frame, area),
             }
         }));
 
@@ -1493,6 +1506,7 @@ impl AppModel {
             ScreenId::AsyncTasks => self.screens.async_tasks.keybindings(),
             ScreenId::ThemeStudio => self.screens.theme_studio.keybindings(),
             ScreenId::SnapshotPlayer => self.screens.snapshot_player.keybindings(),
+            ScreenId::PerformanceHud => self.screens.performance_hud.keybindings(),
         };
         // Convert screens::HelpEntry to chrome::HelpEntry (same struct, different module).
         entries

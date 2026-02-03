@@ -24,6 +24,7 @@ pub mod markdown_rich_text;
 pub mod mouse_playground;
 pub mod notifications;
 pub mod performance;
+pub mod performance_hud;
 pub mod responsive_demo;
 pub mod shakespeare;
 pub mod snapshot_player;

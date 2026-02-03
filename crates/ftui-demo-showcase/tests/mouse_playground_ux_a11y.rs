@@ -135,11 +135,11 @@ fn keybindings_documented() {
         "End/G should be documented for last target"
     );
     assert!(
-        keys.iter().any(|(k, a)| *k == "O" && a.contains("Overlay")),
+        keys.iter().any(|(k, a)| *k == "O" && a.contains("overlay")),
         "O should be documented for overlay"
     );
     assert!(
-        keys.iter().any(|(k, a)| *k == "J" && a.contains("Jitter")),
+        keys.iter().any(|(k, a)| *k == "J" && a.contains("jitter")),
         "J should be documented for jitter stats"
     );
     assert!(

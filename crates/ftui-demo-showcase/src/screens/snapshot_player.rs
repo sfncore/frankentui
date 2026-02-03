@@ -95,7 +95,8 @@ pub enum PlaybackState {
 }
 
 impl PlaybackState {
-    fn label(self) -> &'static str {
+    /// Human-readable label for display (includes both icon and text).
+    pub fn label(self) -> &'static str {
         match self {
             Self::Paused => "⏸ Paused",
             Self::Playing => "▶ Playing",
