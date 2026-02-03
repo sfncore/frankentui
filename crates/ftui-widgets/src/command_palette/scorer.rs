@@ -429,6 +429,21 @@ impl BayesianScorer {
         title_lower: &str,
         title: &str,
     ) -> (MatchType, Vec<usize>) {
+        self.detect_match_type_with_words(query_lower, title_lower, title, None)
+    }
+
+    /// Detect match type with optional precomputed word-start positions.
+    fn detect_match_type_with_words(
+        &self,
+        query_lower: &str,
+        title_lower: &str,
+        title: &str,
+        word_starts: Option<&[usize]>,
+    ) -> (MatchType, Vec<usize>) {
+        if query_lower.is_ascii() && title_lower.is_ascii() {
+            return self.detect_match_type_ascii(query_lower, title_lower, word_starts);
+        }
+
         // Check exact match
         if query_lower == title_lower {
             let positions: Vec<usize> = (0..title.len()).collect();
@@ -454,6 +469,42 @@ impl BayesianScorer {
 
         // Check fuzzy match
         if let Some(positions) = self.fuzzy_match(query_lower, title_lower) {
+            return (MatchType::Fuzzy, positions);
+        }
+
+        (MatchType::NoMatch, Vec::new())
+    }
+
+    /// ASCII fast-path match detection.
+    fn detect_match_type_ascii(
+        &self,
+        query_lower: &str,
+        title_lower: &str,
+        word_starts: Option<&[usize]>,
+    ) -> (MatchType, Vec<usize>) {
+        let query_bytes = query_lower.as_bytes();
+        let title_bytes = title_lower.as_bytes();
+
+        if query_bytes == title_bytes {
+            let positions: Vec<usize> = (0..title_bytes.len()).collect();
+            return (MatchType::Exact, positions);
+        }
+
+        if title_bytes.starts_with(query_bytes) {
+            let positions: Vec<usize> = (0..query_bytes.len()).collect();
+            return (MatchType::Prefix, positions);
+        }
+
+        if let Some(positions) = self.word_start_match_ascii(query_bytes, title_bytes, word_starts) {
+            return (MatchType::WordStart, positions);
+        }
+
+        if let Some(start) = title_lower.find(query_lower) {
+            let positions: Vec<usize> = (start..start + query_bytes.len()).collect();
+            return (MatchType::Substring, positions);
+        }
+
+        if let Some(positions) = self.fuzzy_match_ascii(query_bytes, title_bytes) {
             return (MatchType::Fuzzy, positions);
         }
 
@@ -492,6 +543,48 @@ impl BayesianScorer {
         }
     }
 
+    /// ASCII word-start match with optional precomputed word-start positions.
+    fn word_start_match_ascii(
+        &self,
+        query: &[u8],
+        title: &[u8],
+        word_starts: Option<&[usize]>,
+    ) -> Option<Vec<usize>> {
+        let mut positions = Vec::new();
+        let mut query_idx = 0;
+        if query.is_empty() {
+            return Some(positions);
+        }
+
+        if let Some(starts) = word_starts {
+            for &pos in starts {
+                if pos >= title.len() {
+                    continue;
+                }
+                if title[pos] == query[query_idx] {
+                    positions.push(pos);
+                    query_idx += 1;
+                    if query_idx == query.len() {
+                        return Some(positions);
+                    }
+                }
+            }
+        } else {
+            for (i, &b) in title.iter().enumerate() {
+                let is_word_start = i == 0 || matches!(title[i - 1], b' ' | b'-' | b'_');
+                if is_word_start && b == query[query_idx] {
+                    positions.push(i);
+                    query_idx += 1;
+                    if query_idx == query.len() {
+                        return Some(positions);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     /// Check fuzzy match (characters in order).
     fn fuzzy_match(&self, query: &str, title: &str) -> Option<Vec<usize>> {
         let mut positions = Vec::new();
@@ -511,6 +604,27 @@ impl BayesianScorer {
         } else {
             None
         }
+    }
+
+    /// ASCII fuzzy match (characters in order).
+    fn fuzzy_match_ascii(&self, query: &[u8], title: &[u8]) -> Option<Vec<usize>> {
+        let mut positions = Vec::new();
+        let mut query_idx = 0;
+        if query.is_empty() {
+            return Some(positions);
+        }
+
+        for (i, &b) in title.iter().enumerate() {
+            if b == query[query_idx] {
+                positions.push(i);
+                query_idx += 1;
+                if query_idx == query.len() {
+                    return Some(positions);
+                }
+            }
+        }
+
+        None
     }
 
     /// Compute score from match type and positions.
