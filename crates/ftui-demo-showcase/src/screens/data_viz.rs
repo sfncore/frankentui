@@ -12,7 +12,7 @@ use ftui_core::event::{Event, KeyCode, KeyEvent, KeyEventKind, Modifiers};
 use ftui_core::geometry::Rect;
 use ftui_extras::canvas::{Canvas, Mode, Painter};
 use ftui_extras::charts::{
-    BarChart, BarDirection, BarGroup, LineChart, Series, Sparkline, heatmap_gradient,
+    BarChart, BarDirection, BarGroup, BarMode, LineChart, Series, Sparkline, heatmap_gradient,
 };
 use ftui_layout::{Constraint, Flex};
 use ftui_render::cell::{Cell, PackedRgba};
@@ -34,26 +34,32 @@ use crate::theme;
 enum ChartPanel {
     Sparkline,
     BarChart,
+    Spectrum,
     LineChart,
     Canvas,
+    Heatmap,
 }
 
 impl ChartPanel {
     fn next(self) -> Self {
         match self {
             Self::Sparkline => Self::BarChart,
-            Self::BarChart => Self::LineChart,
+            Self::BarChart => Self::Spectrum,
+            Self::Spectrum => Self::LineChart,
             Self::LineChart => Self::Canvas,
-            Self::Canvas => Self::Sparkline,
+            Self::Canvas => Self::Heatmap,
+            Self::Heatmap => Self::Sparkline,
         }
     }
 
     fn prev(self) -> Self {
         match self {
-            Self::Sparkline => Self::Canvas,
+            Self::Sparkline => Self::Heatmap,
             Self::BarChart => Self::Sparkline,
-            Self::LineChart => Self::BarChart,
+            Self::Spectrum => Self::BarChart,
+            Self::LineChart => Self::Spectrum,
             Self::Canvas => Self::LineChart,
+            Self::Heatmap => Self::Canvas,
         }
     }
 }

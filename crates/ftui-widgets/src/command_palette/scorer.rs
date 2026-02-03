@@ -1246,6 +1246,68 @@ impl IncrementalScorer {
         results
     }
 
+    /// Score a query against a corpus with pre-lowercased titles and word-start cache.
+    ///
+    /// `corpus_lower` and `word_starts` must align 1:1 with `corpus`.
+    pub fn score_corpus_with_lowered_and_words(
+        &mut self,
+        query: &str,
+        corpus: &[String],
+        corpus_lower: &[String],
+        word_starts: &[Vec<usize>],
+        generation: Option<u64>,
+    ) -> Vec<(usize, MatchResult)> {
+        debug_assert_eq!(
+            corpus.len(),
+            corpus_lower.len(),
+            "corpus_lower must match corpus length"
+        );
+        debug_assert_eq!(
+            corpus.len(),
+            word_starts.len(),
+            "word_starts must match corpus length"
+        );
+
+        // Detect corpus changes.
+        let generation_val = generation.unwrap_or(self.corpus_generation);
+        if generation_val != self.corpus_generation || corpus.len() != self.corpus_len {
+            self.invalidate();
+            self.corpus_generation = generation_val;
+            self.corpus_len = corpus.len();
+        }
+
+        // Determine if we can use incremental scoring.
+        let can_prune = !self.prev_query.is_empty()
+            && query.starts_with(&self.prev_query)
+            && !self.cache.is_empty();
+
+        let query_lower = query.to_lowercase();
+        let results = if can_prune {
+            self.score_incremental_lowered_with_words(
+                query,
+                &query_lower,
+                corpus,
+                corpus_lower,
+                word_starts,
+            )
+        } else {
+            self.score_full_lowered_with_words(query, &query_lower, corpus, corpus_lower, word_starts)
+        };
+
+        // Update cache state.
+        self.prev_query.clear();
+        self.prev_query.push_str(query);
+        self.cache = results
+            .iter()
+            .map(|(idx, result)| CachedEntry {
+                corpus_index: *idx,
+                result: result.clone(),
+            })
+            .collect();
+
+        results
+    }
+
     /// Full scan: score every item in the corpus.
     fn score_full(
         &mut self,
@@ -1314,6 +1376,47 @@ impl IncrementalScorer {
         results
     }
 
+    /// Full scan with pre-lowercased titles and word-start cache.
+    fn score_full_lowered_with_words(
+        &mut self,
+        query: &str,
+        query_lower: &str,
+        corpus: &[String],
+        corpus_lower: &[String],
+        word_starts: &[Vec<usize>],
+    ) -> Vec<(usize, MatchResult)> {
+        self.stats.full_scans += 1;
+        self.stats.total_evaluated += corpus.len() as u64;
+
+        let mut results: Vec<(usize, MatchResult)> = corpus
+            .iter()
+            .zip(corpus_lower.iter())
+            .zip(word_starts.iter())
+            .enumerate()
+            .map(|(i, ((title, title_lower), starts))| {
+                (
+                    i,
+                    self.scorer.score_with_lowered_title_and_words(
+                        query,
+                        query_lower,
+                        title,
+                        title_lower,
+                        Some(starts),
+                    ),
+                )
+            })
+            .filter(|(_, r)| r.score > 0.0)
+            .collect();
+
+        results.sort_by(|a, b| {
+            b.1.score
+                .partial_cmp(&a.1.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.1.match_type.cmp(&a.1.match_type))
+        });
+
+        results
+    }
     /// Incremental scan: only re-score items that previously matched.
     fn score_incremental(
         &mut self,
@@ -1383,6 +1486,55 @@ impl IncrementalScorer {
                         query_lower,
                         title,
                         title_lower,
+                    );
+                    if result.score > 0.0 {
+                        return Some((entry.corpus_index, result));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        results.sort_by(|a, b| {
+            b.1.score
+                .partial_cmp(&a.1.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.1.match_type.cmp(&a.1.match_type))
+        });
+
+        results
+    }
+
+    /// Incremental scan with pre-lowercased titles and word-start cache.
+    fn score_incremental_lowered_with_words(
+        &mut self,
+        query: &str,
+        query_lower: &str,
+        corpus: &[String],
+        corpus_lower: &[String],
+        word_starts: &[Vec<usize>],
+    ) -> Vec<(usize, MatchResult)> {
+        self.stats.incremental_scans += 1;
+
+        let prev_match_count = self.cache.len();
+        let pruned = corpus.len().saturating_sub(prev_match_count);
+        self.stats.total_pruned += pruned as u64;
+        self.stats.total_evaluated += prev_match_count as u64;
+
+        let mut results: Vec<(usize, MatchResult)> = self
+            .cache
+            .iter()
+            .filter_map(|entry| {
+                if entry.corpus_index < corpus.len() {
+                    let title = &corpus[entry.corpus_index];
+                    let title_lower = &corpus_lower[entry.corpus_index];
+                    let starts = &word_starts[entry.corpus_index];
+                    let result = self.scorer.score_with_lowered_title_and_words(
+                        query,
+                        query_lower,
+                        title,
+                        title_lower,
+                        Some(starts),
                     );
                     if result.score > 0.0 {
                         return Some((entry.corpus_index, result));
@@ -2128,16 +2280,45 @@ mod tests {
 
     #[test]
     fn incremental_lowered_matches_full() {
-        let corpus = ["Open File", "Save File", "Close", "Launch 🚀"];
-        let corpus_refs: Vec<&str> = corpus.to_vec();
+        let corpus = vec![
+            "Open File".to_string(),
+            "Save File".to_string(),
+            "Close".to_string(),
+            "Launch 🚀".to_string(),
+        ];
+        let corpus_refs: Vec<&str> = corpus.iter().map(|s| s.as_str()).collect();
         let lower: Vec<String> = corpus.iter().map(|s| s.to_lowercase()).collect();
-        let lower_refs: Vec<&str> = lower.iter().map(|s| s.as_str()).collect();
+        let word_starts: Vec<Vec<usize>> = lower
+            .iter()
+            .map(|title_lower| {
+                let bytes = title_lower.as_bytes();
+                title_lower
+                    .char_indices()
+                    .filter_map(|(i, _)| {
+                        let is_word_start = i == 0 || {
+                            let prev = bytes
+                                .get(i.saturating_sub(1))
+                                .copied()
+                                .unwrap_or(b' ');
+                            prev == b' ' || prev == b'-' || prev == b'_'
+                        };
+                        is_word_start.then_some(i)
+                    })
+                    .collect()
+            })
+            .collect();
 
         let mut full = IncrementalScorer::new();
         let mut lowered = IncrementalScorer::new();
 
         let a = full.score_corpus("fi", &corpus_refs, None);
-        let b = lowered.score_corpus_with_lowered("fi", &corpus_refs, &lower_refs, None);
+        let b = lowered.score_corpus_with_lowered_and_words(
+            "fi",
+            &corpus,
+            &lower,
+            &word_starts,
+            None,
+        );
 
         assert_eq!(a.len(), b.len());
         for ((ia, ra), (ib, rb)) in a.iter().zip(b.iter()) {
