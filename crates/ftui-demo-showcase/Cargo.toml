@@ -10,7 +10,7 @@ ftui-render = { path = "../ftui-render" }
 ftui-style = { path = "../ftui-style" }
 ftui-text = { path = "../ftui-text", features = ["markup"] }
 ftui-layout = { path = "../ftui-layout" }
-ftui-runtime = { path = "../ftui-runtime" }
+ftui-runtime = { path = "../ftui-runtime", features = ["tracing"] }
 ftui-widgets = { path = "../ftui-widgets", features = ["tracing"] }
 tracing = "0.1"
 ftui-extras = { path = "../ftui-extras", features = [
@@ -45,6 +45,7 @@ ftui-harness = { path = "../ftui-harness" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["registry"] }
 criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
 
 [[bench]]
 name = "action_timeline_bench"

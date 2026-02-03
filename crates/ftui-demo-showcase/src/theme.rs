@@ -34,6 +34,88 @@ pub use core_theme::{
 };
 pub use core_theme::{palette, set_theme};
 
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+
+// ---------------------------------------------------------------------------
+// Accessibility Settings
+// ---------------------------------------------------------------------------
+
+/// Global flag for large text mode.
+static LARGE_TEXT_ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// Global motion scale (0-100, representing 0.0-1.0).
+static MOTION_SCALE_PERCENT: AtomicU8 = AtomicU8::new(100);
+
+/// Accessibility settings for the application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct A11ySettings {
+    /// Enable high contrast mode for better visibility.
+    pub high_contrast: bool,
+    /// Reduce motion for users sensitive to animations.
+    pub reduced_motion: bool,
+    /// Enable large text mode.
+    pub large_text: bool,
+}
+
+impl A11ySettings {
+    /// Create settings with all accessibility features disabled.
+    pub const fn none() -> Self {
+        Self {
+            high_contrast: false,
+            reduced_motion: false,
+            large_text: false,
+        }
+    }
+
+    /// Create settings with all accessibility features enabled.
+    pub const fn all() -> Self {
+        Self {
+            high_contrast: true,
+            reduced_motion: true,
+            large_text: true,
+        }
+    }
+}
+
+/// Set the global large text mode.
+pub fn set_large_text(enabled: bool) {
+    LARGE_TEXT_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+/// Returns true if large text mode is enabled.
+pub fn large_text_enabled() -> bool {
+    LARGE_TEXT_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Set the global motion scale (0.0 = stopped, 1.0 = full speed).
+pub fn set_motion_scale(scale: f32) {
+    let clamped = scale.clamp(0.0, 1.0);
+    let percent = (clamped * 100.0).round() as u8;
+    MOTION_SCALE_PERCENT.store(percent, Ordering::Relaxed);
+}
+
+/// Get the current global motion scale (0.0..=1.0).
+pub fn motion_scale() -> f32 {
+    MOTION_SCALE_PERCENT.load(Ordering::Relaxed) as f32 / 100.0
+}
+
+/// Apply large text adjustments to a style if large text mode is enabled.
+pub fn apply_large_text(style: Style) -> Style {
+    if large_text_enabled() {
+        style.bold()
+    } else {
+        style
+    }
+}
+
+/// Scale spacing values for accessibility modes.
+///
+/// Returns the input spacing value, scaled up for large text mode.
+pub fn scale_spacing(spacing: u16) -> u16 {
+    let factor = if large_text_enabled() { 2 } else { 1 };
+    spacing.saturating_mul(factor)
+}
+
 // ---------------------------------------------------------------------------
 // Spacing tokens
 // ---------------------------------------------------------------------------
@@ -513,39 +595,39 @@ pub fn priority_icon(is_emoji: bool, priority: u8) -> &'static str {
 
 /// Semantic text styles.
 pub fn title() -> Style {
-    Style::new().fg(fg::PRIMARY).attrs(StyleFlags::BOLD)
+    apply_large_text(Style::new().fg(fg::PRIMARY).attrs(StyleFlags::BOLD))
 }
 
 pub fn subtitle() -> Style {
-    Style::new().fg(fg::SECONDARY).attrs(StyleFlags::ITALIC)
+    apply_large_text(Style::new().fg(fg::SECONDARY).attrs(StyleFlags::ITALIC))
 }
 
 pub fn body() -> Style {
-    Style::new().fg(fg::PRIMARY)
+    apply_large_text(Style::new().fg(fg::PRIMARY))
 }
 
 pub fn muted() -> Style {
-    Style::new().fg(fg::MUTED)
+    apply_large_text(Style::new().fg(fg::MUTED))
 }
 
 pub fn link() -> Style {
-    Style::new().fg(accent::LINK).attrs(StyleFlags::UNDERLINE)
+    apply_large_text(Style::new().fg(accent::LINK).attrs(StyleFlags::UNDERLINE))
 }
 
 pub fn code() -> Style {
-    Style::new().fg(accent::INFO).bg(alpha::SURFACE)
+    apply_large_text(Style::new().fg(accent::INFO).bg(alpha::SURFACE))
 }
 
 pub fn error_style() -> Style {
-    Style::new().fg(accent::ERROR).attrs(StyleFlags::BOLD)
+    apply_large_text(Style::new().fg(accent::ERROR).attrs(StyleFlags::BOLD))
 }
 
 pub fn success() -> Style {
-    Style::new().fg(accent::SUCCESS).attrs(StyleFlags::BOLD)
+    apply_large_text(Style::new().fg(accent::SUCCESS).attrs(StyleFlags::BOLD))
 }
 
 pub fn warning() -> Style {
-    Style::new().fg(accent::WARNING).attrs(StyleFlags::BOLD)
+    apply_large_text(Style::new().fg(accent::WARNING).attrs(StyleFlags::BOLD))
 }
 
 // ---------------------------------------------------------------------------
@@ -604,7 +686,7 @@ pub fn strikethrough() -> Style {
 
 /// Tab bar background.
 pub fn tab_bar() -> Style {
-    Style::new().bg(alpha::SURFACE).fg(fg::SECONDARY)
+    apply_large_text(Style::new().bg(alpha::SURFACE).fg(fg::SECONDARY))
 }
 
 /// Active tab.
@@ -617,7 +699,7 @@ pub fn tab_active() -> Style {
 
 /// Status bar background.
 pub fn status_bar() -> Style {
-    Style::new().bg(alpha::SURFACE).fg(fg::MUTED)
+    apply_large_text(Style::new().bg(alpha::SURFACE).fg(fg::MUTED))
 }
 
 /// Content area border.
@@ -627,7 +709,7 @@ pub fn content_border() -> Style {
 
 /// Help overlay background.
 pub fn help_overlay() -> Style {
-    Style::new().bg(alpha::OVERLAY).fg(fg::PRIMARY)
+    apply_large_text(Style::new().bg(alpha::OVERLAY).fg(fg::PRIMARY))
 }
 
 // ---------------------------------------------------------------------------

@@ -937,6 +937,9 @@ impl AppModel {
                         }
                         // Undo (Ctrl+Z)
                         (KeyCode::Char('z'), Modifiers::CTRL) => {
+                            if self.handle_screen_undo(UndoAction::Undo) {
+                                return Cmd::None;
+                            }
                             if self.history.can_undo() {
                                 let _ = self.history.undo();
                             }
@@ -944,6 +947,9 @@ impl AppModel {
                         }
                         // Redo (Ctrl+Y or Ctrl+Shift+Z)
                         (KeyCode::Char('y'), Modifiers::CTRL) => {
+                            if self.handle_screen_undo(UndoAction::Redo) {
+                                return Cmd::None;
+                            }
                             if self.history.can_redo() {
                                 let _ = self.history.redo();
                             }
@@ -951,6 +957,9 @@ impl AppModel {
                         }
                         (KeyCode::Char('Z'), m) if m.contains(Modifiers::CTRL) => {
                             // Ctrl+Shift+Z for redo
+                            if self.handle_screen_undo(UndoAction::Redo) {
+                                return Cmd::None;
+                            }
                             if self.history.can_redo() {
                                 let _ = self.history.redo();
                             }
@@ -1098,6 +1107,7 @@ impl Model for AppModel {
         }
 
         // Status bar (chrome module)
+        let (can_undo, can_redo, undo_description) = self.current_screen_undo_status();
         let status_state = crate::chrome::StatusBarState {
             current_screen: self.current_screen,
             screen_title: self.current_screen.title(),
@@ -1111,9 +1121,9 @@ impl Model for AppModel {
             a11y_high_contrast: self.a11y.high_contrast,
             a11y_reduced_motion: self.a11y.reduced_motion,
             a11y_large_text: self.a11y.large_text,
-            can_undo: self.history.can_undo(),
-            can_redo: self.history.can_redo(),
-            undo_description: self.history.next_undo_description(),
+            can_undo,
+            can_redo,
+            undo_description,
         };
         crate::chrome::render_status_bar(&status_state, frame, chunks[2]);
     }
@@ -1123,6 +1133,12 @@ impl Model for AppModel {
             AppMsg::Tick
         }))]
     }
+}
+
+#[derive(Clone, Copy)]
+enum UndoAction {
+    Undo,
+    Redo,
 }
 
 impl AppModel {
@@ -1163,6 +1179,42 @@ impl AppModel {
                 action: e.action,
             })
             .collect()
+    }
+
+    fn current_screen_undo_status(&self) -> (bool, bool, Option<&str>) {
+        use screens::Screen;
+        match self.current_screen {
+            ScreenId::AdvancedTextEditor => (
+                self.screens.advanced_text_editor.can_undo(),
+                self.screens.advanced_text_editor.can_redo(),
+                self.screens.advanced_text_editor.next_undo_description(),
+            ),
+            ScreenId::FormsInput => (
+                self.screens.forms_input.can_undo(),
+                self.screens.forms_input.can_redo(),
+                self.screens.forms_input.next_undo_description(),
+            ),
+            _ => (
+                self.history.can_undo(),
+                self.history.can_redo(),
+                self.history.next_undo_description(),
+            ),
+        }
+    }
+
+    fn handle_screen_undo(&mut self, action: UndoAction) -> bool {
+        use screens::Screen;
+        match self.current_screen {
+            ScreenId::AdvancedTextEditor => match action {
+                UndoAction::Undo => self.screens.advanced_text_editor.undo(),
+                UndoAction::Redo => self.screens.advanced_text_editor.redo(),
+            },
+            ScreenId::FormsInput => match action {
+                UndoAction::Undo => self.screens.forms_input.undo(),
+                UndoAction::Redo => self.screens.forms_input.redo(),
+            },
+            _ => false,
+        }
     }
 
     /// Execute an action returned by the command palette.

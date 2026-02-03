@@ -82,10 +82,13 @@ pub fn render_tab_bar(current: ScreenId, frame: &mut Frame, area: Rect) {
         } else {
             Style::new().bg(bg).fg(theme::fg::MUTED)
         };
-        let key_style = Style::new()
-            .bg(bg)
-            .fg(theme::fg::MUTED)
-            .attrs(StyleFlags::DIM);
+        let label_style = theme::apply_large_text(label_style);
+        let key_style = theme::apply_large_text(
+            Style::new()
+                .bg(bg)
+                .fg(theme::fg::MUTED)
+                .attrs(StyleFlags::DIM),
+        );
         let pad_style = Style::new().bg(bg);
 
         let line = Line::from_spans([
@@ -123,6 +126,7 @@ pub fn render_tab_bar(current: ScreenId, frame: &mut Frame, area: Rect) {
 
 /// State needed to render the status bar.
 pub struct StatusBarState<'a> {
+    pub current_screen: ScreenId,
     pub screen_title: &'a str,
     pub screen_index: usize,
     pub screen_count: usize,
@@ -131,67 +135,261 @@ pub struct StatusBarState<'a> {
     pub terminal_width: u16,
     pub terminal_height: u16,
     pub theme_name: &'a str,
+    pub a11y_high_contrast: bool,
+    pub a11y_reduced_motion: bool,
+    pub a11y_large_text: bool,
+    /// Whether undo is available.
+    pub can_undo: bool,
+    /// Whether redo is available.
+    pub can_redo: bool,
+    /// Description of the next undo action, if any.
+    pub undo_description: Option<&'a str>,
 }
 
 /// Render the status bar at the bottom of the screen.
+///
+/// The status bar uses a three-segment layout with visual differentiation:
+/// - **Left segment**: Screen title with accent color, position indicator, theme name
+/// - **Center segment**: Live metrics (tick/frame counts) in muted style
+/// - **Right segment**: Terminal dimensions and elapsed time
 pub fn render_status_bar(state: &StatusBarState<'_>, frame: &mut Frame, area: Rect) {
     // Fill background
     let bg_style = theme::status_bar();
+    let bg_color = theme::alpha::SURFACE;
     let blank = Paragraph::new("").style(bg_style);
     blank.render(area, frame);
+
+    // Get screen accent color for title emphasis
+    let screen_accent = accent_for(state.current_screen);
 
     // Elapsed time from tick count (each tick = 100ms)
     let total_secs = state.tick_count / 10;
     let mins = total_secs / 60;
     let secs = total_secs % 60;
 
-    // Build left / center / right segments
-    let left = format!(
-        " {} [{}/{}]  {}",
-        state.screen_title,
-        state.screen_index + 1,
-        state.screen_count,
-        state.theme_name,
+    // Build a11y indicator
+    let mut a11y_flags = Vec::new();
+    if state.a11y_high_contrast {
+        a11y_flags.push("HC");
+    }
+    if state.a11y_reduced_motion {
+        a11y_flags.push("RM");
+    }
+    if state.a11y_large_text {
+        a11y_flags.push("LT");
+    }
+    let a11y_label = if a11y_flags.is_empty() {
+        String::new()
+    } else {
+        format!(" A11y:{}", a11y_flags.join(" "))
+    };
+
+    // Build undo/redo indicator
+    let undo_label = if state.can_undo || state.can_redo {
+        let undo_icon = if state.can_undo { "↶" } else { "-" };
+        let redo_icon = if state.can_redo { "↷" } else { "-" };
+        format!(" [{}|{}]", undo_icon, redo_icon)
+    } else {
+        String::new()
+    };
+
+    // Style definitions for segments
+    let title_style = theme::apply_large_text(
+        Style::new()
+            .bg(bg_color)
+            .fg(screen_accent)
+            .attrs(StyleFlags::BOLD),
     );
-    let center = format!("tick:{} frm:{}", state.tick_count, state.frame_count);
-    let right = format!(
-        "{}x{} {:02}:{:02} ",
-        state.terminal_width, state.terminal_height, mins, secs,
+    let position_style =
+        theme::apply_large_text(Style::new().bg(bg_color).fg(theme::fg::SECONDARY));
+    let muted_style = theme::apply_large_text(Style::new().bg(bg_color).fg(theme::fg::MUTED));
+    let dim_style = theme::apply_large_text(
+        Style::new()
+            .bg(bg_color)
+            .fg(theme::fg::MUTED)
+            .attrs(StyleFlags::DIM),
     );
+    let time_style = theme::apply_large_text(Style::new().bg(bg_color).fg(theme::fg::SECONDARY));
+    let pad_style = Style::new().bg(bg_color);
+
+    // Build content strings
+    let position_str = format!("[{}/{}]", state.screen_index + 1, state.screen_count);
+    let theme_str = format!("  {}", state.theme_name);
+    let center_str = format!("tick:{} frm:{}", state.tick_count, state.frame_count);
+    let dims_str = format!("{}x{}", state.terminal_width, state.terminal_height);
+    let time_str = format!("{:02}:{:02}", mins, secs);
+
+    // Undo indicator style
+    let undo_style = theme::apply_large_text(
+        Style::new()
+            .bg(bg_color)
+            .fg(theme::accent::INFO)
+            .attrs(StyleFlags::BOLD),
+    );
+
+    // Calculate lengths for padding
+    let left_content_len = 1
+        + state.screen_title.len()
+        + 1
+        + position_str.len()
+        + theme_str.len()
+        + a11y_label.len()
+        + undo_label.len();
+    let center_content_len = center_str.len();
+    let right_content_len = dims_str.len() + 1 + time_str.len() + 1;
 
     let available = area.width as usize;
-    let left_len = left.len();
-    let center_len = center.len();
-    let right_len = right.len();
+    let total_content = left_content_len + center_content_len + right_content_len;
 
-    // Build a single line with spacing
-    let mut line = String::with_capacity(available);
-    line.push_str(&left);
+    // Build spans for the line
+    let mut spans = Vec::with_capacity(12);
 
-    let total_content = left_len + center_len + right_len;
+    // Left segment: title with accent, position, theme
+    spans.push(Span::styled(" ", pad_style));
+    spans.push(Span::styled(state.screen_title, title_style));
+    spans.push(Span::styled(" ", pad_style));
+    spans.push(Span::styled(position_str, position_style));
+    spans.push(Span::styled(theme_str, muted_style));
+    if !a11y_label.is_empty() {
+        spans.push(Span::styled(a11y_label, dim_style));
+    }
+    if !undo_label.is_empty() {
+        spans.push(Span::styled(undo_label, undo_style));
+    }
+
     if total_content < available {
+        // Full layout with centered metrics
         let total_padding = available - total_content;
         let left_pad = total_padding / 2;
         let right_pad = total_padding - left_pad;
-        for _ in 0..left_pad {
-            line.push(' ');
+
+        // Left padding
+        if left_pad > 0 {
+            spans.push(Span::styled(" ".repeat(left_pad), pad_style));
         }
-        line.push_str(&center);
-        for _ in 0..right_pad {
-            line.push(' ');
+
+        // Center segment: metrics
+        spans.push(Span::styled(center_str, dim_style));
+
+        // Right padding
+        if right_pad > 0 {
+            spans.push(Span::styled(" ".repeat(right_pad), pad_style));
         }
-        line.push_str(&right);
+
+        // Right segment: dimensions and time
+        spans.push(Span::styled(dims_str, muted_style));
+        spans.push(Span::styled(" ", pad_style));
+        spans.push(Span::styled(time_str, time_style));
+        spans.push(Span::styled(" ", pad_style));
     } else {
-        // Truncate: just show left and right
-        let pad = available.saturating_sub(left_len + right_len);
-        for _ in 0..pad {
-            line.push(' ');
+        // Compact layout: skip center, show left and right
+        let pad = available.saturating_sub(left_content_len + right_content_len);
+        if pad > 0 {
+            spans.push(Span::styled(" ".repeat(pad), pad_style));
         }
-        line.push_str(&right);
+        spans.push(Span::styled(dims_str, muted_style));
+        spans.push(Span::styled(" ", pad_style));
+        spans.push(Span::styled(time_str, time_style));
+        spans.push(Span::styled(" ", pad_style));
     }
 
-    let bar = Paragraph::new(line).style(bg_style);
+    let line = Line::from_spans(spans);
+    let bar = Paragraph::new(Text::from_lines([line]));
     bar.render(area, frame);
+}
+
+// ---------------------------------------------------------------------------
+// A11y panel
+// ---------------------------------------------------------------------------
+
+/// State needed to render the A11y panel.
+pub struct A11yPanelState<'a> {
+    pub high_contrast: bool,
+    pub reduced_motion: bool,
+    pub large_text: bool,
+    pub base_theme: &'a str,
+}
+
+/// Render a compact A11y panel with toggle states.
+pub fn render_a11y_panel(state: &A11yPanelState<'_>, frame: &mut Frame, area: Rect) {
+    let overlay_width = 36u16.min(area.width.saturating_sub(2));
+    let overlay_height = 8u16.min(area.height.saturating_sub(2));
+
+    if overlay_width < 26 || overlay_height < 6 {
+        return;
+    }
+
+    let x = area
+        .x
+        .saturating_add(area.width.saturating_sub(overlay_width).saturating_sub(1));
+    let y = area
+        .y
+        .saturating_add(area.height.saturating_sub(overlay_height).saturating_sub(1));
+    let overlay_area = Rect::new(x, y, overlay_width, overlay_height);
+
+    let block = Block::new()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .title(" A11y ")
+        .title_alignment(Alignment::Center)
+        .style(theme::help_overlay());
+
+    let inner = block.inner(overlay_area);
+    Paragraph::new("")
+        .style(theme::help_overlay())
+        .render(overlay_area, frame);
+    block.render(overlay_area, frame);
+
+    if inner.width < 10 || inner.height < 4 {
+        return;
+    }
+
+    let key_style =
+        theme::apply_large_text(Style::new().fg(theme::accent::INFO).attrs(StyleFlags::BOLD));
+    let label_style = theme::body();
+    let on_style = theme::apply_large_text(
+        Style::new()
+            .fg(theme::accent::SUCCESS)
+            .attrs(StyleFlags::BOLD),
+    );
+    let off_style = theme::apply_large_text(Style::new().fg(theme::fg::MUTED));
+    let hint_style = theme::apply_large_text(Style::new().fg(theme::fg::MUTED));
+
+    let theme_line = if state.high_contrast {
+        format!(" Theme: High Contrast ({})", state.base_theme)
+    } else {
+        format!(" Theme: {}", state.base_theme)
+    };
+
+    let mut lines = Vec::new();
+    lines.push(Line::from_spans([Span::styled(theme_line, label_style)]));
+
+    let gap_lines = theme::scale_spacing(1).saturating_sub(1);
+    for _ in 0..gap_lines {
+        lines.push(Line::from(""));
+    }
+
+    let toggle_line = |key: &str, label: &str, enabled: bool| {
+        let value = if enabled { "ON" } else { "OFF" };
+        let value_style = if enabled { on_style } else { off_style };
+        Line::from_spans([
+            Span::styled(format!(" [{key}] "), key_style),
+            Span::styled(label, label_style),
+            Span::styled(": ", label_style),
+            Span::styled(value, value_style),
+        ])
+    };
+
+    lines.push(toggle_line("H", "High Contrast", state.high_contrast));
+    lines.push(toggle_line("M", "Reduced Motion", state.reduced_motion));
+    lines.push(toggle_line("L", "Large Text", state.large_text));
+    lines.push(Line::from_spans([Span::styled(
+        " Press A to close",
+        hint_style,
+    )]));
+
+    let text = Text::from_lines(lines);
+    Paragraph::new(text).render(inner, frame);
 }
 
 // ---------------------------------------------------------------------------
@@ -276,10 +474,14 @@ pub fn render_help_overlay(
         .entry("?", "Toggle this help overlay")
         .entry("Ctrl+K", "Open command palette")
         .entry("Ctrl+T", "Cycle color theme")
+        .entry("Ctrl+Z", "Undo")
+        .entry("Ctrl+Y / Ctrl+Shift+Z", "Redo")
+        .entry("A", "Toggle A11y panel")
+        .entry("H/M/L", "A11y: high contrast, reduced motion, large text")
         .entry("F12", "Toggle debug overlay")
         .entry("q / Ctrl+C", "Quit application");
 
-    let global_entries = 8u16;
+    let global_entries = 10u16;
     let global_area = Rect::new(
         inner.x + 1,
         current_y,
@@ -359,6 +561,8 @@ pub fn accent_for(id: ScreenId) -> theme::ColorToken {
         ScreenId::MousePlayground => theme::screen_accent::PERFORMANCE,
         ScreenId::FormValidation => theme::screen_accent::FORMS_INPUT,
         ScreenId::VirtualizedSearch => theme::screen_accent::PERFORMANCE,
+        ScreenId::AsyncTasks => theme::screen_accent::PERFORMANCE,
+        ScreenId::ThemeStudio => theme::screen_accent::VISUAL_EFFECTS,
     }
 }
 
@@ -422,6 +626,7 @@ mod tests {
         let area = Rect::new(0, 0, 80, 1);
 
         let state = StatusBarState {
+            current_screen: ScreenId::Dashboard,
             screen_title: "Dashboard",
             screen_index: 0,
             screen_count: 11,
@@ -430,6 +635,12 @@ mod tests {
             terminal_width: 120,
             terminal_height: 40,
             theme_name: "default",
+            a11y_high_contrast: false,
+            a11y_reduced_motion: false,
+            a11y_large_text: false,
+            can_undo: false,
+            can_redo: false,
+            undo_description: None,
         };
         render_status_bar(&state, &mut frame, area);
 

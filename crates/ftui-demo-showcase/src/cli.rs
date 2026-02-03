@@ -46,6 +46,9 @@ SCREENS:
    19  Text Editor        Advanced multi-line text editor with search
    20  Mouse Playground   Mouse hit-testing and interaction demo
    21  Form Validation    Comprehensive form validation demo
+   22  Virtualized Search Fuzzy search in 100K+ items demo
+   23  Async Tasks        Async task manager with retry and cancellation
+   24  Theme Studio       Live palette editor and theme inspector
 
 KEYBINDINGS:
     1-9, 0          Switch to screens 1-10 by number
