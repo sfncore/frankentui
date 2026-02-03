@@ -7,18 +7,18 @@
 ││   41 │     let config = Config::load││Spinners:                            ││
 ││ ❱ 42 │     app::run(config)?;       ││dots        ⠋                        ││
 ││   43 │     Ok(())                   ││line        |                        ││
-││   44 │ }                            ││braille     ⠋                        ││
-││  File "src/app.rs", line 128, in run││Progress: ░░░░░░░░░░░░░░░░░░░░░░░░░  ││
-││   125 │ pub fn run(config: Config) -│╰─────────────────────────────────────╯│
-││   126 │     let db = Database::conne│╭─────────────System Info─────────────╮│
-││   127 │     let server = Server::new││FrankenTUI Demo Showcase             ││
-││ ❱ 128 │     server.listen(config.por││                                     ││
-││   129 │     Ok(())                  ││Framework: ftui (Rust)               ││
-││   130 │ }                           ││Rendering: 16-byte Cell model        ││
-││  File "src/database.rs", line 56, in││Color: 24-bit true color (RGB)       ││
-││   53 │ pub fn connect(url: &str) -> ││Input: Kitty keyboard protocol       ││
-││   54 │     let pool = Pool::builder(││                                     ││
+││   44 │ }                            │╰─────────────────────────────────────╯│
+││  File "src/app.rs", line 128, in run│╭───────────Macro Recorder────────────╮│
+││   125 │ pub fn run(config: Config) -││State: Idle                          ││
+││   126 │     let db = Database::conne││Macro: none                          ││
+││   127 │     let server = Server::new││Events: 0                            ││
+││ ❱ 128 │     server.listen(config.por││Duration: -                          ││
+││   129 │     Ok(())                  │╰─────────────────────────────────────╯│
+││   130 │ }                           │╭─────────────System Info─────────────╮│
+││  File "src/database.rs", line 56, in││FrankenTUI Demo Showcase             ││
+││   53 │ pub fn connect(url: &str) -> ││                                     ││
+││   54 │     let pool = Pool::builder(││Framework: ftui (Rust)               ││
 │╰─────────────────────────────────────╯╰─────────────────────────────────────╯│
-│Tick: 0 | Ctrl+←/→: panels | r: reset | Space: pause/resume                   │
+│Tick: 0 | Ctrl+←/→: panels | r: reset | Space: pause | Macro: r/p/l +/-       │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- Advanced [9/12]  Cyberpunk Aurora            tick:0 frm:0            0x0 00:00 
+ Advanced [9/13]  Cyberpunk Aurora            tick:0 frm:0            0x0 00:00 

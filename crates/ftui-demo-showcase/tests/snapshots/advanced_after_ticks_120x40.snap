@@ -13,14 +13,22 @@
 │ ❱ 128 │     server.listen(config.port)?;                 ││                                                          │
 │   129 │     Ok(())                                       ││                                                          │
 │   130 │ }                                                ││                                                          │
-│  File "src/database.rs", line 56, in connect             ││                                                          │
-│   53 │ pub fn connect(url: &str) -> Result<Self> {       ││                                                          │
-│   54 │     let pool = Pool::builder()                    ││                                                          │
-│   55 │         .max_size(10)                             ││                                                          │
-│ ❱ 56 │         .build(url)?;                             │╰──────────────────────────────────────────────────────────╯
-│   57 │     Ok(Self { pool })                             │╭───────────────────────System Info────────────────────────╮
-│   58 │ }                                                 ││FrankenTUI Demo Showcase                                  │
-│ConnectionError: failed to connect to database: connection││                                                          │
+│  File "src/database.rs", line 56, in connect             │╰──────────────────────────────────────────────────────────╯
+│   53 │ pub fn connect(url: &str) -> Result<Self> {       │╭──────────────────────Macro Recorder──────────────────────╮
+│   54 │     let pool = Pool::builder()                    ││State: Idle                                               │
+│   55 │         .max_size(10)                             ││Macro: none                                               │
+│ ❱ 56 │         .build(url)?;                             ││Events: 0                                                 │
+│   57 │     Ok(Self { pool })                             ││Duration: -                                               │
+│   58 │ }                                                 ││Speed: 1.00x                                              │
+│ConnectionError: failed to connect to database: connection││Loop: Off                                                 │
+│                                                          ││Controls: r/p/l +/- Esc                                   │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          │╰──────────────────────────────────────────────────────────╯
+│                                                          │╭───────────────────────System Info────────────────────────╮
+│                                                          ││FrankenTUI Demo Showcase                                  │
+│                                                          ││                                                          │
 │                                                          ││Framework: ftui (Rust)                                    │
 │                                                          ││Rendering: 16-byte Cell model                             │
 │                                                          ││Color: 24-bit true color (RGB)                            │
@@ -28,13 +36,5 @@
 │                                                          ││                                                          │
 │                                                          ││Features demonstrated:                                    │
 │                                                          ││  - Traceback error display                               │
-│                                                          ││  - Countdown timers (compact/clock)                      │
-│                                                          ││  - Terminal spinners                                     │
-│                                                          ││  - Progress bars                                         │
-│                                                          ││                                                          │
-│                                                          ││Controls:                                                 │
-│                                                          ││  r - Reset timers                                        │
-│                                                          ││  Space - Pause/resume timers                             │
-│                                                          ││                                                          │
 ╰──────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────╯
-Tick: 10 | Ctrl+←/→: panels | r: reset | Space: pause/resume                                                            
+Tick: 10 | Ctrl+←/→: panels | r: reset | Space: pause | Macro: r/p/l +/-                                                

@@ -1,5 +1,5 @@
 ╭────Markdown Renderer─────╮╭LLM Streaming Simulation |╮╭────Style Sampler─────╮
-│GitHub-Flavored Markdown  ││                          ││Bold  Dim  Italic  Und│
+│GitHub-Flavored Markdown  ││▌                         ││Bold  Dim  Italic  Und│
 │                          ││                          ││Strikethrough  Reverse│
 │Math & LaTeX Support      ││                          ││Dbl-Underline  Curly-U│
 │                          ││                          ││                      │
@@ -17,7 +17,7 @@
 │                          ││                          ││that tests            │
 │Greek letters: α, β, γ, δ,││                          ││character-level       │
 │ε                         ││                          ││wrapping behavior.    │
-│                          ││                          ││???? contains CJK │
+│                          ││  [░░░░░░░░░░░░░░░░░░░░░░]││???? contains CJK │
 │Operators: ×, ÷, ±, ≤, ≥, ││  Detection: 0 indicators ││characters that are   │
 │≠, ≈                      ││  Confidence: 0% | Chars: ││double-width. ?      │
 │                          ││  Space: play/pause | r: r││Ferris says hello!    │

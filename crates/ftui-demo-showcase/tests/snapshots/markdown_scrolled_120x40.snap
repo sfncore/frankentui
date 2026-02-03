@@ -1,5 +1,5 @@
 ╭───────────Markdown Renderer────────────╮╭LLM Streaming Simulation | Streaming... ╮╭──────────Style Sampler───────────╮
-│                                        ││                                        ││Bold  Dim  Italic  Underline      │
+│                                        ││▌                                       ││Bold  Dim  Italic  Underline      │
 │  f(x) = ∫_{−∞}^{∞} e^{−x²} dx = √{π}   ││                                        ││Strikethrough  Reverse  Blink     │
 │                                        ││                                        ││Dbl-Underline  Curly-Underline  [H│
 │Greek letters: α, β, γ, δ, ε            ││                                        ││                                  │
@@ -33,7 +33,7 @@
 │                                        ││                                        ││                                  │
 │? CAUTION                              ││                                        ││                                  │
 │┃ Dangerous actions that may cause      ││                                        ││                                  │
-│problems.                               ││                                        ││                                  │
+│problems.                               ││  [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]││                                  │
 │                                        ││  Detection: 0 indicators | Uncertain   ││                                  │
 │Footnotes                               ││  Confidence: 0% | Chars: 0/1304        ││                                  │
 │                                        ││  Space: play/pause | r: restart | ↑↓: s││                                  │

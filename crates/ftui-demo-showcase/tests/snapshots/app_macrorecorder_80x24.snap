@@ -1,0 +1,24 @@
+ 1:Dash  2:Shakes  3:Code  4:Widgets  5:Layout  6:Forms  7:DataViz  8:Files     
+╭────────────────────────────────Macro Recorder────────────────────────────────╮
+│╭───────────────────────────────Macro Recorder───────────────────────────────╮│
+││State: Idle   Events: 0   Duration: 0ms   Filtered: 0                       ││
+││Controls: r record/stop  p play/pause  l loop  +/- speed  Esc stop          ││
+││Speed: 1.00x   Loop: Off   Progress:   0%                                   ││
+│╰────────────────────────────────────────────────────────────────────────────╯│
+│╭──────────────────Timeline───────────────────╮╭───────Scenario Runner───────╮│
+││No macro recorded yet.                       ││Preset scenarios (WIP)       ││
+││                                             ││                             ││
+││                                             ││Tab Tour                     ││
+││                                             ││  Cycle screens, toggle help,││
+││                                             ││                             ││
+││                                             ││Search Flow                  ││
+││                                             ││  Open Shakespeare screen, se││
+││                                             ││                             ││
+││                                             ││Layout Lab                   ││
+││                                             ││  Adjust constraints and swit││
+││                                             ││                             ││
+││                                             ││                             ││
+││                                             ││                             ││
+│╰─────────────────────────────────────────────╯╰─────────────────────────────╯│
+╰──────────────────────────────────────────────────────────────────────────────╯
+ Macro Recorder [11/13]  Cyberpunk Aurora        tick:0 frm:0         0x0 00:00 

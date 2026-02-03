@@ -1,5 +1,5 @@
 ╭───────────Markdown Renderer────────────╮╭LLM Streaming Simulation | Streaming... ╮╭──────────Style Sampler───────────╮
-│GitHub-Flavored Markdown                ││                                        ││Bold  Dim  Italic  Underline      │
+│GitHub-Flavored Markdown                ││▌                                       ││Bold  Dim  Italic  Underline      │
 │                                        ││                                        ││Strikethrough  Reverse  Blink     │
 │Math & LaTeX Support                    ││                                        ││Dbl-Underline  Curly-Underline  [H│
 │                                        ││                                        ││                                  │
@@ -33,7 +33,7 @@
 │┃ Pro tip: Use keyboard shortcuts for   ││                                        ││                                  │
 │faster navigation.                      ││                                        ││                                  │
 │                                        ││                                        ││                                  │
-│? IMPORTANT                            ││                                        ││                                  │
+│? IMPORTANT                            ││  [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]││                                  │
 │┃ Critical information that users need  ││  Detection: 0 indicators | Uncertain   ││                                  │
 │to know.                                ││  Confidence: 0% | Chars: 0/1304        ││                                  │
 │                                        ││  Space: play/pause | r: restart | ↑↓: s││                                  │

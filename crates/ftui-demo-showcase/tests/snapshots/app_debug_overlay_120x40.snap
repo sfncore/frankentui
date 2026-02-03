@@ -1,4 +1,4 @@
- 1:Dash  2:Shakes  3:Code  4:Widgets  5:Layout  6:Forms  7:DataViz  8:Files  9:Adv  0:Perf  -:MD  -:VFX                 
+ 1:Dash  2:Shakes  3:Code  4:Widgets  5:Layout  6:Forms  7:DataViz  8:Files  9:Adv  0:Perf  -:Macro  -:MD  -:VFX        
 ╭──────────────────────────────────────────────────────Dashboard───────────────╭────────────────Debug─────────────────╮╮
 │FRANKENTUI DASHBOARD                                                          │Tick: 0                               ││
 │╭────────Plasma────────╮╭─────────────Charts──────────────╮╭──────────────Code│Frame: 0──────╮╭─────────Info─────────││
@@ -37,4 +37,4 @@
 │╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯│
 │1-9:screens | Tab:next | t:theme | ?:help | q:quit                                                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- Dashboard [1/12]  Cyberpunk Aurora                              tick:0 frm:0                              120x40 00:00 
+ Dashboard [1/13]  Cyberpunk Aurora                              tick:0 frm:0                              120x40 00:00 

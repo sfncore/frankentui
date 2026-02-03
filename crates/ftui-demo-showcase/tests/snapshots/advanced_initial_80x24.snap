@@ -6,19 +6,19 @@
 │ ❱ 42 │     app::run(config)?;        ││dots        ⠋                         │
 │   43 │     Ok(())                    ││line        |                         │
 │   44 │ }                             ││braille     ⠋                         │
-│  File "src/app.rs", line 128, in run ││Progress: ░░░░░░░░░░░░░░░░░░░░░░░░░░  │
-│   125 │ pub fn run(config: Config) ->││                                      │
-│   126 │     let db = Database::connec││                                      │
-│   127 │     let server = Server::new(│╰──────────────────────────────────────╯
-│ ❱ 128 │     server.listen(config.port│╭─────────────System Info──────────────╮
-│   129 │     Ok(())                   ││FrankenTUI Demo Showcase              │
-│   130 │ }                            ││                                      │
-│  File "src/database.rs", line 56, in ││Framework: ftui (Rust)                │
-│   53 │ pub fn connect(url: &str) -> R││Rendering: 16-byte Cell model         │
-│   54 │     let pool = Pool::builder()││Color: 24-bit true color (RGB)        │
-│   55 │         .max_size(10)         ││Input: Kitty keyboard protocol        │
-│ ❱ 56 │         .build(url)?;         ││                                      │
-│   57 │     Ok(Self { pool })         ││Features demonstrated:                │
-│   58 │ }                             ││  - Traceback error display           │
+│  File "src/app.rs", line 128, in run │╰──────────────────────────────────────╯
+│   125 │ pub fn run(config: Config) ->│╭────────────Macro Recorder────────────╮
+│   126 │     let db = Database::connec││State: Idle                           │
+│   127 │     let server = Server::new(││Macro: none                           │
+│ ❱ 128 │     server.listen(config.port││Events: 0                             │
+│   129 │     Ok(())                   ││Duration: -                           │
+│   130 │ }                            ││Speed: 1.00x                          │
+│  File "src/database.rs", line 56, in │╰──────────────────────────────────────╯
+│   53 │ pub fn connect(url: &str) -> R│╭─────────────System Info──────────────╮
+│   54 │     let pool = Pool::builder()││FrankenTUI Demo Showcase              │
+│   55 │         .max_size(10)         ││                                      │
+│ ❱ 56 │         .build(url)?;         ││Framework: ftui (Rust)                │
+│   57 │     Ok(Self { pool })         ││Rendering: 16-byte Cell model         │
+│   58 │ }                             ││Color: 24-bit true color (RGB)        │
 ╰──────────────────────────────────────╯╰──────────────────────────────────────╯
-Tick: 0 | Ctrl+←/→: panels | r: reset | Space: pause/resume                     
+Tick: 0 | Ctrl+←/→: panels | r: reset | Space: pause | Macro: r/p/l +/-         
