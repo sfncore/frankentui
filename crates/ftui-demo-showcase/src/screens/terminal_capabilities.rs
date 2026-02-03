@@ -1656,6 +1656,79 @@ mod tests {
         );
     }
 
+    #[test]
+    fn regression_build_rows_names_stable() {
+        let screen = TerminalCapabilitiesScreen::new();
+        let rows = screen.build_rows(&TerminalCapabilities::from_profile(TerminalProfile::Modern));
+
+        let names: Vec<&'static str> = rows.iter().map(|row| row.name).collect();
+        let expected = vec![
+            "True color (24-bit)",
+            "256-color palette",
+            "Synchronized output",
+            "Scroll region (DECSTBM)",
+            "OSC 8 hyperlinks",
+            "Kitty keyboard protocol",
+            "Focus events",
+            "Bracketed paste",
+            "SGR mouse",
+            "OSC 52 clipboard",
+        ];
+        assert_eq!(names, expected);
+
+        log_jsonl(
+            "regression",
+            &[
+                ("case", "terminal_caps_rows_stable".to_string()),
+                ("rows", names.len().to_string()),
+            ],
+        );
+    }
+
+    #[test]
+    fn regression_reason_for_mux_policy() {
+        let caps = TerminalCapabilities::from_profile(TerminalProfile::Tmux);
+        let mux_reason = TerminalCapabilitiesScreen::reason_for(&caps, true, false, true);
+        assert_eq!(mux_reason, "Disabled by mux safety policy");
+
+        let non_mux = TerminalCapabilities::from_profile(TerminalProfile::Modern);
+        let non_mux_reason = TerminalCapabilitiesScreen::reason_for(&non_mux, true, false, true);
+        assert_eq!(non_mux_reason, "Policy disabled (safety)");
+
+        log_jsonl(
+            "regression",
+            &[
+                ("case", "terminal_caps_reason_for".to_string()),
+                ("mux", mux_reason),
+                ("non_mux", non_mux_reason),
+            ],
+        );
+    }
+
+    #[test]
+    fn regression_fallback_text() {
+        assert_eq!(
+            TerminalCapabilitiesScreen::fallback_text(true, "fallback"),
+            "enabled"
+        );
+        assert_eq!(
+            TerminalCapabilitiesScreen::fallback_text(false, "fallback"),
+            "fallback"
+        );
+    }
+
+    #[test]
+    fn regression_profile_label_detected() {
+        assert_eq!(
+            TerminalCapabilitiesScreen::profile_label(TerminalProfile::Detected),
+            "detected"
+        );
+        assert_eq!(
+            TerminalCapabilitiesScreen::profile_label(TerminalProfile::Xterm),
+            TerminalProfile::Xterm.as_str()
+        );
+    }
+
     proptest! {
         #[test]
         fn prop_selection_wraps_within_bounds(row_count in 1usize..30, start in 0usize..200) {

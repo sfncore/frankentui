@@ -110,6 +110,143 @@ fn emit_perf_hud_jsonl_numeric(event: &str, fields: &[(&str, f64)]) {
 }
 
 // ---------------------------------------------------------------------------
+// Accessibility Diagnostics + Telemetry (bd-2o55.5)
+// ---------------------------------------------------------------------------
+
+/// Global counter for A11y JSONL logs.
+static A11Y_LOG_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Check if A11y JSONL diagnostics are enabled via env var.
+fn a11y_jsonl_enabled() -> bool {
+    env::var("FTUI_A11Y_JSONL")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+/// Emit a JSONL diagnostic log line for accessibility mode changes.
+fn emit_a11y_jsonl(event: &str, fields: &[(&str, &str)]) {
+    if !a11y_jsonl_enabled() {
+        return;
+    }
+
+    let seq = A11Y_LOG_SEQ.fetch_add(1, Ordering::Relaxed);
+    let ts_us = seq.saturating_mul(16_667);
+
+    let mut json = format!("{{\"seq\":{seq},\"ts_us\":{ts_us},\"event\":\"{event}\"");
+    for (key, value) in fields {
+        let escaped = value.replace('\"', "\\\"");
+        json.push_str(&format!(",\"{key}\":\"{escaped}\""));
+    }
+    json.push('}');
+
+    let _ = writeln!(std::io::stderr(), "{json}");
+}
+
+/// Accessibility telemetry event types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum A11yEventKind {
+    PanelToggled,
+    HighContrastToggled,
+    ReducedMotionToggled,
+    LargeTextToggled,
+}
+
+/// Telemetry payload for A11y events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct A11yTelemetryEvent {
+    kind: A11yEventKind,
+    tick: u64,
+    screen: &'static str,
+    panel_visible: bool,
+    high_contrast: bool,
+    reduced_motion: bool,
+    large_text: bool,
+}
+
+type A11yTelemetryCallback = Box<dyn Fn(&A11yTelemetryEvent) + Send + Sync>;
+
+/// Optional telemetry hooks for A11y events.
+#[derive(Default)]
+pub struct A11yTelemetryHooks {
+    on_panel_toggle: Option<A11yTelemetryCallback>,
+    on_high_contrast: Option<A11yTelemetryCallback>,
+    on_reduced_motion: Option<A11yTelemetryCallback>,
+    on_large_text: Option<A11yTelemetryCallback>,
+    on_any: Option<A11yTelemetryCallback>,
+}
+
+impl A11yTelemetryHooks {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn on_panel_toggle(
+        mut self,
+        f: impl Fn(&A11yTelemetryEvent) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_panel_toggle = Some(Box::new(f));
+        self
+    }
+
+    pub fn on_high_contrast(
+        mut self,
+        f: impl Fn(&A11yTelemetryEvent) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_high_contrast = Some(Box::new(f));
+        self
+    }
+
+    pub fn on_reduced_motion(
+        mut self,
+        f: impl Fn(&A11yTelemetryEvent) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_reduced_motion = Some(Box::new(f));
+        self
+    }
+
+    pub fn on_large_text(
+        mut self,
+        f: impl Fn(&A11yTelemetryEvent) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_large_text = Some(Box::new(f));
+        self
+    }
+
+    pub fn on_any(mut self, f: impl Fn(&A11yTelemetryEvent) + Send + Sync + 'static) -> Self {
+        self.on_any = Some(Box::new(f));
+        self
+    }
+
+    fn dispatch(&self, event: &A11yTelemetryEvent) {
+        if let Some(ref hook) = self.on_any {
+            hook(event);
+        }
+        match event.kind {
+            A11yEventKind::PanelToggled => {
+                if let Some(ref hook) = self.on_panel_toggle {
+                    hook(event);
+                }
+            }
+            A11yEventKind::HighContrastToggled => {
+                if let Some(ref hook) = self.on_high_contrast {
+                    hook(event);
+                }
+            }
+            A11yEventKind::ReducedMotionToggled => {
+                if let Some(ref hook) = self.on_reduced_motion {
+                    hook(event);
+                }
+            }
+            A11yEventKind::LargeTextToggled => {
+                if let Some(ref hook) = self.on_large_text {
+                    hook(event);
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ScreenId
 // ---------------------------------------------------------------------------
 
@@ -696,6 +833,8 @@ pub struct AppModel {
     perf_prev_view_count: u64,
     /// Global undo/redo history manager for reversible operations.
     pub history: HistoryManager,
+    /// Optional telemetry hooks for A11y mode changes.
+    a11y_telemetry: Option<A11yTelemetryHooks>,
 }
 
 impl Default for AppModel {
@@ -734,6 +873,46 @@ impl AppModel {
             perf_views_per_tick: 0.0,
             perf_prev_view_count: 0,
             history: HistoryManager::default(),
+            a11y_telemetry: None,
+        }
+    }
+
+    /// Attach telemetry hooks for accessibility mode changes.
+    pub fn with_a11y_telemetry_hooks(mut self, hooks: A11yTelemetryHooks) -> Self {
+        self.a11y_telemetry = Some(hooks);
+        self
+    }
+
+    fn emit_a11y_event(&self, kind: A11yEventKind) {
+        let event = A11yTelemetryEvent {
+            kind,
+            tick: self.tick_count,
+            screen: self.current_screen.title(),
+            panel_visible: self.a11y_panel_visible,
+            high_contrast: self.a11y.high_contrast,
+            reduced_motion: self.a11y.reduced_motion,
+            large_text: self.a11y.large_text,
+        };
+
+        emit_a11y_jsonl(
+            match kind {
+                A11yEventKind::PanelToggled => "panel_toggle",
+                A11yEventKind::HighContrastToggled => "high_contrast_toggle",
+                A11yEventKind::ReducedMotionToggled => "reduced_motion_toggle",
+                A11yEventKind::LargeTextToggled => "large_text_toggle",
+            },
+            &[
+                ("tick", &event.tick.to_string()),
+                ("screen", event.screen),
+                ("panel_visible", if event.panel_visible { "true" } else { "false" }),
+                ("high_contrast", if event.high_contrast { "true" } else { "false" }),
+                ("reduced_motion", if event.reduced_motion { "true" } else { "false" }),
+                ("large_text", if event.large_text { "true" } else { "false" }),
+            ],
+        );
+
+        if let Some(ref hooks) = self.a11y_telemetry {
+            hooks.dispatch(&event);
         }
     }
 
@@ -889,6 +1068,7 @@ impl AppModel {
                     "Toggle A11y panel",
                     vec![("state".to_string(), state.to_string())],
                 );
+                self.emit_a11y_event(A11yEventKind::PanelToggled);
                 Cmd::None
             }
 
@@ -904,6 +1084,7 @@ impl AppModel {
                     "Toggle high contrast",
                     vec![("state".to_string(), state.to_string())],
                 );
+                self.emit_a11y_event(A11yEventKind::HighContrastToggled);
                 Cmd::None
             }
 
@@ -920,6 +1101,7 @@ impl AppModel {
                     "Toggle reduced motion",
                     vec![("state".to_string(), state.to_string())],
                 );
+                self.emit_a11y_event(A11yEventKind::ReducedMotionToggled);
                 Cmd::None
             }
 
@@ -932,6 +1114,7 @@ impl AppModel {
                     "Toggle large text",
                     vec![("state".to_string(), state.to_string())],
                 );
+                self.emit_a11y_event(A11yEventKind::LargeTextToggled);
                 Cmd::None
             }
 
