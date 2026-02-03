@@ -8,7 +8,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use ftui_core::geometry::Rect;
-use ftui_render::buffer::Buffer;
+use ftui_render::buffer::{Buffer, DoubleBuffer};
 use ftui_render::cell::{Cell, PackedRgba};
 use std::hint::black_box;
 
@@ -174,6 +174,61 @@ fn bench_buffer_row_access(c: &mut Criterion) {
 }
 
 // =============================================================================
+// DoubleBuffer swap (O(1) vs clone's O(n))
+// =============================================================================
+
+fn bench_double_buffer_swap(c: &mut Criterion) {
+    let mut group = c.benchmark_group("buffer/double_buffer");
+
+    for (w, h) in [(80, 24), (120, 40), (200, 60)] {
+        let cells = w as u64 * h as u64;
+        group.throughput(Throughput::Elements(cells));
+
+        // O(1) swap - just flip an index
+        group.bench_with_input(
+            BenchmarkId::new("swap", format!("{w}x{h}")),
+            &(w, h),
+            |b, &(w, h)| {
+                let mut db = DoubleBuffer::new(w, h);
+                b.iter(|| {
+                    db.swap();
+                    black_box(&db);
+                })
+            },
+        );
+
+        // Clear after swap (still needed for next frame)
+        group.bench_with_input(
+            BenchmarkId::new("clear", format!("{w}x{h}")),
+            &(w, h),
+            |b, &(w, h)| {
+                let mut db = DoubleBuffer::new(w, h);
+                b.iter(|| {
+                    db.current_mut().clear();
+                    black_box(&db);
+                })
+            },
+        );
+
+        // Full frame transition: swap + clear (replaces clone)
+        group.bench_with_input(
+            BenchmarkId::new("swap_and_clear", format!("{w}x{h}")),
+            &(w, h),
+            |b, &(w, h)| {
+                let mut db = DoubleBuffer::new(w, h);
+                b.iter(|| {
+                    db.swap();
+                    db.current_mut().clear();
+                    black_box(&db);
+                })
+            },
+        );
+    }
+
+    group.finish();
+}
+
+// =============================================================================
 // Scissor stack
 // =============================================================================
 
@@ -213,6 +268,7 @@ criterion_group!(
     benches,
     bench_buffer_new,
     bench_buffer_clone,
+    bench_double_buffer_swap,
     bench_buffer_set,
     bench_buffer_fill,
     bench_buffer_row_access,
