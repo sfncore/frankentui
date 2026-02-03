@@ -102,6 +102,11 @@ impl LocaleStrings {
     pub fn is_empty(&self) -> bool {
         self.strings.is_empty()
     }
+
+    /// Iterate over all keys in this locale.
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.strings.keys().map(String::as_str)
+    }
 }
 
 /// Central string catalog with locale fallback and pluralization.
@@ -300,6 +305,104 @@ impl StringCatalog {
     pub fn locales(&self) -> Vec<&str> {
         self.locales.keys().map(String::as_str).collect()
     }
+
+    // -----------------------------------------------------------------
+    // Extraction & Coverage
+    // -----------------------------------------------------------------
+
+    /// Collect all unique keys across every registered locale.
+    ///
+    /// The result is sorted for deterministic output.
+    #[must_use]
+    pub fn all_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self
+            .locales
+            .values()
+            .flat_map(|ls| ls.keys().map(String::from))
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        keys
+    }
+
+    /// Find keys from `reference_keys` that are missing in `locale`
+    /// (including fallback chain resolution).
+    ///
+    /// Returns the missing keys sorted alphabetically.
+    #[must_use]
+    pub fn missing_keys(&self, locale: &str, reference_keys: &[&str]) -> Vec<String> {
+        let mut missing = Vec::new();
+        for &key in reference_keys {
+            if self.get(locale, key).is_none() {
+                missing.push(key.to_string());
+            }
+        }
+        missing.sort_unstable();
+        missing
+    }
+
+    /// Generate a full coverage report across all locales.
+    ///
+    /// Uses `all_keys()` as the reference set and checks each locale
+    /// (with fallback) for presence.
+    #[must_use]
+    pub fn coverage_report(&self) -> CoverageReport {
+        let all = self.all_keys();
+        let ref_keys: Vec<&str> = all.iter().map(String::as_str).collect();
+        let total = ref_keys.len();
+
+        let mut locale_tags: Vec<String> = self.locales.keys().cloned().collect();
+        locale_tags.sort_unstable();
+
+        let locales = locale_tags
+            .into_iter()
+            .map(|tag| {
+                let missing = self.missing_keys(&tag, &ref_keys);
+                let present = total.saturating_sub(missing.len());
+                let coverage_percent = if total == 0 {
+                    100.0
+                } else {
+                    (present as f32 / total as f32) * 100.0
+                };
+                LocaleCoverage {
+                    locale: tag,
+                    present,
+                    missing,
+                    coverage_percent,
+                }
+            })
+            .collect();
+
+        CoverageReport {
+            total_keys: total,
+            locales,
+        }
+    }
+}
+
+/// Coverage report for a string catalog.
+///
+/// Shows how many keys each locale covers relative to the full key set
+/// and lists the specific missing keys.
+#[derive(Debug, Clone)]
+pub struct CoverageReport {
+    /// Total number of unique keys across all locales.
+    pub total_keys: usize,
+    /// Per-locale coverage data.
+    pub locales: Vec<LocaleCoverage>,
+}
+
+/// Per-locale coverage statistics.
+#[derive(Debug, Clone)]
+pub struct LocaleCoverage {
+    /// Locale tag (e.g., `"en"`, `"ru"`).
+    pub locale: String,
+    /// Number of reference keys present (including via fallback).
+    pub present: usize,
+    /// Keys from the reference set that are missing (even after fallback).
+    pub missing: Vec<String>,
+    /// Coverage as a percentage (0.0–100.0).
+    pub coverage_percent: f32,
 }
 
 /// Single-pass `{name}` interpolation. Unmatched tokens left as-is.
@@ -533,5 +636,161 @@ mod tests {
         // Looking up a Simple entry via get_plural should still work
         let catalog = english_catalog();
         assert_eq!(catalog.get_plural("en", "greeting", 1), Some("Hello"));
+    }
+
+    // -----------------------------------------------------------------
+    // Extraction & Coverage tests
+    // -----------------------------------------------------------------
+
+    fn multi_locale_catalog() -> StringCatalog {
+        let mut catalog = StringCatalog::new();
+
+        let mut en = LocaleStrings::new();
+        en.insert("greeting", "Hello");
+        en.insert("farewell", "Goodbye");
+        en.insert("submit", "Submit");
+        catalog.add_locale("en", en);
+
+        let mut es = LocaleStrings::new();
+        es.insert("greeting", "Hola");
+        es.insert("farewell", "Adiós");
+        // "submit" missing in es
+        catalog.add_locale("es", es);
+
+        let mut fr = LocaleStrings::new();
+        fr.insert("greeting", "Bonjour");
+        // "farewell" and "submit" missing in fr
+        catalog.add_locale("fr", fr);
+
+        catalog.set_fallback_chain(vec!["en".into()]);
+        catalog
+    }
+
+    #[test]
+    fn locale_strings_keys() {
+        let mut ls = LocaleStrings::new();
+        ls.insert("alpha", "A");
+        ls.insert("beta", "B");
+
+        let mut keys: Vec<&str> = ls.keys().collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn all_keys_is_sorted_and_deduped() {
+        let catalog = multi_locale_catalog();
+        let keys = catalog.all_keys();
+        assert_eq!(keys, vec!["farewell", "greeting", "submit"]);
+    }
+
+    #[test]
+    fn all_keys_empty_catalog() {
+        let catalog = StringCatalog::new();
+        assert!(catalog.all_keys().is_empty());
+    }
+
+    #[test]
+    fn missing_keys_none_missing() {
+        let catalog = multi_locale_catalog();
+        let missing = catalog.missing_keys("en", &["greeting", "farewell", "submit"]);
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn missing_keys_with_fallback() {
+        let catalog = multi_locale_catalog();
+        let missing = catalog.missing_keys("es", &["greeting", "farewell", "submit"]);
+        assert!(missing.is_empty(), "fallback should resolve submit");
+    }
+
+    #[test]
+    fn missing_keys_no_fallback() {
+        let mut catalog = StringCatalog::new();
+        let mut es = LocaleStrings::new();
+        es.insert("greeting", "Hola");
+        catalog.add_locale("es", es);
+        let missing = catalog.missing_keys("es", &["greeting", "farewell"]);
+        assert_eq!(missing, vec!["farewell"]);
+    }
+
+    #[test]
+    fn missing_keys_unknown_locale() {
+        let catalog = multi_locale_catalog();
+        let missing = catalog.missing_keys("de", &["greeting", "farewell", "submit"]);
+        assert!(missing.is_empty(), "fallback to en should cover all");
+    }
+
+    #[test]
+    fn coverage_report_structure() {
+        let catalog = multi_locale_catalog();
+        let report = catalog.coverage_report();
+
+        assert_eq!(report.total_keys, 3);
+        assert_eq!(report.locales.len(), 3);
+
+        let tags: Vec<&str> = report.locales.iter().map(|l| l.locale.as_str()).collect();
+        let mut sorted_tags = tags.clone();
+        sorted_tags.sort_unstable();
+        assert_eq!(tags, sorted_tags);
+    }
+
+    #[test]
+    fn coverage_report_with_fallback() {
+        let catalog = multi_locale_catalog();
+        let report = catalog.coverage_report();
+
+        for lc in &report.locales {
+            assert_eq!(
+                lc.present, 3,
+                "{} should have all 3 keys via fallback",
+                lc.locale
+            );
+            assert!(
+                lc.missing.is_empty(),
+                "{} should have no missing keys via fallback",
+                lc.locale
+            );
+            assert!(
+                (lc.coverage_percent - 100.0).abs() < f32::EPSILON,
+                "{} should be 100% coverage",
+                lc.locale
+            );
+        }
+    }
+
+    #[test]
+    fn coverage_report_without_fallback() {
+        let mut catalog = StringCatalog::new();
+
+        let mut en = LocaleStrings::new();
+        en.insert("a", "A");
+        en.insert("b", "B");
+        en.insert("c", "C");
+        catalog.add_locale("en", en);
+
+        let mut fr = LocaleStrings::new();
+        fr.insert("a", "A-fr");
+        catalog.add_locale("fr", fr);
+
+        let report = catalog.coverage_report();
+        assert_eq!(report.total_keys, 3);
+
+        let en_cov = report.locales.iter().find(|l| l.locale == "en").unwrap();
+        assert_eq!(en_cov.present, 3);
+        assert!(en_cov.missing.is_empty());
+
+        let fr_cov = report.locales.iter().find(|l| l.locale == "fr").unwrap();
+        assert_eq!(fr_cov.present, 1);
+        assert_eq!(fr_cov.missing, vec!["b", "c"]);
+        assert!((fr_cov.coverage_percent - 33.333_332).abs() < 0.01);
+    }
+
+    #[test]
+    fn coverage_report_empty_catalog() {
+        let catalog = StringCatalog::new();
+        let report = catalog.coverage_report();
+        assert_eq!(report.total_keys, 0);
+        assert!(report.locales.is_empty());
     }
 }

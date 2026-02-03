@@ -2006,7 +2006,7 @@ mod tests {
         assert_eq!(app.current_screen, ScreenId::Dashboard);
 
         app.update(AppMsg::PrevScreen);
-        assert_eq!(app.current_screen, ScreenId::SnapshotPlayer);
+        assert_eq!(app.current_screen, ScreenId::I18nDemo);
     }
 
     #[test]
@@ -2111,7 +2111,7 @@ mod tests {
     fn screen_next_prev_wraps() {
         assert_eq!(ScreenId::Dashboard.next(), ScreenId::Shakespeare);
         assert_eq!(ScreenId::VisualEffects.next(), ScreenId::ResponsiveDemo);
-        assert_eq!(ScreenId::Dashboard.prev(), ScreenId::SnapshotPlayer);
+        assert_eq!(ScreenId::Dashboard.prev(), ScreenId::I18nDemo);
         assert_eq!(ScreenId::Shakespeare.prev(), ScreenId::Dashboard);
     }
 
@@ -2290,7 +2290,7 @@ mod tests {
     /// Verify all screens have the expected count.
     #[test]
     fn all_screens_count() {
-        assert_eq!(ScreenId::ALL.len(), 26);
+        assert_eq!(ScreenId::ALL.len(), 28);
     }
 
     // -----------------------------------------------------------------------

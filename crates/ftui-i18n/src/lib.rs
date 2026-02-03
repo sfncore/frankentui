@@ -9,5 +9,7 @@
 pub mod catalog;
 pub mod plural;
 
-pub use catalog::{I18nError, LocaleStrings, StringCatalog, StringEntry};
+pub use catalog::{
+    CoverageReport, I18nError, LocaleCoverage, LocaleStrings, StringCatalog, StringEntry,
+};
 pub use plural::{PluralCategory, PluralForms, PluralRule};

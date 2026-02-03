@@ -51,6 +51,8 @@ SCREENS:
    24  Async Tasks        Async task manager and queue diagnostics
    25  Theme Studio       Live palette editor and theme inspector
    26  Snapshot Player    Time-travel playback of recorded UI snapshots
+   27  Performance HUD    Real-time render budget and frame diagnostics
+   28  i18n Demo          Internationalization with locale switching
 
 KEYBINDINGS:
     1-9, 0          Switch to screens 1-10 by number

@@ -180,47 +180,32 @@ impl I18nDemo {
                 .render(cols[0], frame);
         }
         {
-            let locales = self.catalog.locales();
-            let mut sorted: Vec<&str> = locales.clone();
-            sorted.sort();
+            let report = self.catalog.coverage_report();
             let mut lines = vec![
-                "--- String Extraction ---".to_string(),
+                "--- Coverage Report ---".to_string(),
                 String::new(),
-                format!("  Registered locales: {}", locales.len()),
+                format!("  Total keys: {}", report.total_keys),
+                format!("  Locales: {}", report.locales.len()),
+                String::new(),
             ];
-            for tag in &sorted {
+            for lc in &report.locales {
+                let marker = if lc.locale == locale { " <--" } else { "" };
                 lines.push(format!(
-                    "    - {}{}",
-                    tag,
-                    if *tag == locale { " <--" } else { "" }
+                    "  {} {:.0}% ({}/{}){}",
+                    lc.locale, lc.coverage_percent, lc.present, report.total_keys, marker
                 ));
+                if !lc.missing.is_empty() {
+                    for key in &lc.missing {
+                        lines.push(format!("    \u{2717} {}", key));
+                    }
+                }
             }
-            lines.extend([
-                "".into(),
-                "  Fallback chain: en".into(),
-                "".into(),
-                "  Keys used on this screen:".into(),
-            ]);
-            for key in [
-                "demo.title",
-                "greeting",
-                "welcome",
-                "direction",
-                "items",
-                "files",
-            ] {
-                let ok = self.catalog.get(locale, key).is_some();
-                lines.push(format!(
-                    "    {} {}",
-                    if ok { "\u{2713}" } else { "\u{2717}" },
-                    key
-                ));
-            }
+            lines.extend(["".into(), "  Fallback chain: en".into()]);
             Paragraph::new(lines.join("\n"))
                 .style(Style::new().fg(theme::fg::PRIMARY))
                 .block(
                     Block::new()
-                        .title("Catalog Info")
+                        .title("Coverage Report")
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
                         .border_style(Style::new().fg(theme::accent::ACCENT_3)),
