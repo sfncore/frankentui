@@ -276,8 +276,11 @@ impl FormsInput {
     }
 
     pub fn apply_theme(&mut self) {
-        self.form
-            .set_style(Style::new().fg(theme::fg::PRIMARY).bg(theme::alpha::SURFACE));
+        self.form.set_style(
+            Style::new()
+                .fg(theme::fg::PRIMARY)
+                .bg(theme::alpha::SURFACE),
+        );
         self.form
             .set_label_style(Style::new().fg(theme::fg::SECONDARY));
         self.form.set_focused_style(
@@ -430,12 +433,12 @@ impl FormsInput {
         match field {
             FormField::Text { value, .. } => !value.trim().is_empty(),
             FormField::Checkbox { checked, .. } => *checked,
-            FormField::Radio { options, selected, .. } => {
-                !options.is_empty() && *selected < options.len()
-            }
-            FormField::Select { options, selected, .. } => {
-                !options.is_empty() && *selected < options.len()
-            }
+            FormField::Radio {
+                options, selected, ..
+            } => !options.is_empty() && *selected < options.len(),
+            FormField::Select {
+                options, selected, ..
+            } => !options.is_empty() && *selected < options.len(),
             FormField::Number { .. } => true,
         }
     }

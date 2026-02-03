@@ -40,6 +40,45 @@ PTY runner controls (from `tests/e2e/lib/pty.sh`):
 - `PTY_SEND` / `PTY_SEND_FILE` — input payloads
 - `PTY_TIMEOUT` / `PTY_DRAIN_TIMEOUT_MS` — timeouts and drain windows
 
+## Capability Profile Matrix
+
+Use `FTUI_TEST_PROFILE` to force a terminal capability profile in tests and
+snapshots. When set, snapshot filenames are automatically suffixed with
+`__<profile>` so each profile keeps its own baselines.
+
+Examples:
+
+```bash
+# Run the demo showcase snapshots as a dumb terminal
+FTUI_TEST_PROFILE=dumb cargo test -p ftui-demo-showcase
+
+# Run harness widget snapshots as tmux
+FTUI_TEST_PROFILE=tmux cargo test -p ftui-harness widget_snapshots
+```
+
+Cross-profile comparison mode (for tests that use `profile_matrix_text`):
+
+```bash
+# Report diffs without failing
+FTUI_TEST_PROFILE_COMPARE=report cargo test -p ftui-harness profile_matrix
+
+# Fail fast on differences
+FTUI_TEST_PROFILE_COMPARE=strict cargo test -p ftui-harness profile_matrix
+```
+
+### CI Integration Guide
+
+Run the test suite across a profile matrix to catch capability regressions:
+
+```yaml
+strategy:
+  matrix:
+    profile: [modern, xterm-256color, screen, tmux, dumb, windows-console]
+
+steps:
+  - run: FTUI_TEST_PROFILE=${{ matrix.profile }} cargo test -p ftui-demo-showcase
+```
+
 ## Artifacts
 
 Each run produces:
@@ -84,4 +123,3 @@ Other useful suites:
 3. Add the suite to `tests/e2e/scripts/run_all.sh`.
 4. Add any fixtures to `tests/e2e/fixtures/`.
 5. Document the new scenario in `docs/testing/e2e-gap-analysis.md` if needed.
-

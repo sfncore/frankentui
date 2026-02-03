@@ -834,12 +834,11 @@ impl TerminalCapabilities {
     /// for safety.
     #[must_use]
     pub fn detect() -> Self {
-        if let Ok(value) = env::var("FTUI_TEST_PROFILE") {
-            if let Ok(profile) = TerminalProfile::from_str(value.trim()) {
-                if profile != TerminalProfile::Detected {
-                    return Self::from_profile(profile);
-                }
-            }
+        if let Ok(value) = env::var("FTUI_TEST_PROFILE")
+            && let Ok(profile) = TerminalProfile::from_str(value.trim())
+            && profile != TerminalProfile::Detected
+        {
+            return Self::from_profile(profile);
         }
         let env = DetectInputs::from_env();
         Self::detect_from_inputs(&env)

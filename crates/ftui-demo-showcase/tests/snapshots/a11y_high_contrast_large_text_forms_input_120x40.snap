@@ -1,13 +1,13 @@
  1: Dash │ 2: Shakes │ 3: Code │ 4: Widgets │ 5: Layout │ 6: Forms │ 7: DataViz │ 8: Files │ 9: Adv │ 0: Perf │         
 ╭────────────────────────────────────────────────────Forms & Input─────────────────────────────────────────────────────╮
 │╭────────────────────Registration Form────────────────────╮╭───────────────────────Text Inputs───────────────────────╮│
-││Name *:         Enter your name...                       ││Search:   Search...                                      ││
-││Email *:        user@example.com                         ││Password: Password                                       ││
-││Role:             Developer                              ││                                                         ││
-││Theme:          (1) Light                                │╰─────────────────────────────────────────────────────────╯│
-││Age:              25                                     │╭───────────────────────Text Editor───────────────────────╮│
-││Accept Terms *: [ ]                                      ││1  Hello, world!                                         ││
-││                                                         ││2                                                        ││
+││ DRAFT   REQ 0/3   ERR 0   FIELDS 3/6                    ││ Search   Search...                                      ││
+││Name *:         Enter your name...                       ││ Password Password                                       ││
+││Email *:        user@example.com                         ││                                                         ││
+││Role:             Developer                              │╰─────────────────────────────────────────────────────────╯│
+││Theme:          (1) Light                                │╭───────────────────────Text Editor───────────────────────╮│
+││Age:              25                                     ││1  Hello, world!                                         ││
+││Accept Terms *: [ ]                                      ││2                                                        ││
 ││                                                         ││3  This is a multi-line text editor.                     ││
 ││                                                         ││4  You can type, select, undo/redo, and more.            ││
 ││                                                         ││5                                                        ││
@@ -33,8 +33,8 @@
 ││                                                         ││                                                         ││
 ││                                                         ││                                                         ││
 ││Tab: next | Enter: submit | Esc: cancel                  ││                                                         ││
-││                                                         ││                                                         ││
+││Legend: * required | red=error | green=valid | dim=disabl││                                                         ││
 │╰─────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────╯│
-│Ctrl+←/→: switch panels | Form: Tab/↑/↓ navigate, Space toggle, Enter submit                                          │
+│Editing: Name (field 1/6) | Required: 0/3 | Undo:0 Redo:0 | Errors: 0 | Ctrl+U: Show history                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
  Forms & Input [6/24]  Darcula A11y:HC LT                           tick:0 frm:0                           120x40 00:00 

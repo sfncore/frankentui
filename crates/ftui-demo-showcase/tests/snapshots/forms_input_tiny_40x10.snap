@@ -1,10 +1,10 @@
 ╭Registration Form─╮╭───Text Inputs────╮
-│Name:         Ente││Search:   Search..│
-│Email:        user││Password: Password│
-│Role:           De││                  │
-│Theme:        (1) │╰──────────────────╯
-│Age:            25│╭───Text Editor────╮
+│ DRAFT   REQ 0/3  ││ Search   Search..│
+│Name *:         En││ Password Password│
+│Email *:        us││                  │
+│Role:             │╰──────────────────╯
+│Theme:          (1│╭───Text Editor────╮
 │Tab: next | Enter:││1  Hello, world!  │
-│                  ││2                 │
+│Legend: * required││2                 │
 ╰──────────────────╯╰──────────────────╯
-Ctrl+←/→: switch panels | Form: Tab/↑/↓ 
+Editing: Name (field 1/6) | Required: 0/

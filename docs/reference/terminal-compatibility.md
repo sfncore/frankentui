@@ -99,6 +99,17 @@ For CI or manual verification, test against:
 3. Alacritty (minimal, popular)
 4. Windows Terminal (Windows v1 scope)
 
+## Profile Snapshot Matrix
+
+For simulated capability testing, set `FTUI_TEST_PROFILE` to a predefined
+profile name (for example: `dumb`, `screen`, `tmux`, `windows-console`).
+Snapshot filenames are suffixed with `__<profile>` so each profile keeps
+its own baseline outputs. This is how we document and track profile
+differences over time.
+
+When comparing profiles in a single run, use the harness helper
+`profile_matrix_text` with `FTUI_TEST_PROFILE_COMPARE=report` or `strict`.
+
 ## Known Limitations
 
 - Multiplexers can disable or break passthrough for advanced sequences.

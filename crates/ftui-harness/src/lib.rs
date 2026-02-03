@@ -402,10 +402,11 @@ pub fn assert_buffer_snapshot(name: &str, buf: &Buffer, base_dir: &str, mode: Ma
 /// Snapshot files have the `.ansi.snap` suffix.
 pub fn assert_buffer_snapshot_ansi(name: &str, buf: &Buffer, base_dir: &str) {
     let base = Path::new(base_dir);
+    let resolved_name = snapshot_name_with_profile(name);
     let path = base
         .join("tests")
         .join("snapshots")
-        .join(format!("{name}.ansi.snap"));
+        .join(format!("{resolved_name}.ansi.snap"));
     let actual = buffer_to_ansi(buf);
 
     if is_bless() {
@@ -433,7 +434,7 @@ pub fn assert_buffer_snapshot_ansi(name: &str, buf: &Buffer, base_dir: &str) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             panic!(
                 "\n\
-                 === No ANSI snapshot found: '{name}' ===\n\
+                 === No ANSI snapshot found: '{resolved_name}' ===\n\
                  Expected at: {}\n\
                  Run with BLESS=1 to create it.\n\n\
                  Actual output:\n{actual}",
@@ -486,6 +487,147 @@ macro_rules! assert_snapshot_ansi {
     ($name:expr, $buf:expr) => {
         $crate::assert_buffer_snapshot_ansi($name, $buf, env!("CARGO_MANIFEST_DIR"))
     };
+}
+
+// ============================================================================
+// Profile Matrix (bd-k4lj.5)
+// ============================================================================
+
+/// Comparison mode for cross-profile output checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileCompareMode {
+    /// Do not compare outputs across profiles.
+    None,
+    /// Report diffs to stderr but do not fail.
+    Report,
+    /// Fail the test on the first diff.
+    Strict,
+}
+
+impl ProfileCompareMode {
+    /// Resolve compare mode from `FTUI_TEST_PROFILE_COMPARE`.
+    #[must_use]
+    pub fn from_env() -> Self {
+        match std::env::var("FTUI_TEST_PROFILE_COMPARE")
+            .ok()
+            .map(|v| v.to_lowercase())
+            .as_deref()
+        {
+            Some("strict") | Some("1") | Some("true") => Self::Strict,
+            Some("report") | Some("log") => Self::Report,
+            _ => Self::None,
+        }
+    }
+}
+
+/// Snapshot output captured for a specific profile.
+#[derive(Debug, Clone)]
+pub struct ProfileSnapshot {
+    pub profile: TerminalProfile,
+    pub text: String,
+    pub checksum: String,
+}
+
+fn profile_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// Guard for temporarily forcing `FTUI_TEST_PROFILE`.
+pub struct TestProfileGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    previous: Option<OsString>,
+}
+
+impl TestProfileGuard {
+    #[must_use]
+    pub fn new(profile: TerminalProfile) -> Self {
+        let lock = profile_lock().lock().expect("profile lock poisoned");
+        let previous = std::env::var_os("FTUI_TEST_PROFILE");
+        std::env::set_var("FTUI_TEST_PROFILE", profile.as_str());
+        Self {
+            _lock: lock,
+            previous,
+        }
+    }
+}
+
+impl Drop for TestProfileGuard {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            Some(value) => std::env::set_var("FTUI_TEST_PROFILE", value),
+            None => std::env::remove_var("FTUI_TEST_PROFILE"),
+        }
+    }
+}
+
+/// Run a test closure across multiple profiles and optionally compare outputs.
+///
+/// Use `FTUI_TEST_PROFILE_COMPARE=strict` to fail on differences or
+/// `FTUI_TEST_PROFILE_COMPARE=report` to emit diffs without failing.
+pub fn profile_matrix_text<F>(profiles: &[TerminalProfile], mut render: F) -> Vec<ProfileSnapshot>
+where
+    F: FnMut(TerminalProfile) -> String,
+{
+    profile_matrix_text_with_options(
+        profiles,
+        ProfileCompareMode::from_env(),
+        MatchMode::TrimTrailing,
+        &mut render,
+    )
+}
+
+/// Profile matrix runner with explicit comparison options.
+pub fn profile_matrix_text_with_options<F>(
+    profiles: &[TerminalProfile],
+    compare: ProfileCompareMode,
+    mode: MatchMode,
+    render: &mut F,
+) -> Vec<ProfileSnapshot>
+where
+    F: FnMut(TerminalProfile) -> String,
+{
+    let mut outputs = Vec::with_capacity(profiles.len());
+    for profile in profiles {
+        let _guard = TestProfileGuard::new(*profile);
+        let text = render(*profile);
+        let checksum = crate::golden::compute_text_checksum(&text);
+        outputs.push(ProfileSnapshot {
+            profile: *profile,
+            text,
+            checksum,
+        });
+    }
+
+    if compare != ProfileCompareMode::None && outputs.len() > 1 {
+        let baseline = normalize(&outputs[0].text, mode);
+        let baseline_profile = outputs[0].profile;
+        for snapshot in outputs.iter().skip(1) {
+            let candidate = normalize(&snapshot.text, mode);
+            if baseline != candidate {
+                let diff = diff_text(&baseline, &candidate);
+                match compare {
+                    ProfileCompareMode::Report => {
+                        eprintln!(
+                            "=== Profile comparison drift: {} vs {} ===\n{diff}",
+                            baseline_profile.as_str(),
+                            snapshot.profile.as_str()
+                        );
+                    }
+                    ProfileCompareMode::Strict => {
+                        panic!(
+                            "Profile comparison drift: {} vs {}\n{diff}",
+                            baseline_profile.as_str(),
+                            snapshot.profile.as_str()
+                        );
+                    }
+                    ProfileCompareMode::None => {}
+                }
+            }
+        }
+    }
+
+    outputs
 }
 
 // ============================================================================

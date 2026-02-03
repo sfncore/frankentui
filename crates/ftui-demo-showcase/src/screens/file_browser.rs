@@ -365,12 +365,16 @@ impl FileBrowser {
             theme::screen_accent::FILE_BROWSER,
         );
 
-        let entry_name = self
+        let (entry_name, entry_icon) = self
             .picker
             .selected_entry()
-            .map(|e| e.name.as_str())
-            .unwrap_or("(none)");
-        let title = format!("Preview: {entry_name}");
+            .map(|e| (e.name.as_str(), icons::entry_icon(e)))
+            .unwrap_or(("(none)", ""));
+        let title = if entry_icon.is_empty() {
+            format!("Preview: {entry_name}")
+        } else {
+            format!("Preview: {entry_icon} {entry_name}")
+        };
         let block = Block::new()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -609,6 +613,14 @@ fn preview_metadata(path: &str, entry: Option<&FileEntry>) -> String {
     }
 }
 
+fn tree_dir_label(name: &str) -> String {
+    format!("{} {}", icons::directory_icon(), name)
+}
+
+fn tree_file_label(name: &str) -> String {
+    format!("{} {}", icons::file_icon(name), name)
+}
+
 mod icons {
     use super::{FileEntry, FileKind};
 
@@ -646,22 +658,26 @@ mod icons {
 }
 
 fn build_project_tree() -> TreeNode {
-    TreeNode::new("my-app").with_children(vec![
-        TreeNode::new("src").with_children(vec![
-            TreeNode::new("main.rs"),
-            TreeNode::new("lib.rs"),
-            TreeNode::new("models")
-                .with_children(vec![TreeNode::new("user.rs"), TreeNode::new("post.rs")]),
+    TreeNode::new(tree_dir_label("my-app")).with_children(vec![
+        TreeNode::new(tree_dir_label("src")).with_children(vec![
+            TreeNode::new(tree_file_label("main.rs")),
+            TreeNode::new(tree_file_label("lib.rs")),
+            TreeNode::new(tree_dir_label("models")).with_children(vec![
+                TreeNode::new(tree_file_label("user.rs")),
+                TreeNode::new(tree_file_label("post.rs")),
+            ]),
         ]),
-        TreeNode::new("tests").with_children(vec![
-            TreeNode::new("test_app.py"),
-            TreeNode::new("integration.rs"),
+        TreeNode::new(tree_dir_label("tests")).with_children(vec![
+            TreeNode::new(tree_file_label("test_app.py")),
+            TreeNode::new(tree_file_label("integration.rs")),
         ]),
-        TreeNode::new("docs")
-            .with_children(vec![TreeNode::new("README.md"), TreeNode::new("API.md")]),
-        TreeNode::new("Cargo.toml"),
-        TreeNode::new("package.json"),
-        TreeNode::new(".gitignore"),
+        TreeNode::new(tree_dir_label("docs")).with_children(vec![
+            TreeNode::new(tree_file_label("README.md")),
+            TreeNode::new(tree_file_label("API.md")),
+        ]),
+        TreeNode::new(tree_file_label("Cargo.toml")),
+        TreeNode::new(tree_file_label("package.json")),
+        TreeNode::new(tree_file_label(".gitignore")),
     ])
 }
 
