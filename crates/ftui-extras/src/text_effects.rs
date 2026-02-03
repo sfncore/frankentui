@@ -4499,6 +4499,304 @@ mod tests {
         assert_eq!(CursorStyle::default(), CursorStyle::Block);
         assert_eq!(CursorPosition::default(), CursorPosition::End);
     }
+
+    // =========================================================================
+    // Reveal Effect Tests (bd-vins)
+    // =========================================================================
+
+    #[test]
+    fn test_reveal_ltr_first_chars_first() {
+        // LeftToRight at progress=0.5 shows first half of characters
+        let text = StyledText::new("Hello World")
+            .effect(TextEffect::Reveal {
+                mode: RevealMode::LeftToRight,
+                progress: 0.5,
+                seed: 0,
+            })
+            .time(0.0);
+
+        // Total 11 chars, 0.5 progress = 5 chars visible
+        let c0 = text.char_color(0, 11);
+        let c4 = text.char_color(4, 11);
+        let c5 = text.char_color(5, 11);
+        let c10 = text.char_color(10, 11);
+
+        assert_ne!(c0, PackedRgba::TRANSPARENT, "First char should be visible");
+        assert_ne!(c4, PackedRgba::TRANSPARENT, "5th char should be visible");
+        assert_eq!(c5, PackedRgba::TRANSPARENT, "6th char should be hidden");
+        assert_eq!(c10, PackedRgba::TRANSPARENT, "Last char should be hidden");
+    }
+
+    #[test]
+    fn test_reveal_rtl_last_chars_first() {
+        // RightToLeft at progress=0.5 shows last half of characters
+        let text = StyledText::new("Hello World")
+            .effect(TextEffect::Reveal {
+                mode: RevealMode::RightToLeft,
+                progress: 0.5,
+                seed: 0,
+            })
+            .time(0.0);
+
+        // Total 11 chars, 0.5 progress = last 6 chars visible (idx 5-10)
+        // hidden_count = (0.5 * 11) = 5, so idx >= 5 is visible
+        let c0 = text.char_color(0, 11);
+        let c4 = text.char_color(4, 11);
+        let c5 = text.char_color(5, 11);
+        let c10 = text.char_color(10, 11);
+
+        assert_eq!(c0, PackedRgba::TRANSPARENT, "First char should be hidden");
+        assert_eq!(c4, PackedRgba::TRANSPARENT, "5th char (idx 4) should be hidden");
+        assert_ne!(c5, PackedRgba::TRANSPARENT, "6th char (idx 5) should be visible");
+        assert_ne!(c10, PackedRgba::TRANSPARENT, "Last char should be visible");
+    }
+
+    #[test]
+    fn test_reveal_center_out_middle_first() {
+        // CenterOut: center characters visible first
+        let text = StyledText::new("ABCDEFGHI") // 9 chars, center at idx 4
+            .effect(TextEffect::Reveal {
+                mode: RevealMode::CenterOut,
+                progress: 0.3,
+                seed: 0,
+            })
+            .time(0.0);
+
+        // Center char (idx 4 'E') should be visible early
+        let c4 = text.char_color(4, 9); // Center
+        let c0 = text.char_color(0, 9); // Edge
+        let c8 = text.char_color(8, 9); // Edge
+
+        assert_ne!(c4, PackedRgba::TRANSPARENT, "Center should be visible first");
+        assert_eq!(c0, PackedRgba::TRANSPARENT, "Left edge should be hidden at low progress");
+        assert_eq!(c8, PackedRgba::TRANSPARENT, "Right edge should be hidden at low progress");
+    }
+
+    #[test]
+    fn test_reveal_edges_in_edges_first() {
+        // EdgesIn: edge characters visible first
+        let text = StyledText::new("ABCDEFGHI") // 9 chars
+            .effect(TextEffect::Reveal {
+                mode: RevealMode::EdgesIn,
+                progress: 0.3,
+                seed: 0,
+            })
+            .time(0.0);
+
+        // Edge chars (idx 0, 8) should be visible, center hidden
+        let c0 = text.char_color(0, 9); // Left edge
+        let c8 = text.char_color(8, 9); // Right edge
+        let c4 = text.char_color(4, 9); // Center
+
+        assert_ne!(c0, PackedRgba::TRANSPARENT, "Left edge should be visible first");
+        assert_ne!(c8, PackedRgba::TRANSPARENT, "Right edge should be visible first");
+        assert_eq!(c4, PackedRgba::TRANSPARENT, "Center should be hidden at low progress");
+    }
+
+    #[test]
+    fn test_reveal_random_deterministic() {
+        // Same seed = same reveal order
+        let text1 = StyledText::new("Hello World")
+            .effect(TextEffect::Reveal {
+                mode: RevealMode::Random,
+                progress: 0.5,
+                seed: 12345,
+            })
+            .time(0.0);
+
+        let text2 = StyledText::new("Hello World")
+            .effect(TextEffect::Reveal {
+                mode: RevealMode::Random,
+                progress: 0.5,
+                seed: 12345,
+            })
+            .time(0.0);
+
+        // Colors should be identical for same seed
+        for i in 0..11 {
+            let c1 = text1.char_color(i, 11);
+            let c2 = text2.char_color(i, 11);
+            assert_eq!(c1, c2, "Same seed should produce same visibility at idx {i}");
+        }
+    }
+
+    #[test]
+    fn test_reveal_random_all_chars_reveal() {
+        // At progress=1.0, all chars visible regardless of seed
+        let text = StyledText::new("Hello World")
+            .effect(TextEffect::Reveal {
+                mode: RevealMode::Random,
+                progress: 1.0,
+                seed: 99999,
+            })
+            .time(0.0);
+
+        for i in 0..11 {
+            let c = text.char_color(i, 11);
+            assert_ne!(c, PackedRgba::TRANSPARENT, "All chars visible at progress=1.0");
+        }
+    }
+
+    #[test]
+    fn test_reveal_by_word_whole_words() {
+        // ByWord reveals complete words
+        let text = StyledText::new("One Two Three") // 3 words
+            .effect(TextEffect::Reveal {
+                mode: RevealMode::ByWord,
+                progress: 0.4, // Should show first word
+                seed: 0,
+            })
+            .time(0.0);
+
+        // "One" = idx 0-2, " " = idx 3, "Two" = idx 4-6, etc.
+        let c0 = text.char_color(0, 13); // 'O'
+        let c2 = text.char_color(2, 13); // 'e'
+
+        assert_ne!(c0, PackedRgba::TRANSPARENT, "First word first char visible");
+        assert_ne!(c2, PackedRgba::TRANSPARENT, "First word last char visible");
+    }
+
+    #[test]
+    fn test_reveal_by_line_whole_lines() {
+        // ByLine for single-line falls back to LeftToRight behavior
+        let text = StyledText::new("Hello")
+            .effect(TextEffect::Reveal {
+                mode: RevealMode::ByLine,
+                progress: 0.5,
+                seed: 0,
+            })
+            .time(0.0);
+
+        let c0 = text.char_color(0, 5);
+
+        assert_ne!(c0, PackedRgba::TRANSPARENT, "First chars visible");
+    }
+
+    #[test]
+    fn test_reveal_mask_angle_0() {
+        // Angle 0 = left-to-right sweep
+        let text = StyledText::new("ABCDE")
+            .effect(TextEffect::RevealMask {
+                angle: 0.0,
+                progress: 0.5,
+                softness: 0.0,
+            })
+            .time(0.0);
+
+        let c0 = text.char_color(0, 5);
+
+        // With hard edge at 0.5, approximately half should be visible
+        assert_ne!(c0, PackedRgba::TRANSPARENT, "Left side visible at angle 0");
+    }
+
+    #[test]
+    fn test_reveal_mask_angle_90() {
+        // Angle 90 = top-to-bottom sweep
+        // For single-line text (y=0.5), this becomes uniform visibility
+        let text = StyledText::new("ABCDE")
+            .effect(TextEffect::RevealMask {
+                angle: 90.0,
+                progress: 0.5,
+                softness: 0.0,
+            })
+            .time(0.0);
+
+        // With angle 90 and y=0.5, all chars have similar sweep position
+        let c0 = text.char_color(0, 5);
+        let c4 = text.char_color(4, 5);
+
+        // Both should be in same visibility state
+        assert_eq!(
+            c0 == PackedRgba::TRANSPARENT,
+            c4 == PackedRgba::TRANSPARENT,
+            "At angle 90, all single-line chars have same visibility"
+        );
+    }
+
+    #[test]
+    fn test_reveal_mask_softness_0() {
+        // Softness 0 = hard edge (binary visible/hidden)
+        let text = StyledText::new("ABCDEFGHIJ") // 10 chars
+            .effect(TextEffect::RevealMask {
+                angle: 0.0,
+                progress: 0.5,
+                softness: 0.0,
+            })
+            .time(0.0);
+
+        // Count visible and hidden
+        let mut visible = 0;
+        let mut hidden = 0;
+        for i in 0..10 {
+            let c = text.char_color(i, 10);
+            if c == PackedRgba::TRANSPARENT {
+                hidden += 1;
+            } else {
+                visible += 1;
+            }
+        }
+
+        // With hard edge, should be a clean split
+        assert!(visible > 0, "Some chars should be visible");
+        assert!(hidden > 0, "Some chars should be hidden");
+    }
+
+    #[test]
+    fn test_reveal_mask_softness_1() {
+        // Softness 1 = full gradient fade
+        let text = StyledText::new("ABCDEFGHIJ") // 10 chars
+            .base_color(PackedRgba::rgb(255, 255, 255))
+            .effect(TextEffect::RevealMask {
+                angle: 0.0,
+                progress: 0.5,
+                softness: 1.0,
+            })
+            .time(0.0);
+
+        // With soft edge, chars in the middle range should have partial alpha
+        let c0 = text.char_color(0, 10);
+        let c9 = text.char_color(9, 10);
+
+        // First char should be more visible than last
+        let alpha_first = c0.r() as f64 / 255.0;
+        let alpha_last = c9.r() as f64 / 255.0;
+
+        assert!(alpha_first > alpha_last || c9 == PackedRgba::TRANSPARENT,
+            "Soft edge should create gradient (first more visible than last)");
+    }
+
+    #[test]
+    fn test_reveal_mode_default() {
+        // RevealMode default should be LeftToRight
+        assert_eq!(RevealMode::default(), RevealMode::LeftToRight);
+    }
+
+    #[test]
+    fn test_reveal_progress_boundaries() {
+        // Progress 0 = all hidden, progress 1 = all visible
+        let text_0 = StyledText::new("Test")
+            .effect(TextEffect::Reveal {
+                mode: RevealMode::LeftToRight,
+                progress: 0.0,
+                seed: 0,
+            })
+            .time(0.0);
+
+        let text_1 = StyledText::new("Test")
+            .effect(TextEffect::Reveal {
+                mode: RevealMode::LeftToRight,
+                progress: 1.0,
+                seed: 0,
+            })
+            .time(0.0);
+
+        for i in 0..4 {
+            assert_eq!(text_0.char_color(i, 4), PackedRgba::TRANSPARENT,
+                "All hidden at progress=0");
+            assert_ne!(text_1.char_color(i, 4), PackedRgba::TRANSPARENT,
+                "All visible at progress=1");
+        }
+    }
 }
 
 // =============================================================================
