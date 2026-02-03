@@ -1031,3 +1031,121 @@ fn layout_lab_combined_state_120x40() {
     lab.view(&mut frame, area);
     assert_snapshot!("layout_lab_combined_state_120x40", &frame.buffer);
 }
+
+// ===========================================================================
+// Scenario 15: Resize Regression (Round-Trip Determinism + Latency Logging)
+// ===========================================================================
+
+#[test]
+fn e2e_resize_roundtrip_regression() {
+    let start = Instant::now();
+    log_test_start("e2e_resize_roundtrip_regression", 120, 40);
+
+    let mut lab = LayoutLab::new();
+    lab.update(&char_press('5')); // Real-world layout preset (denser constraints)
+
+    let sizes = [(80, 24), (120, 40), (160, 50), (120, 40), (80, 24)];
+    let mut hashes = Vec::with_capacity(sizes.len());
+    let mut max_elapsed_ms = 0u128;
+
+    for (w, h) in sizes {
+        let render_start = Instant::now();
+        let hash = capture_frame_hash(&lab, w, h);
+        let elapsed_ms = render_start.elapsed().as_millis();
+        max_elapsed_ms = max_elapsed_ms.max(elapsed_ms);
+        hashes.push(hash);
+        log_jsonl(
+            "resize_render",
+            &[
+                ("width", &w.to_string()),
+                ("height", &h.to_string()),
+                ("elapsed_ms", &elapsed_ms.to_string()),
+                ("hash", &format!("{hash:016x}")),
+            ],
+        );
+    }
+
+    assert_eq!(
+        hashes[0], hashes[4],
+        "Round-trip resize back to 80x24 should be deterministic"
+    );
+    assert_eq!(
+        hashes[1], hashes[3],
+        "Round-trip resize back to 120x40 should be deterministic"
+    );
+
+    log_jsonl(
+        "resize_summary",
+        &[("max_elapsed_ms", &max_elapsed_ms.to_string())],
+    );
+    log_test_end(
+        "e2e_resize_roundtrip_regression",
+        start,
+        hashes[hashes.len() - 1],
+        true,
+    );
+}
+
+#[test]
+fn e2e_resize_storm_determinism() {
+    let start = Instant::now();
+    log_test_start("e2e_resize_storm_determinism", 120, 40);
+
+    let mut lab_a = LayoutLab::new();
+    let mut lab_b = LayoutLab::new();
+    lab_a.update(&char_press('4')); // Nested preset for more constraints
+    lab_b.update(&char_press('4'));
+
+    let sizes = [
+        (60, 20),
+        (80, 24),
+        (100, 30),
+        (120, 40),
+        (90, 28),
+        (70, 22),
+        (140, 45),
+        (110, 36),
+        (80, 24),
+        (60, 20),
+    ];
+
+    let mut hasher = DefaultHasher::new();
+    let mut max_elapsed_ms = 0u128;
+
+    for (w, h) in sizes {
+        let render_start = Instant::now();
+        let hash_a = capture_frame_hash(&lab_a, w, h);
+        let hash_b = capture_frame_hash(&lab_b, w, h);
+        let elapsed_ms = render_start.elapsed().as_millis();
+        max_elapsed_ms = max_elapsed_ms.max(elapsed_ms);
+
+        assert_eq!(
+            hash_a, hash_b,
+            "Deterministic resize storm: hashes must match for {w}x{h}"
+        );
+
+        log_jsonl(
+            "resize_storm",
+            &[
+                ("width", &w.to_string()),
+                ("height", &h.to_string()),
+                ("elapsed_ms", &elapsed_ms.to_string()),
+                ("hash", &format!("{hash_a:016x}")),
+            ],
+        );
+
+        w.hash(&mut hasher);
+        h.hash(&mut hasher);
+        hash_a.hash(&mut hasher);
+    }
+
+    let checksum = hasher.finish();
+    log_jsonl(
+        "resize_storm_summary",
+        &[
+            ("max_elapsed_ms", &max_elapsed_ms.to_string()),
+            ("checksum", &format!("{checksum:016x}")),
+        ],
+    );
+    log_test_end("e2e_resize_storm_determinism", start, checksum, true);
+}

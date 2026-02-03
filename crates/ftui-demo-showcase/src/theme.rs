@@ -1177,67 +1177,88 @@ mod tests {
 
     #[test]
     fn primary_fg_on_base_bg_meets_wcag_aa() {
-        let ratio = cr(fg::PRIMARY, bg::BASE);
-        assert!(
-            ratio >= WCAG_AA_NORMAL,
-            "fg::PRIMARY on bg::BASE contrast {ratio:.2} < {WCAG_AA_NORMAL}"
-        );
+        for theme in ThemeId::ALL {
+            set_theme(theme);
+            let ratio = cr(fg::PRIMARY, bg::BASE);
+            assert!(
+                ratio >= WCAG_AA_NORMAL,
+                "fg::PRIMARY on bg::BASE contrast {ratio:.2} < {WCAG_AA_NORMAL} for {theme:?}"
+            );
+        }
     }
 
     #[test]
     fn secondary_fg_on_base_bg_meets_wcag_aa() {
-        let ratio = cr(fg::SECONDARY, bg::BASE);
-        assert!(
-            ratio >= WCAG_AA_NORMAL,
-            "fg::SECONDARY on bg::BASE contrast {ratio:.2} < {WCAG_AA_NORMAL}"
-        );
+        for theme in ThemeId::ALL {
+            set_theme(theme);
+            let ratio = cr(fg::SECONDARY, bg::BASE);
+            assert!(
+                ratio >= WCAG_AA_NORMAL,
+                "fg::SECONDARY on bg::BASE contrast {ratio:.2} < {WCAG_AA_NORMAL} for {theme:?}"
+            );
+        }
     }
 
     #[test]
     fn muted_fg_on_base_bg_meets_wcag_aa_large() {
         // Muted text is typically used at large size or for decorative purposes,
         // so we use the relaxed 3:1 threshold.
-        let ratio = cr(fg::MUTED, bg::BASE);
-        assert!(
-            ratio >= WCAG_AA_LARGE,
-            "fg::MUTED on bg::BASE contrast {ratio:.2} < {WCAG_AA_LARGE}"
-        );
+        for theme in ThemeId::ALL {
+            set_theme(theme);
+            let ratio = cr(fg::MUTED, bg::BASE);
+            assert!(
+                ratio >= WCAG_AA_LARGE,
+                "fg::MUTED on bg::BASE contrast {ratio:.2} < {WCAG_AA_LARGE} for {theme:?}"
+            );
+        }
     }
 
     #[test]
     fn accent_error_on_base_bg_meets_wcag_aa() {
-        let ratio = cr(accent::ERROR, bg::BASE);
-        assert!(
-            ratio >= WCAG_AA_NORMAL,
-            "accent::ERROR on bg::BASE contrast {ratio:.2} < {WCAG_AA_NORMAL}"
-        );
+        for theme in ThemeId::ALL {
+            set_theme(theme);
+            let ratio = cr(accent::ERROR, bg::BASE);
+            assert!(
+                ratio >= WCAG_AA_NORMAL,
+                "accent::ERROR on bg::BASE contrast {ratio:.2} < {WCAG_AA_NORMAL} for {theme:?}"
+            );
+        }
     }
 
     #[test]
     fn accent_success_on_base_bg_meets_wcag_aa() {
-        let ratio = cr(accent::SUCCESS, bg::BASE);
-        assert!(
-            ratio >= WCAG_AA_NORMAL,
-            "accent::SUCCESS on bg::BASE contrast {ratio:.2} < {WCAG_AA_NORMAL}"
-        );
+        for theme in ThemeId::ALL {
+            set_theme(theme);
+            let ratio = cr(accent::SUCCESS, bg::BASE);
+            assert!(
+                ratio >= WCAG_AA_NORMAL,
+                "accent::SUCCESS on bg::BASE contrast {ratio:.2} < {WCAG_AA_NORMAL} for {theme:?}"
+            );
+        }
     }
 
     #[test]
     fn accent_warning_on_base_bg_meets_wcag_aa_large() {
-        let ratio = cr(accent::WARNING, bg::BASE);
-        assert!(
-            ratio >= WCAG_AA_LARGE,
-            "accent::WARNING on bg::BASE contrast {ratio:.2} < {WCAG_AA_LARGE}"
-        );
+        for theme in ThemeId::ALL {
+            set_theme(theme);
+            let ratio = cr(accent::WARNING, bg::BASE);
+            assert!(
+                ratio >= WCAG_AA_LARGE,
+                "accent::WARNING on bg::BASE contrast {ratio:.2} < {WCAG_AA_LARGE} for {theme:?}"
+            );
+        }
     }
 
     #[test]
     fn accent_info_on_base_bg_meets_wcag_aa() {
-        let ratio = cr(accent::INFO, bg::BASE);
-        assert!(
-            ratio >= WCAG_AA_LARGE,
-            "accent::INFO on bg::BASE contrast {ratio:.2} < {WCAG_AA_LARGE}"
-        );
+        for theme in ThemeId::ALL {
+            set_theme(theme);
+            let ratio = cr(accent::INFO, bg::BASE);
+            assert!(
+                ratio >= WCAG_AA_LARGE,
+                "accent::INFO on bg::BASE contrast {ratio:.2} < {WCAG_AA_LARGE} for {theme:?}"
+            );
+        }
     }
 
     #[test]
@@ -1248,12 +1269,15 @@ mod tests {
             ("StatusBlocked", ColorToken::StatusBlocked),
             ("StatusClosed", ColorToken::StatusClosed),
         ];
-        for (name, token) in status_tokens {
-            let ratio = cr(token, bg::BASE);
-            assert!(
-                ratio >= WCAG_AA_LARGE,
-                "status::{name} on bg::BASE contrast {ratio:.2} < {WCAG_AA_LARGE}"
-            );
+        for theme in ThemeId::ALL {
+            set_theme(theme);
+            for (name, token) in status_tokens {
+                let ratio = cr(token, bg::BASE);
+                assert!(
+                    ratio >= WCAG_AA_LARGE,
+                    "status::{name} on bg::BASE contrast {ratio:.2} < {WCAG_AA_LARGE} for {theme:?}"
+                );
+            }
         }
     }
 
@@ -1266,12 +1290,15 @@ mod tests {
             ("P3", ColorToken::PriorityP3),
             ("P4", ColorToken::PriorityP4),
         ];
-        for (name, token) in priority_tokens {
-            let ratio = cr(token, bg::BASE);
-            assert!(
-                ratio >= WCAG_AA_LARGE,
-                "priority::{name} on bg::BASE contrast {ratio:.2} < {WCAG_AA_LARGE}"
-            );
+        for theme in ThemeId::ALL {
+            set_theme(theme);
+            for (name, token) in priority_tokens {
+                let ratio = cr(token, bg::BASE);
+                assert!(
+                    ratio >= WCAG_AA_LARGE,
+                    "priority::{name} on bg::BASE contrast {ratio:.2} < {WCAG_AA_LARGE} for {theme:?}"
+                );
+            }
         }
     }
 
@@ -1288,12 +1315,15 @@ mod tests {
             ("PERFORMANCE", screen_accent::PERFORMANCE),
             ("ACTION_TIMELINE", screen_accent::ACTION_TIMELINE),
         ];
-        for (name, token) in screens {
-            let ratio = cr(*token, bg::DEEP);
-            assert!(
-                ratio >= WCAG_AA_LARGE,
-                "screen_accent::{name} on bg::DEEP contrast {ratio:.2} < {WCAG_AA_LARGE}"
-            );
+        for theme in ThemeId::ALL {
+            set_theme(theme);
+            for (name, token) in screens {
+                let ratio = cr(*token, bg::DEEP);
+                assert!(
+                    ratio >= WCAG_AA_LARGE,
+                    "screen_accent::{name} on bg::DEEP contrast {ratio:.2} < {WCAG_AA_LARGE} for {theme:?}"
+                );
+            }
         }
     }
 

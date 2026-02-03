@@ -284,10 +284,13 @@ impl<M: Send + 'static> Subscription<M> for Every<M> {
                 break;
             }
             tick_count += 1;
-            crate::debug_trace!("Every subscription tick {}: id={}", tick_count, self.id);
             let msg = (self.make_msg)();
             if sender.send(msg).is_err() {
-                crate::debug_trace!("Every subscription channel closed: id={}", self.id);
+                crate::debug_trace!(
+                    "Every subscription channel closed: id={}, sent {} ticks",
+                    self.id,
+                    tick_count
+                );
                 break;
             }
         }

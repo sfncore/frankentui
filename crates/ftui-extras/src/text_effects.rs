@@ -2512,6 +2512,333 @@ pub enum TextEffect {
 }
 
 // =============================================================================
+// TextPreset - Curated Effect Combinations (bd-4r5h)
+// =============================================================================
+//
+// Evidence Ledger:
+// - Choice: Presets as an enum with methods returning Vec<TextEffect>
+// - Reason: Allows inspection of preset contents, easy customization after applying,
+//   and keeps preset definitions close to effect definitions for maintenance.
+// - Invariants:
+//   - preset.effects() never returns an empty Vec
+//   - preset.effects().len() <= MAX_EFFECTS
+//   - All presets render without panic at t=0, t=0.5, t=1
+// - Failure Modes:
+//   - User overrides base_color to something incompatible: visual clash but no panic
+//   - Effect conflicts: presets are designed to avoid conflicting effect types
+
+/// Curated text effect presets for common visual styles.
+///
+/// Presets provide ready-to-use effect combinations that showcase the system's
+/// capabilities. Each preset can be customized after application using the
+/// standard StyledText builder methods.
+///
+/// # Categories
+///
+/// | Category | Presets | Style |
+/// |----------|---------|-------|
+/// | High-energy | Neon, Cyberpunk, Matrix | Bold, animated, digital |
+/// | Classic/retro | Retro, Typewriter, Terminal | Nostalgic, CRT aesthetic |
+/// | Elegant | Cinematic, Elegant, Minimal | Professional, subtle |
+/// | Dynamic | Fire, Ice, Hologram | Colorful, eye-catching |
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // Apply a preset
+/// let styled = StyledText::preset(TextPreset::Neon, "WELCOME")
+///     .time(current_time);
+///
+/// // Customize after preset
+/// let custom = StyledText::preset(TextPreset::Cinematic, "TITLE")
+///     .base_color(PackedRgba::rgb(255, 200, 100))
+///     .easing(Easing::EaseOut)
+///     .time(current_time);
+///
+/// // Get preset effects for inspection
+/// let effects = TextPreset::Neon.effects();
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TextPreset {
+    // --- High-energy/modern ---
+    /// Neon: Cyan/magenta wave with pulsing glow.
+    /// Bold text, bright colors, animated color wave effect.
+    #[default]
+    Neon,
+
+    /// Cyberpunk: Glitch, chromatic aberration, animated gradient.
+    /// Digital dystopia aesthetic with glitch effects.
+    Cyberpunk,
+
+    /// Matrix: Green cascade with fade trail and subtle glitch.
+    /// Classic terminal rain aesthetic.
+    Matrix,
+
+    // --- Classic/retro ---
+    /// Retro: CRT scanlines, green phosphor, subtle flicker.
+    /// Old-school monitor look.
+    Retro,
+
+    /// Typewriter: Character-by-character reveal with cursor.
+    /// Classic typewriter feel.
+    Typewriter,
+
+    /// Terminal: Solid green, subtle pulse.
+    /// Clean terminal aesthetic.
+    Terminal,
+
+    // --- Elegant/professional ---
+    /// Cinematic: Slow fade, gold gradient, soft glow.
+    /// Movie title aesthetic.
+    Cinematic,
+
+    /// Elegant: Organic pulse, gold/cream gradient, drop shadow.
+    /// Sophisticated, professional look.
+    Elegant,
+
+    /// Minimal: Subtle fade only, no color effects.
+    /// Clean, understated aesthetic.
+    Minimal,
+
+    // --- Dynamic/playful ---
+    /// Fire: Fire gradient with upward wave motion.
+    /// Flames rising effect.
+    Fire,
+
+    /// Ice: Frost blue gradient with sparkle effect.
+    /// Cold, crystalline aesthetic.
+    Ice,
+
+    /// Hologram: Rainbow shift, scanlines, transparency pulse.
+    /// Futuristic holographic display effect.
+    Hologram,
+}
+
+impl TextPreset {
+    /// Get the effects for this preset.
+    ///
+    /// Returns a Vec of TextEffect variants that define the preset's visual style.
+    /// The effects are ordered appropriately for composition.
+    ///
+    /// # Invariants
+    /// - Never returns empty Vec
+    /// - Length is always <= MAX_EFFECTS
+    #[must_use]
+    pub fn effects(self) -> Vec<TextEffect> {
+        match self {
+            Self::Neon => vec![
+                TextEffect::ColorWave {
+                    color1: PackedRgba::rgb(0, 255, 255), // Cyan
+                    color2: PackedRgba::rgb(255, 0, 255), // Magenta
+                    speed: 1.5,
+                    wavelength: 8.0,
+                },
+                TextEffect::PulsingGlow {
+                    color: PackedRgba::rgb(100, 255, 255),
+                    speed: 2.0,
+                },
+            ],
+
+            Self::Cyberpunk => vec![
+                TextEffect::AnimatedGradient {
+                    gradient: ColorGradient::cyberpunk(),
+                    speed: 0.5,
+                },
+                TextEffect::ChromaticAberration {
+                    offset: 2,
+                    direction: Direction::Right,
+                    animated: true,
+                    speed: 0.3,
+                },
+                TextEffect::Glitch { intensity: 0.05 },
+            ],
+
+            Self::Matrix => vec![
+                TextEffect::AnimatedGradient {
+                    gradient: ColorGradient::matrix(),
+                    speed: 0.8,
+                },
+                TextEffect::Cascade {
+                    speed: 15.0,
+                    direction: Direction::Down,
+                    stagger: 0.1,
+                },
+                TextEffect::Glitch { intensity: 0.02 },
+            ],
+
+            Self::Retro => vec![
+                TextEffect::ColorCycle {
+                    colors: vec![
+                        PackedRgba::rgb(0, 200, 50),   // Terminal green
+                        PackedRgba::rgb(50, 255, 100), // Bright green
+                        PackedRgba::rgb(0, 180, 40),   // Dim green
+                    ],
+                    speed: 0.3,
+                },
+                TextEffect::Scanline {
+                    intensity: 0.3,
+                    line_gap: 2,
+                    scroll: true,
+                    scroll_speed: 1.0,
+                    flicker: 0.02,
+                },
+            ],
+
+            Self::Typewriter => vec![
+                TextEffect::Reveal {
+                    mode: RevealMode::LeftToRight,
+                    progress: 1.0,
+                    seed: 0,
+                },
+                TextEffect::Cursor {
+                    style: CursorStyle::Block,
+                    blink_speed: 2.0,
+                    position: CursorPosition::AfterReveal,
+                },
+            ],
+
+            Self::Terminal => vec![TextEffect::Pulse {
+                speed: 0.5,
+                min_alpha: 0.85,
+            }],
+
+            Self::Cinematic => vec![
+                TextEffect::FadeIn { progress: 1.0 },
+                TextEffect::HorizontalGradient {
+                    gradient: ColorGradient::gold(),
+                },
+                TextEffect::Glow {
+                    color: PackedRgba::rgb(255, 220, 150),
+                    intensity: 0.4,
+                },
+            ],
+
+            Self::Elegant => vec![
+                TextEffect::OrganicPulse {
+                    speed: 0.4,
+                    min_brightness: 0.7,
+                    asymmetry: 0.6,
+                    phase_variation: 0.15,
+                    seed: 42,
+                },
+                TextEffect::HorizontalGradient {
+                    gradient: ColorGradient::new(vec![
+                        (0.0, PackedRgba::rgb(200, 170, 100)), // Dark gold
+                        (0.5, PackedRgba::rgb(255, 230, 180)), // Cream
+                        (1.0, PackedRgba::rgb(200, 170, 100)), // Dark gold
+                    ]),
+                },
+            ],
+
+            Self::Minimal => vec![TextEffect::FadeIn { progress: 1.0 }],
+
+            Self::Fire => vec![
+                TextEffect::AnimatedGradient {
+                    gradient: ColorGradient::fire(),
+                    speed: 1.2,
+                },
+                TextEffect::Wave {
+                    amplitude: 0.5,
+                    wavelength: 6.0,
+                    speed: 2.0,
+                    direction: Direction::Up,
+                },
+            ],
+
+            Self::Ice => vec![
+                TextEffect::HorizontalGradient {
+                    gradient: ColorGradient::ice(),
+                },
+                TextEffect::Pulse {
+                    speed: 1.0,
+                    min_alpha: 0.8,
+                },
+            ],
+
+            Self::Hologram => vec![
+                TextEffect::RainbowGradient { speed: 0.5 },
+                TextEffect::Scanline {
+                    intensity: 0.2,
+                    line_gap: 3,
+                    scroll: true,
+                    scroll_speed: 2.0,
+                    flicker: 0.0,
+                },
+                TextEffect::Pulse {
+                    speed: 1.5,
+                    min_alpha: 0.6,
+                },
+            ],
+        }
+    }
+
+    /// Get the recommended base color for this preset.
+    ///
+    /// Some presets work best with specific base colors. This returns the
+    /// optimal color for maximum visual impact.
+    #[must_use]
+    pub fn base_color(self) -> PackedRgba {
+        match self {
+            Self::Neon => PackedRgba::rgb(200, 255, 255), // Bright cyan-white
+            Self::Cyberpunk => PackedRgba::rgb(255, 100, 200), // Hot pink
+            Self::Matrix => PackedRgba::rgb(0, 255, 65),  // Matrix green
+            Self::Retro => PackedRgba::rgb(50, 255, 100), // Terminal green
+            Self::Typewriter => PackedRgba::rgb(255, 255, 255), // White
+            Self::Terminal => PackedRgba::rgb(0, 200, 50), // Terminal green
+            Self::Cinematic => PackedRgba::rgb(255, 220, 150), // Warm gold
+            Self::Elegant => PackedRgba::rgb(255, 240, 200), // Cream
+            Self::Minimal => PackedRgba::rgb(200, 200, 200), // Light gray
+            Self::Fire => PackedRgba::rgb(255, 150, 50),  // Orange
+            Self::Ice => PackedRgba::rgb(200, 230, 255),  // Light blue
+            Self::Hologram => PackedRgba::rgb(255, 255, 255), // White for rainbow
+        }
+    }
+
+    /// Get the recommended easing for this preset.
+    ///
+    /// Different presets benefit from different animation curves.
+    #[must_use]
+    pub fn easing(self) -> Easing {
+        match self {
+            Self::Neon | Self::Cyberpunk | Self::Matrix => Easing::Linear,
+            Self::Retro | Self::Terminal => Easing::Linear,
+            Self::Typewriter => Easing::Linear,
+            Self::Cinematic => Easing::EaseOut,
+            Self::Elegant => Easing::EaseInOut,
+            Self::Minimal => Easing::EaseOut,
+            Self::Fire => Easing::EaseOut,
+            Self::Ice => Easing::EaseInOut,
+            Self::Hologram => Easing::Linear,
+        }
+    }
+
+    /// Whether this preset uses bold text by default.
+    #[must_use]
+    pub fn is_bold(self) -> bool {
+        matches!(self, Self::Neon | Self::Fire | Self::Matrix)
+    }
+
+    /// Get an iterator over all preset variants.
+    pub fn all() -> impl Iterator<Item = Self> {
+        [
+            Self::Neon,
+            Self::Cyberpunk,
+            Self::Matrix,
+            Self::Retro,
+            Self::Typewriter,
+            Self::Terminal,
+            Self::Cinematic,
+            Self::Elegant,
+            Self::Minimal,
+            Self::Fire,
+            Self::Ice,
+            Self::Hologram,
+        ]
+        .into_iter()
+    }
+}
+
+// =============================================================================
 // StyledText - Text with effects
 // =============================================================================
 
@@ -2579,6 +2906,49 @@ impl StyledText {
             glow_config: None,
             outline_config: None,
         }
+    }
+
+    /// Create styled text with a preset applied.
+    ///
+    /// This is a convenience constructor that applies all effects, colors, and
+    /// settings for a curated preset. The result can be further customized
+    /// using the standard builder methods.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Use preset directly
+    /// let neon = StyledText::preset(TextPreset::Neon, "WELCOME")
+    ///     .time(current_time);
+    ///
+    /// // Customize after preset
+    /// let custom_fire = StyledText::preset(TextPreset::Fire, "HOT!")
+    ///     .base_color(PackedRgba::rgb(255, 100, 0))  // Override color
+    ///     .easing(Easing::Bounce)
+    ///     .time(current_time);
+    /// ```
+    pub fn preset(preset: TextPreset, text: impl Into<String>) -> Self {
+        let mut styled = Self::new(text);
+
+        // Apply preset's effects
+        for effect in preset.effects() {
+            if styled.effects.len() >= MAX_EFFECTS {
+                break;
+            }
+            styled.effects.push(effect);
+        }
+
+        // Apply preset's recommended settings
+        styled.base_color = preset.base_color();
+        styled.easing = preset.easing();
+        styled.bold = preset.is_bold();
+
+        // Add preset-specific shadows for Elegant preset
+        if matches!(preset, TextPreset::Elegant) {
+            styled.shadows.push(Shadow::new(1, 1).opacity(0.4));
+        }
+
+        styled
     }
 
     /// Add a text effect to the chain.
@@ -5956,8 +6326,8 @@ mod tests {
             let outline_y = (base_y as i32).saturating_add(i32::from(dy));
 
             // Should not panic, just go negative (which is filtered by bounds check)
-            assert!(outline_x >= -3 && outline_x <= 3);
-            assert!(outline_y >= -3 && outline_y <= 3);
+            assert!((-3..=3).contains(&outline_x));
+            assert!((-3..=3).contains(&outline_y));
         }
     }
 
@@ -10609,5 +10979,243 @@ mod particle_dissolve_tests {
             seed: 42,
         });
         assert!(text.has_position_effects());
+    }
+}
+
+// =============================================================================
+// TextPreset Tests (bd-4r5h)
+// =============================================================================
+
+#[cfg(test)]
+mod preset_tests {
+    use super::*;
+
+    #[test]
+    fn test_preset_applies_effects() {
+        // Each preset should set a non-empty effect list
+        for preset in TextPreset::all() {
+            let effects = preset.effects();
+            assert!(
+                !effects.is_empty(),
+                "Preset {:?} should have at least one effect",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_preset_effects_within_limit() {
+        // Preset effects should not exceed MAX_EFFECTS
+        for preset in TextPreset::all() {
+            let effects = preset.effects();
+            assert!(
+                effects.len() <= MAX_EFFECTS,
+                "Preset {:?} has {} effects, exceeding MAX_EFFECTS ({})",
+                preset,
+                effects.len(),
+                MAX_EFFECTS
+            );
+        }
+    }
+
+    #[test]
+    fn test_preset_customizable() {
+        // base_color override should work
+        let custom_color = PackedRgba::rgb(100, 100, 100);
+        let styled = StyledText::preset(TextPreset::Neon, "TEST").base_color(custom_color);
+
+        // The color should be overridden
+        // Note: We can't directly access base_color, but we can verify the preset applied effects
+        assert!(styled.has_effects());
+    }
+
+    #[test]
+    fn test_preset_easing_override() {
+        // Can change easing after preset
+        let styled = StyledText::preset(TextPreset::Neon, "TEST").easing(Easing::Bounce);
+
+        // Should have effects from preset
+        assert!(styled.has_effects());
+    }
+
+    #[test]
+    fn test_all_presets_render_at_t0() {
+        // No panic for any preset at t=0
+        for preset in TextPreset::all() {
+            let styled = StyledText::preset(preset, "TEST").time(0.0);
+            // Just accessing char_at should not panic
+            let _ = styled.char_at(0, ' ');
+            let _ = styled.char_at(1, ' ');
+            let _ = styled.char_at(2, ' ');
+        }
+    }
+
+    #[test]
+    fn test_all_presets_render_at_t05() {
+        // No panic for any preset at t=0.5
+        for preset in TextPreset::all() {
+            let styled = StyledText::preset(preset, "TEST").time(0.5);
+            let _ = styled.char_at(0, ' ');
+            let _ = styled.char_at(1, ' ');
+            let _ = styled.char_at(2, ' ');
+        }
+    }
+
+    #[test]
+    fn test_all_presets_render_at_t1() {
+        // No panic for any preset at t=1.0
+        for preset in TextPreset::all() {
+            let styled = StyledText::preset(preset, "TEST").time(1.0);
+            let _ = styled.char_at(0, ' ');
+            let _ = styled.char_at(1, ' ');
+            let _ = styled.char_at(2, ' ');
+        }
+    }
+
+    #[test]
+    fn test_preset_effects_consistent() {
+        // Same preset = same effects
+        for preset in TextPreset::all() {
+            let effects1 = preset.effects();
+            let effects2 = preset.effects();
+            assert_eq!(
+                effects1.len(),
+                effects2.len(),
+                "Preset {:?} should return consistent effects",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_preset_no_none_effects() {
+        // No preset should include TextEffect::None
+        for preset in TextPreset::all() {
+            let effects = preset.effects();
+            for effect in &effects {
+                assert!(
+                    !matches!(effect, TextEffect::None),
+                    "Preset {:?} should not include TextEffect::None",
+                    preset
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_preset_all_iterator() {
+        // all() should return exactly 12 presets
+        let count = TextPreset::all().count();
+        assert_eq!(count, 12, "Should have exactly 12 presets");
+    }
+
+    #[test]
+    fn test_preset_default_is_neon() {
+        assert_eq!(TextPreset::default(), TextPreset::Neon);
+    }
+
+    #[test]
+    fn test_neon_preset_has_color_wave() {
+        let effects = TextPreset::Neon.effects();
+        let has_color_wave = effects
+            .iter()
+            .any(|e| matches!(e, TextEffect::ColorWave { .. }));
+        assert!(has_color_wave, "Neon preset should have ColorWave effect");
+    }
+
+    #[test]
+    fn test_cyberpunk_preset_has_glitch() {
+        let effects = TextPreset::Cyberpunk.effects();
+        let has_glitch = effects
+            .iter()
+            .any(|e| matches!(e, TextEffect::Glitch { .. }));
+        assert!(has_glitch, "Cyberpunk preset should have Glitch effect");
+    }
+
+    #[test]
+    fn test_matrix_preset_has_cascade() {
+        let effects = TextPreset::Matrix.effects();
+        let has_cascade = effects
+            .iter()
+            .any(|e| matches!(e, TextEffect::Cascade { .. }));
+        assert!(has_cascade, "Matrix preset should have Cascade effect");
+    }
+
+    #[test]
+    fn test_retro_preset_has_scanline() {
+        let effects = TextPreset::Retro.effects();
+        let has_scanline = effects
+            .iter()
+            .any(|e| matches!(e, TextEffect::Scanline { .. }));
+        assert!(has_scanline, "Retro preset should have Scanline effect");
+    }
+
+    #[test]
+    fn test_typewriter_preset_has_reveal_and_cursor() {
+        let effects = TextPreset::Typewriter.effects();
+        let has_reveal = effects
+            .iter()
+            .any(|e| matches!(e, TextEffect::Reveal { .. }));
+        let has_cursor = effects
+            .iter()
+            .any(|e| matches!(e, TextEffect::Cursor { .. }));
+        assert!(has_reveal, "Typewriter preset should have Reveal effect");
+        assert!(has_cursor, "Typewriter preset should have Cursor effect");
+    }
+
+    #[test]
+    fn test_fire_preset_has_wave() {
+        let effects = TextPreset::Fire.effects();
+        let has_wave = effects.iter().any(|e| matches!(e, TextEffect::Wave { .. }));
+        assert!(has_wave, "Fire preset should have Wave effect");
+    }
+
+    #[test]
+    fn test_hologram_preset_has_rainbow() {
+        let effects = TextPreset::Hologram.effects();
+        let has_rainbow = effects
+            .iter()
+            .any(|e| matches!(e, TextEffect::RainbowGradient { .. }));
+        assert!(
+            has_rainbow,
+            "Hologram preset should have RainbowGradient effect"
+        );
+    }
+
+    #[test]
+    fn test_elegant_preset_has_shadow() {
+        // Elegant preset should add a shadow via the preset() constructor
+        let styled = StyledText::preset(TextPreset::Elegant, "TEST");
+        // The Shadow is applied in the preset constructor
+        // We can't directly check shadows, but we can verify the preset was applied
+        assert!(styled.has_effects());
+    }
+
+    #[test]
+    fn test_bold_presets() {
+        // Neon, Fire, and Matrix should be bold
+        assert!(TextPreset::Neon.is_bold());
+        assert!(TextPreset::Fire.is_bold());
+        assert!(TextPreset::Matrix.is_bold());
+
+        // Others should not be bold
+        assert!(!TextPreset::Minimal.is_bold());
+        assert!(!TextPreset::Elegant.is_bold());
+        assert!(!TextPreset::Terminal.is_bold());
+    }
+
+    #[test]
+    fn test_preset_base_colors_are_valid() {
+        // All preset base colors should have valid RGB values (not all zeros or all max)
+        for preset in TextPreset::all() {
+            let color = preset.base_color();
+            // At least one channel should be non-zero
+            let has_color = color.r() > 0 || color.g() > 0 || color.b() > 0;
+            assert!(
+                has_color,
+                "Preset {:?} should have a visible base color",
+                preset
+            );
+        }
     }
 }

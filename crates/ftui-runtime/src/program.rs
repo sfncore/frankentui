@@ -684,7 +684,9 @@ impl<M: Model> Program<M, Stdout> {
         );
 
         // Get terminal size for initial frame
-        let (width, height) = session.size().unwrap_or((80, 24));
+        let (w, h) = session.size().unwrap_or((80, 24));
+        let width = w.max(1);
+        let height = h.max(1);
         writer.set_size(width, height);
 
         let budget = RenderBudget::from_config(&config.budget);
@@ -760,7 +762,10 @@ impl<M: Model, W: Write + Send> Program<M, W> {
         let mut loop_count: u64 = 0;
         while self.running {
             loop_count += 1;
-            crate::debug_trace!("main loop iteration {}", loop_count);
+            // Log heartbeat every 100 iterations to avoid flooding stderr
+            if loop_count.is_multiple_of(100) {
+                crate::debug_trace!("main loop heartbeat: iteration {}", loop_count);
+            }
 
             // Poll for input with tick timeout
             let timeout = self.effective_timeout();
@@ -1138,7 +1143,7 @@ impl<M: Model, W: Write + Send> Program<M, W> {
 
     /// Render a frame with budget tracking.
     fn render_frame(&mut self) -> io::Result<()> {
-        crate::debug_trace!("render_frame called");
+        crate::debug_trace!("render_frame: {}x{}", self.width, self.height);
 
         // Reset budget for new frame, potentially upgrading quality
         self.budget.next_frame();
@@ -1230,8 +1235,9 @@ impl<M: Model, W: Write + Send> Program<M, W> {
     fn render_buffer(&mut self, frame_height: u16) -> (Buffer, Option<(u16, u16)>) {
         // Note: Frame borrows the pool and links from writer.
         // We scope it so it drops before we call present_ui (which needs exclusive writer access).
+        let buffer = self.writer.take_render_buffer(self.width, frame_height);
         let (pool, links) = self.writer.pool_and_links_mut();
-        let mut frame = Frame::new(self.width, frame_height, pool);
+        let mut frame = Frame::from_buffer(buffer, pool);
         frame.set_degradation(self.budget.degradation());
         frame.set_links(links);
 
@@ -1355,7 +1361,8 @@ impl<M: Model, W: Write + Send> Program<M, W> {
         // Use ui_height() to get effective visible height in inline mode.
         let frame_height = self.writer.ui_height();
         let buffer = {
-            let mut frame = Frame::new(self.width, frame_height, self.writer.pool_mut());
+            let buffer = self.writer.take_render_buffer(self.width, frame_height);
+            let mut frame = Frame::from_buffer(buffer, self.writer.pool_mut());
             let text_width = PLACEHOLDER_TEXT.chars().count().min(self.width as usize) as u16;
             let x_start = self.width.saturating_sub(text_width) / 2;
             let y = frame_height / 2;

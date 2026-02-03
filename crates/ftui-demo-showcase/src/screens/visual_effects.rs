@@ -773,8 +773,9 @@ impl Shape3DType {
 
 impl Default for Shape3DState {
     fn default() -> Self {
-        let mut stars = Vec::with_capacity(200);
-        for _ in 0..200 {
+        // 300+ stars for denser starfield (bd-3vbf.27 polish)
+        let mut stars = Vec::with_capacity(350);
+        for _ in 0..350 {
             stars.push(Star {
                 x: rand_simple() * 2.0 - 1.0,
                 y: rand_simple() * 2.0 - 1.0,
@@ -867,6 +868,42 @@ impl Shape3DState {
         }
     }
 
+    /// Draw a line with depth-based thickness (bd-3vbf.27 polish).
+    /// Closer edges (lower z) are thicker (up to 3 pixels wide).
+    #[allow(clippy::too_many_arguments)]
+    fn draw_thick_line(
+        &self,
+        painter: &mut Painter,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        depth: f64,
+        color: PackedRgba,
+    ) {
+        // Closer edges (lower depth) get thicker lines
+        // z ranges roughly from -2 to 2, normalize to thickness 1-3
+        let thickness = if depth < -0.5 {
+            3 // Very close: 3-pixel wide
+        } else if depth < 0.5 {
+            2 // Medium: 2-pixel wide
+        } else {
+            1 // Far: 1-pixel wide
+        };
+
+        painter.line_colored(x0, y0, x1, y1, Some(color));
+
+        if thickness >= 2 {
+            // Draw parallel lines for thickness
+            painter.line_colored(x0 + 1, y0, x1 + 1, y1, Some(color));
+            painter.line_colored(x0, y0 + 1, x1, y1 + 1, Some(color));
+        }
+        if thickness >= 3 {
+            painter.line_colored(x0 - 1, y0, x1 - 1, y1, Some(color));
+            painter.line_colored(x0, y0 - 1, x1, y1 - 1, Some(color));
+        }
+    }
+
     fn render_cube(&self, painter: &mut Painter, w: f64, h: f64, time: f64) {
         let vertices = [
             (-1.0, -1.0, -1.0),
@@ -907,7 +944,7 @@ impl Shape3DState {
             let hue = (i as f64 / edges.len() as f64 + time * 0.1) % 1.0;
             let (r, g, b) = hsv_to_rgb(hue * 360.0, 0.8, brightness);
 
-            painter.line_colored(x0, y0, x1, y1, Some(PackedRgba::rgb(r, g, b)));
+            self.draw_thick_line(painter, x0, y0, x1, y1, avg_z, PackedRgba::rgb(r, g, b));
         }
     }
 
@@ -954,7 +991,8 @@ impl Shape3DState {
                 (color.b() as f64 * brightness) as u8,
             );
 
-            painter.line_colored(x0, y0, x1, y1, Some(PackedRgba::rgb(r, g, b_val)));
+            // Depth-based line thickness (bd-3vbf.27 polish)
+            self.draw_thick_line(painter, x0, y0, x1, y1, avg_z, PackedRgba::rgb(r, g, b_val));
         }
     }
 
@@ -1025,7 +1063,8 @@ impl Shape3DState {
                 (color.b() as f64 * brightness) as u8,
             );
 
-            painter.line_colored(x0, y0, x1, y1, Some(PackedRgba::rgb(r, g, b_val)));
+            // Depth-based line thickness (bd-3vbf.27 polish)
+            self.draw_thick_line(painter, x0, y0, x1, y1, avg_z, PackedRgba::rgb(r, g, b_val));
         }
     }
 
@@ -1133,8 +1172,8 @@ impl ParticleState {
         let mut new_particles = Vec::new();
 
         for p in &mut self.particles {
-            // Store trail position
-            if p.trail.len() < 8 {
+            // Store trail position - longer trails for more dramatic effect (bd-3vbf.27 polish)
+            if p.trail.len() < 14 {
                 p.trail.push((p.x, p.y));
             } else {
                 p.trail.remove(0);
@@ -1150,19 +1189,38 @@ impl ParticleState {
 
                 // Explode when rocket dies or reaches apex
                 if p.life <= 0.0 || p.vy > 0.0 {
-                    // Create explosion
-                    let num_particles = 60 + (rand_simple() * 40.0) as usize;
-                    for _ in 0..num_particles {
-                        let angle = rand_simple() * TAU;
-                        let speed = 0.01 + rand_simple() * 0.02;
-                        let hue_variation = p.hue + (rand_simple() - 0.5) * 0.1;
+                    // Create explosion with variety (bd-3vbf.27 polish)
+                    // More particles (80-140 range) with varied patterns
+                    let num_particles = 80 + (rand_simple() * 60.0) as usize;
+                    let pattern = (rand_simple() * 3.0) as u8; // 0=circular, 1=ring, 2=starburst
+
+                    for i in 0..num_particles {
+                        let angle = match pattern {
+                            0 => rand_simple() * TAU, // Circular: random angles
+                            1 => (i as f64 / num_particles as f64) * TAU + rand_simple() * 0.1, // Ring: evenly spaced
+                            _ => {
+                                // Starburst: concentrated in rays
+                                let ray = (rand_simple() * 8.0).floor();
+                                ray / 8.0 * TAU + (rand_simple() - 0.5) * 0.15
+                            }
+                        };
+
+                        // More varied speeds for dynamic look
+                        let base_speed = match pattern {
+                            1 => 0.015 + rand_simple() * 0.01,  // Ring: tighter speed range
+                            _ => 0.008 + rand_simple() * 0.025, // Others: wider speed range
+                        };
+
+                        let hue_variation = p.hue + (rand_simple() - 0.5) * 0.15; // Slightly more color variation
+                        let life_variation = 0.8 + rand_simple() * 0.4; // Varied lifetimes
+
                         new_particles.push(Particle {
                             x: p.x,
                             y: p.y,
-                            vx: angle.cos() * speed,
-                            vy: angle.sin() * speed,
-                            life: 1.0,
-                            max_life: 1.0,
+                            vx: angle.cos() * base_speed,
+                            vy: angle.sin() * base_speed,
+                            life: life_variation,
+                            max_life: life_variation,
                             hue: hue_variation.rem_euclid(1.0),
                             is_rocket: false,
                             trail: Vec::new(),
@@ -3330,5 +3388,134 @@ mod tests {
         screen.view(&mut frame, smaller);
         let len_after = screen.painter.borrow().buffer_len();
         assert_eq!(len_after, len_large);
+    }
+
+    // =========================================================================
+    // bd-3vbf.27 Unit Tests for Visual Effects Polish
+    // =========================================================================
+
+    /// Verify metaballs renders without panicking and produces visible output.
+    #[test]
+    fn metaballs_render() {
+        let screen = VisualEffectsScreen {
+            effect: EffectType::Metaballs,
+            ..Default::default()
+        };
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(80, 24, &mut pool);
+        let area = Rect::new(0, 0, 80, 24);
+
+        // Should not panic
+        screen.view(&mut frame, area);
+
+        // Should have rendered something (not all cells empty)
+        let has_content = (0..area.height).any(|y| {
+            (0..area.width).any(|x| {
+                frame
+                    .buffer
+                    .get(area.x + x, area.y + y)
+                    .map(|c| c.content.as_char() != Some(' '))
+                    .unwrap_or(false)
+            })
+        });
+        assert!(has_content, "Metaballs should render visible content");
+    }
+
+    /// Verify effect transitions work without panicking.
+    #[test]
+    fn effect_transitions_smoothly() {
+        let mut screen = VisualEffectsScreen::default();
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(60, 20, &mut pool);
+        let area = Rect::new(0, 0, 60, 20);
+
+        // Cycle through all effects
+        for _ in 0..EffectType::ALL.len() * 2 {
+            screen.view(&mut frame, area);
+            screen.effect = screen.effect.next();
+        }
+
+        // Cycle backwards
+        for _ in 0..EffectType::ALL.len() {
+            screen.view(&mut frame, area);
+            screen.effect = screen.effect.prev();
+        }
+        // Should complete without panicking
+    }
+
+    /// Verify all effects handle resize gracefully (including edge cases).
+    #[test]
+    fn effects_handle_resize() {
+        let mut screen = VisualEffectsScreen::default();
+        let mut pool = GraphemePool::new();
+
+        // Test each effect with various sizes
+        for effect in EffectType::ALL {
+            screen.effect = *effect;
+
+            // Normal size
+            let mut frame = Frame::new(80, 24, &mut pool);
+            screen.view(&mut frame, Rect::new(0, 0, 80, 24));
+
+            // Very small
+            let mut frame = Frame::new(10, 5, &mut pool);
+            screen.view(&mut frame, Rect::new(0, 0, 10, 5));
+
+            // Minimum size (1x1)
+            let mut frame = Frame::new(1, 1, &mut pool);
+            screen.view(&mut frame, Rect::new(0, 0, 1, 1));
+
+            // Large size
+            let mut frame = Frame::new(200, 60, &mut pool);
+            screen.view(&mut frame, Rect::new(0, 0, 200, 60));
+        }
+        // All effects should handle all sizes without panicking
+    }
+
+    /// Verify 3D shapes has the expected star count (300+ per bd-3vbf.27).
+    #[test]
+    fn shape3d_has_dense_starfield() {
+        let state = Shape3DState::default();
+        assert!(
+            state.stars.len() >= 300,
+            "3D shapes should have 300+ stars, got {}",
+            state.stars.len()
+        );
+    }
+
+    /// Verify particle trails are longer (12+ per bd-3vbf.27).
+    #[test]
+    fn particles_have_longer_trails() {
+        let mut state = ParticleState::default();
+        // Add a particle and update it many times to fill trail
+        state.particles.push(Particle {
+            x: 0.5,
+            y: 0.5,
+            vx: 0.01,
+            vy: -0.01,
+            life: 1.0,
+            max_life: 1.0,
+            hue: 0.5,
+            is_rocket: false,
+            trail: Vec::new(),
+        });
+
+        // Update many times to fill trail
+        for _ in 0..20 {
+            state.update();
+        }
+
+        // Check that some particle has a long trail
+        let max_trail = state
+            .particles
+            .iter()
+            .map(|p| p.trail.len())
+            .max()
+            .unwrap_or(0);
+        assert!(
+            max_trail >= 12,
+            "Particles should have trails of 12+ points, got {}",
+            max_trail
+        );
     }
 }

@@ -593,24 +593,39 @@ impl SpatialHitIndex {
         }
     }
 
-    /// Rebuild all buckets from entries.
+    /// Rebuild all buckets from entries, compacting storage.
     fn rebuild_buckets(&mut self) {
         // Clear all buckets
         for bucket in &mut self.buckets {
             bucket.clear();
         }
 
-        // Collect entries to re-add (to avoid borrow conflict)
-        let to_add: Vec<(u32, Rect)> = self
+        // Compact entries in-place to remove dead slots (HitId::default())
+        let mut valid_idx = 0;
+        for i in 0..self.entries.len() {
+            if self.entries[i].id != HitId::default() {
+                if i != valid_idx {
+                    self.entries[valid_idx] = self.entries[i];
+                }
+                valid_idx += 1;
+            }
+        }
+        self.entries.truncate(valid_idx);
+
+        // Rebuild lookup map from compacted entries
+        self.id_to_entry.clear();
+        for (idx, entry) in self.entries.iter().enumerate() {
+            self.id_to_entry.insert(entry.id, idx as u32);
+        }
+
+        // Rebuild buckets (separate loop to avoid borrow conflict)
+        let entry_rects: Vec<(u32, Rect)> = self
             .entries
             .iter()
             .enumerate()
-            .filter(|(_, e)| e.id != HitId::default())
             .map(|(idx, e)| (idx as u32, e.rect))
             .collect();
-
-        // Re-add all valid entries
-        for (idx, rect) in to_add {
+        for (idx, rect) in entry_rects {
             self.add_to_buckets_internal(idx, rect);
         }
 

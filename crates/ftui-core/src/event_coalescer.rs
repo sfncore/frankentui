@@ -185,23 +185,21 @@ impl EventCoalescer {
     /// Flush all pending coalesced events.
     ///
     /// Returns a vector of events that were pending. The order is:
-    /// 1. Pending scroll event (single coalesced event)
+    /// 1. Pending scroll events (repeated `count` times)
     /// 2. Pending mouse move (latest position)
     ///
     /// After calling `flush()`, the coalescer is empty.
-    ///
-    /// # When to Call
-    ///
-    /// Call `flush()` before processing non-coalescable events to ensure
-    /// pending input is delivered in the correct order. Also call at the
-    /// end of each event batch to process any remaining pending events.
     #[must_use]
     pub fn flush(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
 
-        // Scroll first (older) - return single coalesced event
+        // Scroll first (older) - return repeated coalesced events
         if let Some(scroll) = self.pending_scroll.take() {
-            events.push(self.scroll_to_event(scroll));
+            let event = self.scroll_to_event(scroll);
+            let count = scroll.count.min(256) as usize;
+            for _ in 0..count {
+                events.push(event.clone());
+            }
         }
 
         // Then mouse move (newer)
@@ -221,7 +219,11 @@ impl EventCoalescer {
         F: FnMut(Event),
     {
         if let Some(scroll) = self.pending_scroll.take() {
-            f(self.scroll_to_event(scroll));
+            let event = self.scroll_to_event(scroll);
+            let count = scroll.count.min(256) as usize;
+            for _ in 0..count {
+                f(event.clone());
+            }
         }
         if let Some(mouse) = self.pending_mouse_move.take() {
             f(Event::Mouse(mouse));

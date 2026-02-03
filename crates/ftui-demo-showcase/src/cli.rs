@@ -35,20 +35,22 @@ SCREENS:
     8  File Browser       File system navigation and preview
     9  Advanced           Mouse, clipboard, hyperlinks, export
    10  Performance        Frame budget, caching, virtualization
-   11  Macro Recorder     Record/replay input macros and scenarios
-   12  Markdown           Rich text and markdown rendering
-   13  Visual Effects     Animated braille and canvas effects
-   14  Responsive         Breakpoint-driven responsive layout demo
-   15  Log Search         Live log search and filter demo
-   16  Notifications      Toast notification system demo
-   17  Action Timeline    Event timeline with filtering and severity
-   18  Sizing             Content-aware intrinsic sizing demo
-   19  Text Editor        Advanced multi-line text editor with search
-   20  Mouse Playground   Mouse hit-testing and interaction demo
-   21  Form Validation    Comprehensive form validation demo
-   22  Virtualized Search Fuzzy search in 100K+ items demo
-   23  Async Tasks        Async task manager and queue diagnostics
-   24  Theme Studio       Live palette editor and theme inspector
+   11  Terminal Caps      Terminal capability detection and probing
+   12  Macro Recorder     Record/replay input macros and scenarios
+   13  Markdown           Rich text and markdown rendering
+   14  Visual Effects     Animated braille and canvas effects
+   15  Responsive         Breakpoint-driven responsive layout demo
+   16  Log Search         Live log search and filter demo
+   17  Notifications      Toast notification system demo
+   18  Action Timeline    Event timeline with filtering and severity
+   19  Sizing             Content-aware intrinsic sizing demo
+   20  Text Editor        Advanced multi-line text editor with search
+   21  Mouse Playground   Mouse hit-testing and interaction demo
+   22  Form Validation    Comprehensive form validation demo
+   23  Virtualized Search Fuzzy search in 100K+ items demo
+   24  Async Tasks        Async task manager and queue diagnostics
+   25  Theme Studio       Live palette editor and theme inspector
+   26  Snapshot Player    Time-travel playback of recorded UI snapshots
 
 KEYBINDINGS:
     1-9, 0          Switch to screens 1-10 by number
@@ -226,8 +228,8 @@ mod tests {
     }
 
     #[test]
-    fn help_text_contains_visual_effects_as_screen_13() {
-        assert!(HELP_TEXT.contains("13  Visual Effects"));
+    fn help_text_contains_visual_effects_as_screen_14() {
+        assert!(HELP_TEXT.contains("14  Visual Effects"));
     }
 
     #[test]

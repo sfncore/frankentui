@@ -1,5 +1,4 @@
 use crate::block::Block;
-#[allow(unused_imports)]
 use crate::undo_support::{TableUndoExt, UndoSupport, UndoWidgetId};
 use crate::{MeasurableWidget, SizeConstraints, StatefulWidget, Widget, set_style_area};
 use ftui_core::geometry::{Rect, Size};
@@ -7,7 +6,6 @@ use ftui_layout::{Constraint, Flex};
 use ftui_render::frame::{Frame, HitId, HitRegion};
 use ftui_style::Style;
 use ftui_text::Text;
-#[allow(unused_imports)]
 use std::any::Any;
 
 /// A row in a table.
@@ -363,6 +361,10 @@ impl<'a> StatefulWidget for Table<'a> {
             return;
         }
 
+        // Push scissor to prevent rows from spilling out of the table area.
+        // This is critical for rows with height > 1 that are partially visible at the bottom.
+        frame.buffer.push_scissor(table_area);
+
         let deg = frame.degradation;
 
         // Apply base style to the entire table area (clears gaps/empty space)
@@ -377,6 +379,7 @@ impl<'a> StatefulWidget for Table<'a> {
             .unwrap_or(0);
 
         if header_height > table_area.height {
+            frame.buffer.pop_scissor();
             return;
         }
 
@@ -488,6 +491,7 @@ impl<'a> StatefulWidget for Table<'a> {
         // Render header
         if let Some(header) = &self.header {
             if header.height > max_y.saturating_sub(y) {
+                frame.buffer.pop_scissor();
                 return;
             }
             let row_area = Rect::new(table_area.x, y, table_area.width, header.height);
@@ -505,6 +509,7 @@ impl<'a> StatefulWidget for Table<'a> {
 
         // Render rows
         if self.rows.is_empty() {
+            frame.buffer.pop_scissor();
             return;
         }
 
@@ -541,6 +546,8 @@ impl<'a> StatefulWidget for Table<'a> {
                 .saturating_add(row.height)
                 .saturating_add(row.bottom_margin);
         }
+
+        frame.buffer.pop_scissor();
     }
 }
 

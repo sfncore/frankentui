@@ -9,7 +9,7 @@
 //! # Usage
 //!
 //! ```bash
-//! FTUI_DEBUG_TRACE=1 cargo run --example demo
+//! FTUI_DEBUG_TRACE=1 cargo run -p ftui-demo-showcase
 //! ```
 //!
 //! This module provides `debug_trace!` macro for conditional debug output:

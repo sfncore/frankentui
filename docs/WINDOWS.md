@@ -6,14 +6,35 @@ known limitations. Behavior varies by terminal emulator and by backend.
 Status note: This project is still early. The items below are the **targeted**
 v1 behavior, not a guarantee for every Windows terminal.
 
-## CI Validation (2026-02-03)
+## CI Validation Status
 
-- CI check job runs on `ubuntu-latest`, `macos-latest`, and `windows-latest`
-  (see `.github/workflows/ci.yml`).
-- Platform-specific capability detection tests run under `cfg(target_os)` on
-  Windows/macOS.
-- Manual spot checks are still required for terminal-specific quirks
-  (Terminal.app, iTerm2, Windows Terminal).
+**Last validated:** 2026-02-03 (bd-31go)
+
+### Cross-Platform CI Matrix
+
+| Platform | Runner | Rust Toolchain | Status |
+|----------|--------|----------------|--------|
+| Linux | `ubuntu-latest` | stable, nightly | Validated |
+| macOS | `macos-latest` | stable, nightly | Validated |
+| Windows | `windows-latest` | stable | Validated |
+
+See `.github/workflows/ci.yml` for the full configuration.
+
+### Automated Testing
+
+- **Format/Clippy/Build**: All platforms
+- **Unit tests**: All crates (`ftui-core`, `ftui-render`, `ftui-widgets`, etc.)
+- **Platform-specific capability detection**: `#[cfg(target_os)]` tests
+  - Windows Terminal detection via `WT_SESSION`
+  - macOS iTerm2 detection via `TERM_PROGRAM`
+  - Linux terminal detection via standard env vars
+- **Snapshot tests**: Platform-independent golden snapshots
+- **E2E tests**: PTY-based tests on Linux/macOS (see `scripts/cross_platform_e2e.sh`)
+
+### Manual Validation Required
+
+- Terminal-specific quirks (Terminal.app, iTerm2, Windows Terminal)
+- Edge cases in legacy consoles (cmd.exe, ConHost)
 
 ## Supported Features (v1 target)
 
@@ -72,3 +93,13 @@ v1 behavior, not a guarantee for every Windows terminal.
 - ADR-004 (Windows v1 scope) — pending
 - Terminal compatibility matrix (bd-1un) — pending
 - Capability detection: `crates/ftui-core/src/terminal_capabilities.rs`
+
+## Validation Checklist (bd-31go)
+
+- [x] Linux tests passing (CI: ubuntu-latest)
+- [x] macOS tests passing (CI: macos-latest)
+- [x] Windows tests passing (CI: windows-latest)
+- [x] CI matrix configured (multi-OS, multi-Rust)
+- [x] Platform-specific capability detection tested
+- [x] Snapshot tests run across platforms
+- [x] docs/WINDOWS.md updated with validated status

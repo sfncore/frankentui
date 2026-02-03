@@ -188,20 +188,7 @@ impl TextInput {
             }
             Event::Paste(paste) => {
                 self.delete_selection();
-                for c in paste.text.chars() {
-                    // Stop if we hit max length
-                    if let Some(max) = self.max_length
-                        && self.grapheme_count() >= max
-                    {
-                        break;
-                    }
-
-                    if c == '\n' || c == '\r' || c == '\t' {
-                        self.insert_char(' ');
-                    } else if !c.is_control() {
-                        self.insert_char(c);
-                    }
-                }
+                self.insert_text(&paste.text);
                 true
             }
             _ => false,
@@ -288,28 +275,89 @@ impl TextInput {
 
     // --- Editing operations ---
 
+    /// Insert text at the current cursor position.
+    ///
+    /// This method:
+    /// - Replaces newlines and tabs with spaces.
+    /// - Filters out other control characters.
+    /// - Respects `max_length` (truncating if necessary).
+    /// - Efficiently inserts the result in one operation.
+    pub fn insert_text(&mut self, text: &str) {
+        // Map line breaks/tabs to spaces, filter other control chars
+        let clean_text: String = text
+            .chars()
+            .map(|c| {
+                if c == '\n' || c == '\r' || c == '\t' {
+                    ' '
+                } else {
+                    c
+                }
+            })
+            .filter(|c| !c.is_control())
+            .collect();
+
+        if clean_text.is_empty() {
+            return;
+        }
+
+        let current_count = self.grapheme_count();
+        let avail = if let Some(max) = self.max_length {
+            if current_count >= max {
+                return;
+            }
+            max - current_count
+        } else {
+            usize::MAX
+        };
+
+        // Calculate grapheme count of new text to see if we need to truncate
+        let new_graphemes = clean_text.graphemes(true).count();
+        let (to_insert, insert_count) = if new_graphemes > avail {
+            // Find byte index to truncate at
+            let end_byte = clean_text
+                .grapheme_indices(true)
+                .map(|(i, _)| i)
+                .nth(avail)
+                .unwrap_or(clean_text.len());
+            (&clean_text[..end_byte], avail)
+        } else {
+            (clean_text.as_str(), new_graphemes)
+        };
+
+        if to_insert.is_empty() {
+            return;
+        }
+
+        let byte_offset = self.grapheme_byte_offset(self.cursor);
+        self.value.insert_str(byte_offset, to_insert);
+        self.cursor += insert_count;
+    }
+
     fn insert_char(&mut self, c: char) {
         // Strict control character filtering to prevent terminal corruption
         if c.is_control() {
             return;
         }
 
-        // Optimization: calculate count once
         let old_count = self.grapheme_count();
-
-        if let Some(max) = self.max_length
-            && old_count >= max
-        {
-            return;
-        }
-
         let byte_offset = self.grapheme_byte_offset(self.cursor);
         self.value.insert(byte_offset, c);
+
+        let new_count = self.grapheme_count();
+
+        // Check constraints
+        if let Some(max) = self.max_length
+            && new_count > max
+        {
+            // Revert change
+            let char_len = c.len_utf8();
+            self.value.drain(byte_offset..byte_offset + char_len);
+            return;
+        }
 
         // Only advance cursor if we added a new grapheme.
         // If we inserted a combining char that merged with the previous one,
         // the count stays the same, and the cursor should stay after that merged grapheme (same index).
-        let new_count = self.grapheme_count();
         if new_count > old_count {
             self.cursor += 1;
         }
@@ -454,22 +502,17 @@ impl TextInput {
             return;
         }
 
-        let byte_pos = self.grapheme_byte_offset(self.cursor);
-        let slice = &self.value[..byte_pos];
-        let mut graphemes = slice.graphemes(true).rev();
+        let graphemes: Vec<&str> = self.value.graphemes(true).collect();
+        let mut pos = self.cursor;
 
-        if let Some(first_g) = graphemes.next() {
-            let target_class = Self::get_grapheme_class(first_g);
-            let mut skipped = 1;
-
-            for g in graphemes {
-                if Self::get_grapheme_class(g) != target_class {
-                    break;
-                }
-                skipped += 1;
-            }
-            self.cursor -= skipped;
+        while pos > 0 && Self::get_grapheme_class(graphemes[pos - 1]) != 1 {
+            pos -= 1;
         }
+        while pos > 0 && Self::get_grapheme_class(graphemes[pos - 1]) == 1 {
+            pos -= 1;
+        }
+
+        self.cursor = pos;
     }
 
     fn move_cursor_word_right(&mut self, select: bool) {
@@ -479,26 +522,23 @@ impl TextInput {
             self.selection_anchor = None;
         }
 
-        let byte_pos = self.grapheme_byte_offset(self.cursor);
-        if byte_pos >= self.value.len() {
+        let graphemes: Vec<&str> = self.value.graphemes(true).collect();
+        let max = graphemes.len();
+
+        if self.cursor >= max {
             return;
         }
 
-        let slice = &self.value[byte_pos..];
-        let mut graphemes = slice.graphemes(true);
+        let mut pos = self.cursor;
 
-        if let Some(first_g) = graphemes.next() {
-            let target_class = Self::get_grapheme_class(first_g);
-            let mut skipped = 1;
-
-            for g in graphemes {
-                if Self::get_grapheme_class(g) != target_class {
-                    break;
-                }
-                skipped += 1;
-            }
-            self.cursor += skipped;
+        while pos < max && Self::get_grapheme_class(graphemes[pos]) == 1 {
+            pos += 1;
         }
+        while pos < max && Self::get_grapheme_class(graphemes[pos]) != 1 {
+            pos += 1;
+        }
+
+        self.cursor = pos;
     }
 
     // --- Internal helpers ---
@@ -987,13 +1027,7 @@ mod tests {
         assert_eq!(input.cursor(), 12); // "hello world |test"
 
         input.move_cursor_word_left(false);
-        assert_eq!(input.cursor(), 11); // "hello world| test" (stopped after space)
-
-        input.move_cursor_word_left(false);
         assert_eq!(input.cursor(), 6); // "hello |world test"
-
-        input.move_cursor_word_left(false);
-        assert_eq!(input.cursor(), 5); // "hello| world test"
 
         input.move_cursor_word_left(false);
         assert_eq!(input.cursor(), 0); // "|hello world test"
@@ -1006,19 +1040,26 @@ mod tests {
         // "|hello world test"
 
         input.move_cursor_word_right(false);
-        assert_eq!(input.cursor(), 5); // "hello| world test"
-
-        input.move_cursor_word_right(false);
         assert_eq!(input.cursor(), 6); // "hello |world test"
-
-        input.move_cursor_word_right(false);
-        assert_eq!(input.cursor(), 11); // "hello world| test"
 
         input.move_cursor_word_right(false);
         assert_eq!(input.cursor(), 12); // "hello world |test"
 
         input.move_cursor_word_right(false);
         assert_eq!(input.cursor(), 16); // "hello world test|"
+    }
+
+    #[test]
+    fn test_word_movement_skips_punctuation() {
+        let mut input = TextInput::new().with_value("hello, world");
+        input.cursor = 0;
+        // "|hello, world"
+
+        input.move_cursor_word_right(false);
+        assert_eq!(input.cursor(), 7); // "hello, |world"
+
+        input.move_cursor_word_left(false);
+        assert_eq!(input.cursor(), 0); // "|hello, world"
     }
 
     #[test]
@@ -1357,5 +1398,39 @@ mod tests {
         let cmd = cmd.unwrap();
         assert_eq!(cmd.widget_id(), input.undo_id());
         assert_eq!(cmd.description(), "Insert text");
+    }
+
+    #[test]
+    fn test_paste_bulk_insert() {
+        let mut input = TextInput::new().with_value("hello");
+        input.cursor = 5;
+        let event = Event::Paste(ftui_core::event::PasteEvent::bracketed(" world"));
+        assert!(input.handle_event(&event));
+        assert_eq!(input.value(), "hello world");
+        assert_eq!(input.cursor(), 11);
+    }
+
+    #[test]
+    fn test_paste_max_length() {
+        let mut input = TextInput::new().with_value("abc").with_max_length(5);
+        input.cursor = 3;
+        // Paste "def" (3 chars). Should be truncated to "de" (2 chars) to fit max 5.
+        let event = Event::Paste(ftui_core::event::PasteEvent::bracketed("def"));
+        assert!(input.handle_event(&event));
+        assert_eq!(input.value(), "abcde");
+        assert_eq!(input.cursor(), 5);
+    }
+
+    #[test]
+    fn test_paste_combining_merge() {
+        let mut input = TextInput::new().with_value("e");
+        input.cursor = 1;
+        // Paste combining acute accent (U+0301). Should merge with 'e' -> 'é'.
+        // Grapheme count stays 1. Cursor stays 1 (after the merged grapheme).
+        let event = Event::Paste(ftui_core::event::PasteEvent::bracketed("\u{0301}"));
+        assert!(input.handle_event(&event));
+        assert_eq!(input.value(), "e\u{0301}");
+        assert_eq!(input.grapheme_count(), 1);
+        assert_eq!(input.cursor(), 1);
     }
 }

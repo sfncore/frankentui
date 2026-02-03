@@ -220,46 +220,6 @@ impl<'a> Block<'a> {
         }
     }
 
-    /// Render title without styling.
-    #[allow(dead_code, unused_variables)]
-    fn render_title_plain(&self, area: Rect, _buf: &mut Buffer) {
-        if let Some(title) = self.title {
-            if !self.borders.contains(Borders::TOP) || area.width < 3 {
-                return;
-            }
-
-            let available_width = area.width.saturating_sub(2) as usize;
-            if available_width == 0 {
-                return;
-            }
-
-            let title_width = unicode_width::UnicodeWidthStr::width(title);
-            let display_width = title_width.min(available_width);
-
-            let _x = match self.title_alignment {
-                Alignment::Left => area.x.saturating_add(1),
-                Alignment::Center => area
-                    .x
-                    .saturating_add(1)
-                    .saturating_add(((available_width.saturating_sub(display_width)) / 2) as u16),
-                Alignment::Right => area
-                    .right()
-                    .saturating_sub(1)
-                    .saturating_sub(display_width as u16),
-            };
-
-            let _max_x = area.right().saturating_sub(1);
-            // This still uses buffer directly because it's plain text (no interning needed for simple titles)
-            // But we should really use draw_text_span with frame if possible.
-            // For now, let's assume plain title rendering is safe on Buffer for ASCII.
-            // But we changed draw_text_span signature to take Frame!
-            // We need a Frame here.
-            // But render_title_plain is called when we have a Buffer but maybe not a Frame?
-            // Widget::render gives us a Frame.
-            // So we can pass Frame to render_title_plain.
-        }
-    }
-
     fn render_title(&self, area: Rect, frame: &mut Frame) {
         if let Some(title) = self.title {
             if !self.borders.contains(Borders::TOP) || area.width < 3 {

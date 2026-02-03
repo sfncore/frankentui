@@ -16,11 +16,16 @@
 //! assert_eq!(help.entries().len(), 3);
 //! ```
 
-use crate::{Widget, draw_text_span};
+use crate::{StatefulWidget, Widget, draw_text_span};
 use ftui_core::geometry::Rect;
+use ftui_render::budget::DegradationLevel;
+use ftui_render::buffer::Buffer;
+use ftui_render::cell::{Cell, PackedRgba};
 use ftui_render::frame::Frame;
 use ftui_style::Style;
+use ftui_style::StyleFlags;
 use ftui_text::wrap::display_width;
+use std::hash::{Hash, Hasher};
 
 /// A single keybinding entry in the help view.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +58,7 @@ impl HelpEntry {
 }
 
 /// Display mode for the help widget.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum HelpMode {
     /// Short inline mode: entries separated by a bullet on one line.
     #[default]
@@ -83,6 +88,129 @@ pub struct Help {
     desc_style: Style,
     /// Style for separator/ellipsis.
     separator_style: Style,
+}
+
+/// Cached render state for [`Help`], enabling incremental layout reuse and
+/// dirty-rect updates for keybinding hint panels.
+///
+/// # Invariants
+/// - Layout is reused only when entry count and slot widths remain compatible.
+/// - Dirty rects always cover the full prior slot width for changed entries.
+/// - Layout rebuilds on any change that could cause reflow.
+///
+/// # Failure Modes
+/// - If a changed entry exceeds its cached slot width, we rebuild the layout.
+/// - If enabled entry count changes, we rebuild the layout.
+#[derive(Debug, Default)]
+pub struct HelpRenderState {
+    cache: Option<HelpCache>,
+    enabled_indices: Vec<usize>,
+    dirty_indices: Vec<usize>,
+    dirty_rects: Vec<Rect>,
+    stats: HelpCacheStats,
+}
+
+/// Cache hit/miss statistics for [`HelpRenderState`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HelpCacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub dirty_updates: u64,
+    pub layout_rebuilds: u64,
+}
+
+impl HelpRenderState {
+    /// Return cache statistics.
+    #[must_use]
+    pub fn stats(&self) -> HelpCacheStats {
+        self.stats
+    }
+
+    /// Clear recorded dirty rects.
+    pub fn clear_dirty_rects(&mut self) {
+        self.dirty_rects.clear();
+    }
+
+    /// Take dirty rects for logging/inspection.
+    #[must_use]
+    pub fn take_dirty_rects(&mut self) -> Vec<Rect> {
+        std::mem::take(&mut self.dirty_rects)
+    }
+
+    /// Read dirty rects without clearing.
+    #[must_use]
+    pub fn dirty_rects(&self) -> &[Rect] {
+        &self.dirty_rects
+    }
+
+    /// Reset cache stats (useful for perf logging).
+    pub fn reset_stats(&mut self) {
+        self.stats = HelpCacheStats::default();
+    }
+}
+
+#[derive(Debug)]
+struct HelpCache {
+    buffer: Buffer,
+    layout: HelpLayout,
+    key: LayoutKey,
+    entry_hashes: Vec<u64>,
+    enabled_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct HelpLayout {
+    mode: HelpMode,
+    width: u16,
+    entries: Vec<EntrySlot>,
+    ellipsis: Option<EllipsisSlot>,
+    max_key_width: usize,
+    separator_width: usize,
+}
+
+#[derive(Debug, Clone)]
+struct EntrySlot {
+    x: u16,
+    y: u16,
+    width: u16,
+    key_width: usize,
+}
+
+#[derive(Debug, Clone)]
+struct EllipsisSlot {
+    x: u16,
+    width: u16,
+    prefix_space: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct StyleKey {
+    fg: Option<PackedRgba>,
+    bg: Option<PackedRgba>,
+    attrs: Option<StyleFlags>,
+}
+
+impl From<Style> for StyleKey {
+    fn from(style: Style) -> Self {
+        Self {
+            fg: style.fg,
+            bg: style.bg,
+            attrs: style.attrs,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct LayoutKey {
+    mode: HelpMode,
+    width: u16,
+    height: u16,
+    separator_hash: u64,
+    ellipsis_hash: u64,
+    key_style: StyleKey,
+    desc_style: StyleKey,
+    separator_style: StyleKey,
+    degradation: DegradationLevel,
 }
 
 impl Default for Help {
@@ -318,6 +446,320 @@ impl Help {
             row += 1;
         }
     }
+
+    fn entry_hash(entry: &HelpEntry) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        entry.key.hash(&mut hasher);
+        entry.desc.hash(&mut hasher);
+        entry.enabled.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn hash_str(value: &str) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn layout_key(&self, area: Rect, degradation: DegradationLevel) -> LayoutKey {
+        LayoutKey {
+            mode: self.mode,
+            width: area.width,
+            height: area.height,
+            separator_hash: Self::hash_str(&self.separator),
+            ellipsis_hash: Self::hash_str(&self.ellipsis),
+            key_style: StyleKey::from(self.key_style),
+            desc_style: StyleKey::from(self.desc_style),
+            separator_style: StyleKey::from(self.separator_style),
+            degradation,
+        }
+    }
+
+    fn build_layout(&self, area: Rect) -> HelpLayout {
+        match self.mode {
+            HelpMode::Short => self.build_short_layout(area),
+            HelpMode::Full => self.build_full_layout(area),
+        }
+    }
+
+    fn build_short_layout(&self, area: Rect) -> HelpLayout {
+        let mut entries = Vec::new();
+        let mut ellipsis = None;
+        let sep_width = display_width(&self.separator);
+        let ellipsis_width = display_width(&self.ellipsis);
+        let max_x = area.width;
+        let mut x: u16 = 0;
+        let mut first = true;
+
+        for entry in self
+            .entries
+            .iter()
+            .filter(|e| e.enabled && (!e.key.is_empty() || !e.desc.is_empty()))
+        {
+            let key_width = display_width(&entry.key);
+            let desc_width = display_width(&entry.desc);
+            let item_width = key_width + 1 + desc_width;
+            let total_width = if first {
+                item_width
+            } else {
+                sep_width + item_width
+            };
+            let space_left = (max_x as usize).saturating_sub(x as usize);
+
+            if total_width > space_left {
+                let ell_total = if first {
+                    ellipsis_width
+                } else {
+                    1 + ellipsis_width
+                };
+                if ell_total <= space_left {
+                    ellipsis = Some(EllipsisSlot {
+                        x,
+                        width: ell_total as u16,
+                        prefix_space: !first,
+                    });
+                }
+                break;
+            }
+
+            entries.push(EntrySlot {
+                x,
+                y: 0,
+                width: total_width as u16,
+                key_width,
+            });
+            x = x.saturating_add(total_width as u16);
+            first = false;
+        }
+
+        HelpLayout {
+            mode: HelpMode::Short,
+            width: area.width,
+            entries,
+            ellipsis,
+            max_key_width: 0,
+            separator_width: sep_width,
+        }
+    }
+
+    fn build_full_layout(&self, area: Rect) -> HelpLayout {
+        let mut max_key_width = 0usize;
+        for entry in self
+            .entries
+            .iter()
+            .filter(|e| e.enabled && (!e.key.is_empty() || !e.desc.is_empty()))
+        {
+            let key_width = display_width(&entry.key);
+            max_key_width = max_key_width.max(key_width);
+        }
+
+        let mut entries = Vec::new();
+        let mut row: u16 = 0;
+        for entry in self
+            .entries
+            .iter()
+            .filter(|e| e.enabled && (!e.key.is_empty() || !e.desc.is_empty()))
+        {
+            if row >= area.height {
+                break;
+            }
+            let key_width = display_width(&entry.key);
+            let desc_width = display_width(&entry.desc);
+            let entry_width = max_key_width.saturating_add(2).saturating_add(desc_width);
+            let slot_width = entry_width.min(area.width as usize) as u16;
+            entries.push(EntrySlot {
+                x: 0,
+                y: row,
+                width: slot_width,
+                key_width,
+            });
+            row = row.saturating_add(1);
+        }
+
+        HelpLayout {
+            mode: HelpMode::Full,
+            width: area.width,
+            entries,
+            ellipsis: None,
+            max_key_width,
+            separator_width: 0,
+        }
+    }
+
+    fn render_cached(&self, area: Rect, frame: &mut Frame, layout: &HelpLayout) {
+        match layout.mode {
+            HelpMode::Short => self.render_short_cached(area, frame, layout),
+            HelpMode::Full => self.render_full_cached(area, frame, layout),
+        }
+    }
+
+    fn render_short_cached(&self, area: Rect, frame: &mut Frame, layout: &HelpLayout) {
+        if layout.entries.is_empty() || area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let deg = frame.buffer.degradation;
+        let max_x = area.right();
+        let mut enabled_iter = self
+            .entries
+            .iter()
+            .filter(|e| e.enabled && (!e.key.is_empty() || !e.desc.is_empty()));
+
+        for (idx, slot) in layout.entries.iter().enumerate() {
+            let Some(entry) = enabled_iter.next() else {
+                break;
+            };
+            let mut x = area.x.saturating_add(slot.x);
+            let y = area.y.saturating_add(slot.y);
+
+            if idx > 0 {
+                let sep_style = if deg.apply_styling() {
+                    self.separator_style
+                } else {
+                    Style::default()
+                };
+                x = draw_text_span(frame, x, y, &self.separator, sep_style, max_x);
+            }
+
+            let key_style = if deg.apply_styling() {
+                self.key_style
+            } else {
+                Style::default()
+            };
+            let desc_style = if deg.apply_styling() {
+                self.desc_style
+            } else {
+                Style::default()
+            };
+
+            x = draw_text_span(frame, x, y, &entry.key, key_style, max_x);
+            x = draw_text_span(frame, x, y, " ", desc_style, max_x);
+            draw_text_span(frame, x, y, &entry.desc, desc_style, max_x);
+        }
+
+        if let Some(ellipsis) = &layout.ellipsis {
+            let y = area.y.saturating_add(0);
+            let mut x = area.x.saturating_add(ellipsis.x);
+            let ellipsis_style = if deg.apply_styling() {
+                self.separator_style
+            } else {
+                Style::default()
+            };
+            if ellipsis.prefix_space {
+                x = draw_text_span(frame, x, y, " ", ellipsis_style, max_x);
+            }
+            draw_text_span(frame, x, y, &self.ellipsis, ellipsis_style, max_x);
+        }
+    }
+
+    fn render_full_cached(&self, area: Rect, frame: &mut Frame, layout: &HelpLayout) {
+        if layout.entries.is_empty() || area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let deg = frame.buffer.degradation;
+        let max_x = area.right();
+
+        let mut enabled_iter = self
+            .entries
+            .iter()
+            .filter(|e| e.enabled && (!e.key.is_empty() || !e.desc.is_empty()));
+
+        for slot in layout.entries.iter() {
+            let Some(entry) = enabled_iter.next() else {
+                break;
+            };
+
+            let y = area.y.saturating_add(slot.y);
+            let mut x = area.x.saturating_add(slot.x);
+
+            let key_style = if deg.apply_styling() {
+                self.key_style
+            } else {
+                Style::default()
+            };
+            let desc_style = if deg.apply_styling() {
+                self.desc_style
+            } else {
+                Style::default()
+            };
+
+            x = draw_text_span(frame, x, y, &entry.key, key_style, max_x);
+            let pad = layout.max_key_width.saturating_sub(slot.key_width);
+            for _ in 0..pad {
+                x = draw_text_span(frame, x, y, " ", Style::default(), max_x);
+            }
+            x = draw_text_span(frame, x, y, "  ", Style::default(), max_x);
+            draw_text_span(frame, x, y, &entry.desc, desc_style, max_x);
+        }
+    }
+
+    fn render_short_entry(&self, slot: &EntrySlot, entry: &HelpEntry, frame: &mut Frame) {
+        let deg = frame.buffer.degradation;
+        let max_x = slot.x.saturating_add(slot.width);
+
+        let rect = Rect::new(slot.x, slot.y, slot.width, 1);
+        frame.buffer.fill(rect, Cell::default());
+
+        let mut x = slot.x;
+        if slot.x > 0 {
+            let sep_style = if deg.apply_styling() {
+                self.separator_style
+            } else {
+                Style::default()
+            };
+            x = draw_text_span(frame, x, slot.y, &self.separator, sep_style, max_x);
+        }
+
+        let key_style = if deg.apply_styling() {
+            self.key_style
+        } else {
+            Style::default()
+        };
+        let desc_style = if deg.apply_styling() {
+            self.desc_style
+        } else {
+            Style::default()
+        };
+
+        x = draw_text_span(frame, x, slot.y, &entry.key, key_style, max_x);
+        x = draw_text_span(frame, x, slot.y, " ", desc_style, max_x);
+        draw_text_span(frame, x, slot.y, &entry.desc, desc_style, max_x);
+    }
+
+    fn render_full_entry(
+        &self,
+        slot: &EntrySlot,
+        entry: &HelpEntry,
+        layout: &HelpLayout,
+        frame: &mut Frame,
+    ) {
+        let deg = frame.buffer.degradation;
+        let max_x = slot.x.saturating_add(slot.width);
+
+        let rect = Rect::new(slot.x, slot.y, slot.width, 1);
+        frame.buffer.fill(rect, Cell::default());
+
+        let mut x = slot.x;
+        let key_style = if deg.apply_styling() {
+            self.key_style
+        } else {
+            Style::default()
+        };
+        let desc_style = if deg.apply_styling() {
+            self.desc_style
+        } else {
+            Style::default()
+        };
+
+        x = draw_text_span(frame, x, slot.y, &entry.key, key_style, max_x);
+        let pad = layout.max_key_width.saturating_sub(slot.key_width);
+        for _ in 0..pad {
+            x = draw_text_span(frame, x, slot.y, " ", Style::default(), max_x);
+        }
+        x = draw_text_span(frame, x, slot.y, "  ", Style::default(), max_x);
+        draw_text_span(frame, x, slot.y, &entry.desc, desc_style, max_x);
+    }
 }
 
 impl Widget for Help {
@@ -333,11 +775,239 @@ impl Widget for Help {
     }
 }
 
+impl StatefulWidget for Help {
+    type State = HelpRenderState;
+
+    fn render(&self, area: Rect, frame: &mut Frame, state: &mut HelpRenderState) {
+        if area.is_empty() || area.width == 0 || area.height == 0 {
+            state.cache = None;
+            return;
+        }
+
+        state.dirty_rects.clear();
+        state.dirty_indices.clear();
+
+        let layout_key = self.layout_key(area, frame.buffer.degradation);
+        let enabled_count = collect_enabled_indices(&self.entries, &mut state.enabled_indices);
+
+        let cache_miss = state
+            .cache
+            .as_ref()
+            .is_none_or(|cache| cache.key != layout_key);
+
+        if cache_miss {
+            rebuild_cache(self, area, frame, state, layout_key, enabled_count);
+            blit_cache(state.cache.as_ref(), area, frame);
+            return;
+        }
+
+        let cache = state
+            .cache
+            .as_mut()
+            .expect("cache present after miss check");
+        if enabled_count != cache.enabled_count {
+            rebuild_cache(self, area, frame, state, layout_key, enabled_count);
+            blit_cache(state.cache.as_ref(), area, frame);
+            return;
+        }
+
+        let mut layout_changed = false;
+        let visible_count = cache.layout.entries.len();
+
+        for (pos, entry_idx) in state.enabled_indices.iter().enumerate() {
+            let entry = &self.entries[*entry_idx];
+            let hash = Help::entry_hash(entry);
+
+            if pos >= cache.entry_hashes.len() {
+                layout_changed = true;
+                break;
+            }
+
+            if hash != cache.entry_hashes[pos] {
+                if pos >= visible_count || !entry_fits_slot(entry, pos, &cache.layout) {
+                    layout_changed = true;
+                    break;
+                }
+                cache.entry_hashes[pos] = hash;
+                state.dirty_indices.push(pos);
+            }
+        }
+
+        if layout_changed {
+            rebuild_cache(self, area, frame, state, layout_key, enabled_count);
+            blit_cache(state.cache.as_ref(), area, frame);
+            return;
+        }
+
+        if state.dirty_indices.is_empty() {
+            state.stats.hits += 1;
+            blit_cache(state.cache.as_ref(), area, frame);
+            return;
+        }
+
+        // Partial update: only changed entries are redrawn into the cached buffer.
+        state.stats.dirty_updates += 1;
+
+        let cache = state
+            .cache
+            .as_mut()
+            .expect("cache present for dirty update");
+        let mut cache_buffer = std::mem::take(&mut cache.buffer);
+        cache_buffer.degradation = frame.buffer.degradation;
+        {
+            let mut cache_frame = Frame {
+                buffer: cache_buffer,
+                pool: frame.pool,
+                links: None,
+                hit_grid: None,
+                cursor_position: None,
+                cursor_visible: true,
+                degradation: frame.buffer.degradation,
+            };
+
+            for idx in &state.dirty_indices {
+                if let Some(entry_idx) = state.enabled_indices.get(*idx)
+                    && let Some(slot) = cache.layout.entries.get(*idx)
+                {
+                    let entry = &self.entries[*entry_idx];
+                    match cache.layout.mode {
+                        HelpMode::Short => self.render_short_entry(slot, entry, &mut cache_frame),
+                        HelpMode::Full => {
+                            self.render_full_entry(slot, entry, &cache.layout, &mut cache_frame)
+                        }
+                    }
+                    state
+                        .dirty_rects
+                        .push(Rect::new(slot.x, slot.y, slot.width, 1));
+                }
+            }
+
+            cache_buffer = cache_frame.buffer;
+        }
+        cache.buffer = cache_buffer;
+
+        blit_cache(state.cache.as_ref(), area, frame);
+    }
+}
+
+fn collect_enabled_indices(entries: &[HelpEntry], out: &mut Vec<usize>) -> usize {
+    out.clear();
+    for (idx, entry) in entries.iter().enumerate() {
+        if entry.enabled && (!entry.key.is_empty() || !entry.desc.is_empty()) {
+            out.push(idx);
+        }
+    }
+    out.len()
+}
+
+fn entry_fits_slot(entry: &HelpEntry, index: usize, layout: &HelpLayout) -> bool {
+    match layout.mode {
+        HelpMode::Short => {
+            let entry_width = display_width(&entry.key) + 1 + display_width(&entry.desc);
+            let slot = match layout.entries.get(index) {
+                Some(slot) => slot,
+                None => return false,
+            };
+            let sep_width = layout.separator_width;
+            let max_width = if slot.x == 0 {
+                slot.width as usize
+            } else {
+                slot.width.saturating_sub(sep_width as u16) as usize
+            };
+            entry_width <= max_width
+        }
+        HelpMode::Full => {
+            let key_width = display_width(&entry.key);
+            let desc_width = display_width(&entry.desc);
+            let entry_width = layout
+                .max_key_width
+                .saturating_add(2)
+                .saturating_add(desc_width);
+            let slot = match layout.entries.get(index) {
+                Some(slot) => slot,
+                None => return false,
+            };
+            if slot.width == layout.width {
+                key_width <= layout.max_key_width
+            } else {
+                key_width <= layout.max_key_width && entry_width <= slot.width as usize
+            }
+        }
+    }
+}
+
+fn rebuild_cache(
+    help: &Help,
+    area: Rect,
+    frame: &mut Frame,
+    state: &mut HelpRenderState,
+    layout_key: LayoutKey,
+    enabled_count: usize,
+) {
+    state.stats.misses += 1;
+    state.stats.layout_rebuilds += 1;
+
+    let layout_area = Rect::new(0, 0, area.width, area.height);
+    let layout = help.build_layout(layout_area);
+
+    let mut buffer = Buffer::new(area.width, area.height);
+    buffer.degradation = frame.buffer.degradation;
+    {
+        let mut cache_frame = Frame {
+            buffer,
+            pool: frame.pool,
+            links: None,
+            hit_grid: None,
+            cursor_position: None,
+            cursor_visible: true,
+            degradation: frame.buffer.degradation,
+        };
+        help.render_cached(layout_area, &mut cache_frame, &layout);
+        buffer = cache_frame.buffer;
+    }
+
+    let mut entry_hashes = Vec::with_capacity(state.enabled_indices.len());
+    for idx in &state.enabled_indices {
+        entry_hashes.push(Help::entry_hash(&help.entries[*idx]));
+    }
+
+    state.cache = Some(HelpCache {
+        buffer,
+        layout,
+        key: layout_key,
+        entry_hashes,
+        enabled_count,
+    });
+}
+
+fn blit_cache(cache: Option<&HelpCache>, area: Rect, frame: &mut Frame) {
+    let Some(cache) = cache else {
+        return;
+    };
+
+    for slot in &cache.layout.entries {
+        let src = Rect::new(slot.x, slot.y, slot.width, 1);
+        frame
+            .buffer
+            .copy_from(&cache.buffer, src, area.x + slot.x, area.y + slot.y);
+    }
+
+    if let Some(ellipsis) = &cache.layout.ellipsis {
+        let src = Rect::new(ellipsis.x, 0, ellipsis.width, 1);
+        frame
+            .buffer
+            .copy_from(&cache.buffer, src, area.x + ellipsis.x, area.y);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ftui_render::frame::Frame;
     use ftui_render::grapheme_pool::GraphemePool;
+    use proptest::prelude::*;
+    use proptest::string::string_regex;
+    use std::time::Instant;
 
     #[test]
     fn new_help_is_empty() {
@@ -396,7 +1066,7 @@ mod tests {
         let mut pool = GraphemePool::new();
         let mut frame = Frame::new(40, 1, &mut pool);
         let area = Rect::new(0, 0, 40, 1);
-        help.render(area, &mut frame);
+        Widget::render(&help, area, &mut frame);
 
         // Check that key text appears in buffer
         let cell_q = frame.buffer.get(0, 0).unwrap();
@@ -413,7 +1083,7 @@ mod tests {
         let mut pool = GraphemePool::new();
         let mut frame = Frame::new(20, 1, &mut pool);
         let area = Rect::new(0, 0, 20, 1);
-        help.render(area, &mut frame);
+        Widget::render(&help, area, &mut frame);
 
         // First entry should be present
         let cell = frame.buffer.get(0, 0).unwrap();
@@ -427,7 +1097,7 @@ mod tests {
         let mut pool = GraphemePool::new();
         let mut frame = Frame::new(20, 1, &mut pool);
         let area = Rect::new(0, 0, 20, 1);
-        help.render(area, &mut frame);
+        Widget::render(&help, area, &mut frame);
 
         // Buffer should remain default (empty cell)
         let cell = frame.buffer.get(0, 0).unwrap();
@@ -444,7 +1114,7 @@ mod tests {
         let mut pool = GraphemePool::new();
         let mut frame = Frame::new(30, 5, &mut pool);
         let area = Rect::new(0, 0, 30, 5);
-        help.render(area, &mut frame);
+        Widget::render(&help, area, &mut frame);
 
         // First row should have "q" key
         let cell = frame.buffer.get(0, 0).unwrap();
@@ -468,7 +1138,7 @@ mod tests {
         // Only 2 rows available
         let mut frame = Frame::new(30, 2, &mut pool);
         let area = Rect::new(0, 0, 30, 2);
-        help.render(area, &mut frame);
+        Widget::render(&help, area, &mut frame);
 
         // Only first two entries should render (height=2)
         // No crash, no panic
@@ -508,7 +1178,7 @@ mod tests {
         let mut pool = GraphemePool::new();
         let mut frame = Frame::new(20, 1, &mut pool);
         let area = Rect::new(0, 0, 0, 0);
-        help.render(area, &mut frame); // Should not panic
+        Widget::render(&help, area, &mut frame); // Should not panic
     }
 
     #[test]
@@ -528,7 +1198,7 @@ mod tests {
         let mut pool = GraphemePool::new();
         let mut frame = Frame::new(30, 3, &mut pool);
         let area = Rect::new(0, 0, 30, 3);
-        help.render(area, &mut frame);
+        Widget::render(&help, area, &mut frame);
 
         // "q" is 1 char, "ctrl+s" is 6 chars, max_key_w = 6
         // Row 0: "q      quit" (q + 5 spaces + 2 spaces + quit)
@@ -541,5 +1211,126 @@ mod tests {
     fn default_impl() {
         let help = Help::default();
         assert!(help.entries().is_empty());
+    }
+
+    #[test]
+    fn cache_hit_same_hints() {
+        let help = Help::new().entry("q", "quit").entry("^s", "save");
+        let mut state = HelpRenderState::default();
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(40, 1, &mut pool);
+        let area = Rect::new(0, 0, 40, 1);
+
+        StatefulWidget::render(&help, area, &mut frame, &mut state);
+        let stats_after_first = state.stats();
+        StatefulWidget::render(&help, area, &mut frame, &mut state);
+        let stats_after_second = state.stats();
+
+        assert!(
+            stats_after_second.hits > stats_after_first.hits,
+            "Second render should be a cache hit"
+        );
+        assert!(state.dirty_rects().is_empty(), "No dirty rects on hit");
+    }
+
+    #[test]
+    fn dirty_rect_only_changes() {
+        let mut help = Help::new()
+            .with_mode(HelpMode::Full)
+            .entry("q", "quit")
+            .entry("w", "write")
+            .entry("e", "edit");
+
+        let mut state = HelpRenderState::default();
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(40, 3, &mut pool);
+        let area = Rect::new(0, 0, 40, 3);
+
+        StatefulWidget::render(&help, area, &mut frame, &mut state);
+
+        help.entries[1].desc.clear();
+        help.entries[1].desc.push_str("save");
+
+        StatefulWidget::render(&help, area, &mut frame, &mut state);
+        let dirty = state.take_dirty_rects();
+
+        assert_eq!(dirty.len(), 1, "Only one row should be dirty");
+        assert_eq!(dirty[0].y, 1, "Second entry row should be dirty");
+    }
+
+    proptest! {
+        #[test]
+        fn prop_cache_hits_on_stable_entries(entries in prop::collection::vec(
+            (string_regex("[a-z]{1,6}").unwrap(), string_regex("[a-z]{1,10}").unwrap()),
+            1..6
+        )) {
+            let mut help = Help::new();
+            for (key, desc) in entries {
+                help = help.entry(key, desc);
+            }
+            let mut state = HelpRenderState::default();
+            let mut pool = GraphemePool::new();
+            let mut frame = Frame::new(80, 1, &mut pool);
+            let area = Rect::new(0, 0, 80, 1);
+
+            StatefulWidget::render(&help, area, &mut frame, &mut state);
+            let stats_after_first = state.stats();
+            StatefulWidget::render(&help, area, &mut frame, &mut state);
+            let stats_after_second = state.stats();
+
+            prop_assert!(stats_after_second.hits > stats_after_first.hits);
+            prop_assert!(state.dirty_rects().is_empty());
+        }
+    }
+
+    #[test]
+    fn perf_micro_hint_update() {
+        let mut help = Help::new()
+            .with_mode(HelpMode::Short)
+            .entry("^T", "Theme")
+            .entry("^C", "Quit")
+            .entry("?", "Help")
+            .entry("F12", "Debug");
+
+        let mut state = HelpRenderState::default();
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(120, 1, &mut pool);
+        let area = Rect::new(0, 0, 120, 1);
+
+        StatefulWidget::render(&help, area, &mut frame, &mut state);
+
+        let iterations = 200u32;
+        let mut times_us = Vec::with_capacity(iterations as usize);
+        for i in 0..iterations {
+            let label = if i % 2 == 0 { "Close" } else { "Open" };
+            help.entries[1].desc.clear();
+            help.entries[1].desc.push_str(label);
+
+            let start = Instant::now();
+            StatefulWidget::render(&help, area, &mut frame, &mut state);
+            let elapsed = start.elapsed();
+            times_us.push(elapsed.as_micros() as u64);
+        }
+
+        times_us.sort();
+        let p50 = times_us[times_us.len() / 2];
+        let p95 = times_us[(times_us.len() as f64 * 0.95) as usize];
+        let p99 = times_us[(times_us.len() as f64 * 0.99) as usize];
+        let updates_per_sec = 1_000_000u64.checked_div(p50).unwrap_or(0);
+
+        eprintln!(
+            "{{\"ts\":\"2026-02-03T00:00:00Z\",\"case\":\"help_hint_update\",\"iterations\":{},\"p50_us\":{},\"p95_us\":{},\"p99_us\":{},\"updates_per_sec\":{},\"hits\":{},\"misses\":{},\"dirty_updates\":{}}}",
+            iterations,
+            p50,
+            p95,
+            p99,
+            updates_per_sec,
+            state.stats().hits,
+            state.stats().misses,
+            state.stats().dirty_updates
+        );
+
+        // Budget: keep p95 under 2ms in CI (500 updates/sec).
+        assert!(p95 <= 2000, "p95 too slow: {p95}us");
     }
 }

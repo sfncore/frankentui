@@ -22,7 +22,7 @@ use crate::stateful::Stateful;
 use crate::undo_support::{TreeUndoExt, UndoSupport, UndoWidgetId};
 use crate::{Widget, draw_text_span};
 use ftui_core::geometry::Rect;
-use ftui_render::frame::Frame;
+use ftui_render::frame::{Frame, HitId, HitRegion};
 use ftui_style::Style;
 use std::any::Any;
 use std::collections::HashSet;
@@ -253,6 +253,8 @@ pub struct Tree {
     root_style: Style,
     /// Optional persistence ID for state saving/restoration.
     persistence_id: Option<String>,
+    /// Optional hit ID for mouse interaction.
+    hit_id: Option<HitId>,
 }
 
 impl Tree {
@@ -268,6 +270,7 @@ impl Tree {
             label_style: Style::default(),
             root_style: Style::default(),
             persistence_id: None,
+            hit_id: None,
         }
     }
 
@@ -317,6 +320,13 @@ impl Tree {
     #[must_use]
     pub fn persistence_id(&self) -> Option<&str> {
         self.persistence_id.as_deref()
+    }
+
+    /// Set a hit ID for mouse interaction.
+    #[must_use]
+    pub fn hit_id(mut self, id: HitId) -> Self {
+        self.hit_id = Some(id);
+        self
     }
 
     /// Get a reference to the root node.
@@ -405,6 +415,12 @@ impl Widget for Tree {
                 draw_text_span(frame, x, y, &node.label, style, max_x);
             } else {
                 draw_text_span(frame, x, y, &node.label, Style::default(), max_x);
+            }
+
+            // Register hit region for the row
+            if let Some(id) = self.hit_id {
+                let row_area = Rect::new(area.x, y, area.width, 1);
+                frame.register_hit(row_area, id, HitRegion::Content, row_idx as u64);
             }
         }
     }

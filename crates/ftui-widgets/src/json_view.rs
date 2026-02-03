@@ -170,7 +170,10 @@ impl JsonView {
                     } else {
                         depth += 1;
                         lines.push(current_line);
-                        current_line = vec![JsonToken::Whitespace(make_indent(depth, self.indent))];
+                        current_line = vec![JsonToken::Whitespace(make_indent(
+                            depth.min(32),
+                            self.indent,
+                        ))];
                     }
                 }
                 '}' | ']' => {
@@ -205,8 +208,10 @@ impl JsonView {
                             chars.next();
                             current_line.push(JsonToken::Punctuation(",".to_string()));
                             lines.push(current_line);
-                            current_line =
-                                vec![JsonToken::Whitespace(make_indent(depth, self.indent))];
+                            current_line = vec![JsonToken::Whitespace(make_indent(
+                                depth.min(32),
+                                self.indent,
+                            ))];
                         }
                     }
                 }
@@ -214,7 +219,10 @@ impl JsonView {
                     chars.next();
                     current_line.push(JsonToken::Punctuation(",".to_string()));
                     lines.push(current_line);
-                    current_line = vec![JsonToken::Whitespace(make_indent(depth, self.indent))];
+                    current_line = vec![JsonToken::Whitespace(make_indent(
+                        depth.min(32),
+                        self.indent,
+                    ))];
                 }
                 ':' => {
                     chars.next();
@@ -235,7 +243,10 @@ impl JsonView {
                         chars.next();
                         current_line.push(JsonToken::Punctuation(",".to_string()));
                         lines.push(current_line);
-                        current_line = vec![JsonToken::Whitespace(make_indent(depth, self.indent))];
+                        current_line = vec![JsonToken::Whitespace(make_indent(
+                            depth.min(32),
+                            self.indent,
+                        ))];
                     }
                 }
             }

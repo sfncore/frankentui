@@ -18,6 +18,63 @@ pub enum ColorProfile {
 }
 
 impl ColorProfile {
+    /// Auto-detect the best available color profile from environment variables.
+    ///
+    /// Detection priority:
+    /// 1. `NO_COLOR` set → [`Mono`](ColorProfile::Mono)
+    /// 2. `COLORTERM=truecolor` or `COLORTERM=24bit` → [`TrueColor`](ColorProfile::TrueColor)
+    /// 3. `TERM` contains "256" → [`Ansi256`](ColorProfile::Ansi256)
+    /// 4. Otherwise → [`Ansi16`](ColorProfile::Ansi16)
+    ///
+    /// # Example
+    /// ```
+    /// use ftui_style::ColorProfile;
+    ///
+    /// let profile = ColorProfile::detect();
+    /// if profile.supports_true_color() {
+    ///     println!("Full 24-bit color available!");
+    /// }
+    /// ```
+    #[must_use]
+    pub fn detect() -> Self {
+        Self::detect_from_env(
+            std::env::var("NO_COLOR").ok().as_deref(),
+            std::env::var("COLORTERM").ok().as_deref(),
+            std::env::var("TERM").ok().as_deref(),
+        )
+    }
+
+    /// Detect color profile from provided environment values (for testing).
+    ///
+    /// Pass `Some("")` for empty env vars or `None` for unset.
+    #[must_use]
+    pub fn detect_from_env(
+        no_color: Option<&str>,
+        colorterm: Option<&str>,
+        term: Option<&str>,
+    ) -> Self {
+        // NO_COLOR takes precedence (presence, not value, matters)
+        if no_color.is_some() {
+            return Self::Mono;
+        }
+
+        // COLORTERM=truecolor or 24bit indicates true color
+        if let Some(ct) = colorterm
+            && (ct == "truecolor" || ct == "24bit")
+        {
+            return Self::TrueColor;
+        }
+
+        // TERM containing "256" indicates 256-color
+        if let Some(t) = term
+            && t.contains("256")
+        {
+            return Self::Ansi256;
+        }
+
+        Self::Ansi16
+    }
+
     /// Choose the best available profile from detection flags.
     ///
     /// `no_color` should reflect explicit user intent (e.g. NO_COLOR).
@@ -39,7 +96,158 @@ impl ColorProfile {
     pub const fn supports_true_color(self) -> bool {
         matches!(self, Self::TrueColor)
     }
+
+    /// Check if this profile supports 256 colors or more.
+    #[must_use]
+    pub const fn supports_256_colors(self) -> bool {
+        matches!(self, Self::TrueColor | Self::Ansi256)
+    }
+
+    /// Check if this profile supports any color (not monochrome).
+    #[must_use]
+    pub const fn supports_color(self) -> bool {
+        !matches!(self, Self::Mono)
+    }
 }
+
+// =============================================================================
+// WCAG Contrast Validation
+// =============================================================================
+
+/// WCAG 2.0 AA contrast ratio for normal text (4.5:1).
+pub const WCAG_AA_NORMAL_TEXT: f64 = 4.5;
+
+/// WCAG 2.0 AA contrast ratio for large text (3.0:1).
+pub const WCAG_AA_LARGE_TEXT: f64 = 3.0;
+
+/// WCAG 2.0 AAA contrast ratio for normal text (7.0:1).
+pub const WCAG_AAA_NORMAL_TEXT: f64 = 7.0;
+
+/// WCAG 2.0 AAA contrast ratio for large text (4.5:1).
+pub const WCAG_AAA_LARGE_TEXT: f64 = 4.5;
+
+/// Convert sRGB channel value to linear RGB.
+///
+/// Per WCAG 2.0 specification for relative luminance calculation.
+#[inline]
+fn srgb_to_linear(c: f64) -> f64 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Compute relative luminance of a color per WCAG 2.0.
+///
+/// Returns a value in the range [0, 1] where:
+/// - 0 = pure black
+/// - 1 = pure white
+///
+/// Formula: <https://www.w3.org/TR/WCAG20/#relativeluminancedef>
+#[must_use]
+pub fn relative_luminance(rgb: Rgb) -> f64 {
+    let r = srgb_to_linear(rgb.r as f64 / 255.0);
+    let g = srgb_to_linear(rgb.g as f64 / 255.0);
+    let b = srgb_to_linear(rgb.b as f64 / 255.0);
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/// Compute relative luminance of a `PackedRgba` color per WCAG 2.0.
+#[must_use]
+pub fn relative_luminance_packed(color: PackedRgba) -> f64 {
+    relative_luminance(Rgb::from(color))
+}
+
+/// Compute WCAG 2.0 contrast ratio between two colors.
+///
+/// Returns a value in the range [1.0, 21.0] where:
+/// - 1.0 = identical colors (no contrast)
+/// - 21.0 = black on white (maximum contrast)
+///
+/// Formula: <https://www.w3.org/TR/WCAG20/#contrast-ratiodef>
+#[must_use]
+pub fn contrast_ratio(fg: Rgb, bg: Rgb) -> f64 {
+    let lum_fg = relative_luminance(fg);
+    let lum_bg = relative_luminance(bg);
+    let lighter = lum_fg.max(lum_bg);
+    let darker = lum_fg.min(lum_bg);
+    (lighter + 0.05) / (darker + 0.05)
+}
+
+/// Compute WCAG 2.0 contrast ratio between two `PackedRgba` colors.
+#[must_use]
+pub fn contrast_ratio_packed(fg: PackedRgba, bg: PackedRgba) -> f64 {
+    contrast_ratio(Rgb::from(fg), Rgb::from(bg))
+}
+
+/// Check if a color combination meets WCAG 2.0 AA for normal text (4.5:1).
+#[must_use]
+pub fn meets_wcag_aa(fg: Rgb, bg: Rgb) -> bool {
+    contrast_ratio(fg, bg) >= WCAG_AA_NORMAL_TEXT
+}
+
+/// Check if a color combination meets WCAG 2.0 AA for normal text (4.5:1).
+#[must_use]
+pub fn meets_wcag_aa_packed(fg: PackedRgba, bg: PackedRgba) -> bool {
+    contrast_ratio_packed(fg, bg) >= WCAG_AA_NORMAL_TEXT
+}
+
+/// Check if a color combination meets WCAG 2.0 AA for large text (3.0:1).
+#[must_use]
+pub fn meets_wcag_aa_large_text(fg: Rgb, bg: Rgb) -> bool {
+    contrast_ratio(fg, bg) >= WCAG_AA_LARGE_TEXT
+}
+
+/// Check if a color combination meets WCAG 2.0 AAA for normal text (7.0:1).
+#[must_use]
+pub fn meets_wcag_aaa(fg: Rgb, bg: Rgb) -> bool {
+    contrast_ratio(fg, bg) >= WCAG_AAA_NORMAL_TEXT
+}
+
+/// Select the best text color from candidates based on contrast ratio.
+///
+/// Returns the candidate with the highest contrast ratio against the background.
+#[must_use]
+pub fn best_text_color(bg: Rgb, candidates: &[Rgb]) -> Rgb {
+    assert!(!candidates.is_empty(), "candidates must not be empty");
+
+    let mut best = candidates[0];
+    let mut best_ratio = contrast_ratio(best, bg);
+
+    for &candidate in candidates.iter().skip(1) {
+        let ratio = contrast_ratio(candidate, bg);
+        if ratio > best_ratio {
+            best = candidate;
+            best_ratio = ratio;
+        }
+    }
+
+    best
+}
+
+/// Select the best text color from candidates based on contrast ratio.
+#[must_use]
+pub fn best_text_color_packed(bg: PackedRgba, candidates: &[PackedRgba]) -> PackedRgba {
+    assert!(!candidates.is_empty(), "candidates must not be empty");
+
+    let mut best = candidates[0];
+    let mut best_ratio = contrast_ratio_packed(best, bg);
+
+    for &candidate in candidates.iter().skip(1) {
+        let ratio = contrast_ratio_packed(candidate, bg);
+        if ratio > best_ratio {
+            best = candidate;
+            best_ratio = ratio;
+        }
+    }
+
+    best
+}
+
+// =============================================================================
+// RGB Color Type
+// =============================================================================
 
 /// RGB color (opaque).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -468,6 +676,191 @@ mod tests {
         assert!(!ColorProfile::Ansi256.supports_true_color());
         assert!(!ColorProfile::Ansi16.supports_true_color());
         assert!(!ColorProfile::Mono.supports_true_color());
+    }
+
+    #[test]
+    fn supports_256_colors() {
+        assert!(ColorProfile::TrueColor.supports_256_colors());
+        assert!(ColorProfile::Ansi256.supports_256_colors());
+        assert!(!ColorProfile::Ansi16.supports_256_colors());
+        assert!(!ColorProfile::Mono.supports_256_colors());
+    }
+
+    #[test]
+    fn supports_color() {
+        assert!(ColorProfile::TrueColor.supports_color());
+        assert!(ColorProfile::Ansi256.supports_color());
+        assert!(ColorProfile::Ansi16.supports_color());
+        assert!(!ColorProfile::Mono.supports_color());
+    }
+
+    // --- ColorProfile::detect_from_env tests ---
+
+    #[test]
+    fn detect_no_color_gives_mono() {
+        // NO_COLOR presence (any value) should force Mono
+        assert_eq!(
+            ColorProfile::detect_from_env(Some("1"), None, None),
+            ColorProfile::Mono
+        );
+        assert_eq!(
+            ColorProfile::detect_from_env(Some(""), None, None),
+            ColorProfile::Mono
+        );
+        // NO_COLOR takes precedence over COLORTERM
+        assert_eq!(
+            ColorProfile::detect_from_env(Some("1"), Some("truecolor"), Some("xterm-256color")),
+            ColorProfile::Mono
+        );
+    }
+
+    #[test]
+    fn detect_colorterm_truecolor() {
+        assert_eq!(
+            ColorProfile::detect_from_env(None, Some("truecolor"), None),
+            ColorProfile::TrueColor
+        );
+    }
+
+    #[test]
+    fn detect_colorterm_24bit() {
+        assert_eq!(
+            ColorProfile::detect_from_env(None, Some("24bit"), None),
+            ColorProfile::TrueColor
+        );
+    }
+
+    #[test]
+    fn detect_term_256color() {
+        assert_eq!(
+            ColorProfile::detect_from_env(None, None, Some("xterm-256color")),
+            ColorProfile::Ansi256
+        );
+        assert_eq!(
+            ColorProfile::detect_from_env(None, None, Some("screen-256color")),
+            ColorProfile::Ansi256
+        );
+    }
+
+    #[test]
+    fn detect_colorterm_unknown_falls_to_term() {
+        // COLORTERM=yes is not truecolor, so fall back to TERM
+        assert_eq!(
+            ColorProfile::detect_from_env(None, Some("yes"), Some("xterm-256color")),
+            ColorProfile::Ansi256
+        );
+    }
+
+    #[test]
+    fn detect_defaults_to_ansi16() {
+        assert_eq!(
+            ColorProfile::detect_from_env(None, None, None),
+            ColorProfile::Ansi16
+        );
+        assert_eq!(
+            ColorProfile::detect_from_env(None, None, Some("xterm")),
+            ColorProfile::Ansi16
+        );
+        assert_eq!(
+            ColorProfile::detect_from_env(None, Some(""), Some("dumb")),
+            ColorProfile::Ansi16
+        );
+    }
+
+    // --- WCAG Contrast tests ---
+
+    #[test]
+    fn wcag_luminance_black_is_zero() {
+        let lum = relative_luminance(Rgb::new(0, 0, 0));
+        assert!((lum - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn wcag_luminance_white_is_one() {
+        let lum = relative_luminance(Rgb::new(255, 255, 255));
+        assert!((lum - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn wcag_luminance_green_is_brightest() {
+        // Green has highest weight (0.7152) in luminance formula
+        let r_lum = relative_luminance(Rgb::new(255, 0, 0));
+        let g_lum = relative_luminance(Rgb::new(0, 255, 0));
+        let b_lum = relative_luminance(Rgb::new(0, 0, 255));
+        assert!(g_lum > r_lum);
+        assert!(g_lum > b_lum);
+    }
+
+    #[test]
+    fn contrast_ratio_black_white_is_21() {
+        let black = Rgb::new(0, 0, 0);
+        let white = Rgb::new(255, 255, 255);
+        let ratio = contrast_ratio(black, white);
+        // Should be exactly 21:1
+        assert!((ratio - 21.0).abs() < 0.01, "ratio was {}", ratio);
+    }
+
+    #[test]
+    fn contrast_ratio_is_symmetric() {
+        let a = Rgb::new(100, 150, 200);
+        let b = Rgb::new(50, 75, 100);
+        let ratio_ab = contrast_ratio(a, b);
+        let ratio_ba = contrast_ratio(b, a);
+        assert!((ratio_ab - ratio_ba).abs() < 0.001);
+    }
+
+    #[test]
+    fn contrast_ratio_same_color_is_one() {
+        let color = Rgb::new(128, 128, 128);
+        let ratio = contrast_ratio(color, color);
+        assert!((ratio - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn meets_wcag_aa_black_white() {
+        let black = Rgb::new(0, 0, 0);
+        let white = Rgb::new(255, 255, 255);
+        assert!(meets_wcag_aa(black, white));
+        assert!(meets_wcag_aa(white, black));
+    }
+
+    #[test]
+    fn meets_wcag_aa_low_contrast_fails() {
+        // Two similar grays should fail WCAG AA
+        let gray1 = Rgb::new(128, 128, 128);
+        let gray2 = Rgb::new(140, 140, 140);
+        assert!(!meets_wcag_aa(gray1, gray2));
+    }
+
+    #[test]
+    fn meets_wcag_aaa_black_white() {
+        let black = Rgb::new(0, 0, 0);
+        let white = Rgb::new(255, 255, 255);
+        assert!(meets_wcag_aaa(black, white));
+    }
+
+    #[test]
+    fn best_text_color_chooses_highest_contrast() {
+        let dark_bg = Rgb::new(30, 30, 30);
+        let candidates = [
+            Rgb::new(50, 50, 50),    // dark gray - low contrast
+            Rgb::new(255, 255, 255), // white - high contrast
+            Rgb::new(100, 100, 100), // mid gray - medium contrast
+        ];
+        let best = best_text_color(dark_bg, &candidates);
+        assert_eq!(best, Rgb::new(255, 255, 255));
+
+        let light_bg = Rgb::new(240, 240, 240);
+        let best_on_light = best_text_color(light_bg, &candidates);
+        assert_eq!(best_on_light, Rgb::new(50, 50, 50));
+    }
+
+    #[test]
+    fn wcag_constants_are_correct() {
+        assert!((WCAG_AA_NORMAL_TEXT - 4.5).abs() < 0.001);
+        assert!((WCAG_AA_LARGE_TEXT - 3.0).abs() < 0.001);
+        assert!((WCAG_AAA_NORMAL_TEXT - 7.0).abs() < 0.001);
+        assert!((WCAG_AAA_LARGE_TEXT - 4.5).abs() < 0.001);
     }
 
     // --- Rgb tests ---

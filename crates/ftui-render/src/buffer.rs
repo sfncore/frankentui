@@ -455,6 +455,29 @@ impl Buffer {
         self.mark_all_dirty();
     }
 
+    /// Reset per-frame state and clear all cells.
+    ///
+    /// This restores scissor/opacity stacks to their base values to ensure
+    /// each frame starts from a clean rendering state.
+    pub fn reset_for_frame(&mut self) {
+        self.scissor_stack.truncate(1);
+        if let Some(base) = self.scissor_stack.first_mut() {
+            *base = Rect::from_size(self.width, self.height);
+        } else {
+            self.scissor_stack
+                .push(Rect::from_size(self.width, self.height));
+        }
+
+        self.opacity_stack.truncate(1);
+        if let Some(base) = self.opacity_stack.first_mut() {
+            *base = 1.0;
+        } else {
+            self.opacity_stack.push(1.0);
+        }
+
+        self.clear();
+    }
+
     /// Clear all cells to the given cell.
     pub fn clear_with(&mut self, cell: Cell) {
         self.cells.fill(cell);
@@ -564,6 +587,11 @@ impl Buffer {
     /// Copies cells from `src` at `src_rect` to this buffer at `dst_pos`.
     /// Respects scissor region.
     pub fn copy_from(&mut self, src: &Buffer, src_rect: Rect, dst_x: u16, dst_y: u16) {
+        // Enforce strict bounds on the destination area to prevent wide characters
+        // from leaking outside the requested copy region.
+        let copy_bounds = Rect::new(dst_x, dst_y, src_rect.width, src_rect.height);
+        self.push_scissor(copy_bounds);
+
         for dy in 0..src_rect.height {
             // Compute destination y with overflow check
             let Some(target_y) = dst_y.checked_add(dy) else {
@@ -609,6 +637,8 @@ impl Buffer {
                 }
             }
         }
+
+        self.pop_scissor();
     }
 
     /// Check if two buffers have identical content.
@@ -1281,6 +1311,35 @@ mod tests {
 
         // Cell at (2,2) in src should be at (5,5) in dst (offset by 3,3)
         assert_eq!(dst.get(5, 5).unwrap().content.as_char(), Some('S'));
+    }
+
+    #[test]
+    fn copy_from_clips_wide_char_at_boundary() {
+        let mut src = Buffer::new(10, 1);
+        // Wide char at x=0 (width 2)
+        src.set(0, 0, Cell::from_char('中'));
+
+        let mut dst = Buffer::new(10, 1);
+        // Copy only the first column (x=0, width=1) from src to dst at (0,0)
+        // This includes the head of '中' but EXCLUDES the tail.
+        dst.copy_from(&src, Rect::new(0, 0, 1, 1), 0, 0);
+
+        // The copy should be atomic: since the tail doesn't fit in the copy region,
+        // the head should NOT be written (or at least the tail should not be written outside the region).
+
+        // Check x=0: Should be empty (atomic rejection) or clipped?
+        // With implicit scissor fix: atomic rejection means x=0 is empty.
+        // Without fix: x=0 is '中', x=1 is CONTINUATION (leak).
+
+        // Asserting the fix behavior (atomic rejection):
+        assert!(
+            dst.get(0, 0).unwrap().is_empty(),
+            "Wide char head should not be written if tail is clipped"
+        );
+        assert!(
+            dst.get(1, 0).unwrap().is_empty(),
+            "Wide char tail should not be leaked outside copy region"
+        );
     }
 
     #[test]

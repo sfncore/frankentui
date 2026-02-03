@@ -4,11 +4,17 @@
 //! Run with: cargo test -p ftui-extras --test text_effects_snapshots
 //! Update snapshots: BLESS=1 cargo test -p ftui-extras --test text_effects_snapshots
 
+#[cfg(feature = "text-effects")]
 use ftui_core::geometry::Rect;
+#[cfg(feature = "text-effects")]
 use ftui_harness::assert_snapshot_ansi;
+#[cfg(feature = "text-effects")]
 use ftui_render::cell::PackedRgba;
+#[cfg(feature = "text-effects")]
 use ftui_render::frame::Frame;
+#[cfg(feature = "text-effects")]
 use ftui_render::grapheme_pool::GraphemePool;
+#[cfg(feature = "text-effects")]
 use ftui_widgets::Widget;
 
 // Import the text effects module

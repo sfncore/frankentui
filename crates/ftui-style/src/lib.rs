@@ -17,7 +17,31 @@ pub mod stylesheet;
 /// Theme system with semantic color slots.
 pub mod theme;
 
-pub use color::{Ansi16, Color, ColorCache, ColorProfile, MonoColor, Rgb};
+pub use color::{
+    // Color types
+    Ansi16,
+    Color,
+    ColorCache,
+    ColorProfile,
+    MonoColor,
+    Rgb,
+    // WCAG constants
+    WCAG_AA_LARGE_TEXT,
+    WCAG_AA_NORMAL_TEXT,
+    WCAG_AAA_LARGE_TEXT,
+    WCAG_AAA_NORMAL_TEXT,
+    // WCAG contrast utilities
+    best_text_color,
+    best_text_color_packed,
+    contrast_ratio,
+    contrast_ratio_packed,
+    meets_wcag_aa,
+    meets_wcag_aa_large_text,
+    meets_wcag_aa_packed,
+    meets_wcag_aaa,
+    relative_luminance,
+    relative_luminance_packed,
+};
 pub use style::{Style, StyleFlags};
 pub use stylesheet::{StyleId, StyleSheet};
 pub use theme::{AdaptiveColor, ResolvedTheme, Theme, ThemeBuilder};

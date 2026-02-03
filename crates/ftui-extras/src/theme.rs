@@ -167,24 +167,24 @@ const THEMES: [ThemePalette; 5] = [
         bg_highlight: PackedRgba::rgb(90, 96, 98),
         fg_primary: PackedRgba::rgb(169, 183, 198),
         fg_secondary: PackedRgba::rgb(146, 161, 177),
-        fg_muted: PackedRgba::rgb(109, 123, 138),
+        fg_muted: PackedRgba::rgb(118, 132, 147), // Brightened for WCAG 3:1
         fg_disabled: PackedRgba::rgb(85, 90, 92),
         accent_primary: PackedRgba::rgb(104, 151, 187),
         accent_secondary: PackedRgba::rgb(152, 118, 170),
-        accent_success: PackedRgba::rgb(106, 135, 89),
+        accent_success: PackedRgba::rgb(130, 180, 110), // Brightened for WCAG 4.5:1
         accent_warning: PackedRgba::rgb(255, 198, 109),
-        accent_error: PackedRgba::rgb(255, 102, 102),
+        accent_error: PackedRgba::rgb(255, 115, 115), // Brightened for WCAG 4.5:1
         accent_info: PackedRgba::rgb(179, 212, 252),
         accent_link: PackedRgba::rgb(74, 136, 199),
         accent_slots: [
             PackedRgba::rgb(104, 151, 187),
             PackedRgba::rgb(152, 118, 170),
-            PackedRgba::rgb(106, 135, 89),
+            PackedRgba::rgb(130, 180, 110), // Updated to match accent_success
             PackedRgba::rgb(255, 198, 109),
             PackedRgba::rgb(204, 120, 50),
             PackedRgba::rgb(191, 97, 106),
             PackedRgba::rgb(187, 181, 41),
-            PackedRgba::rgb(77, 117, 140),
+            PackedRgba::rgb(100, 150, 180), // Brightened for WCAG 3:1 (LAYOUT_LAB)
             PackedRgba::rgb(149, 102, 71),
             PackedRgba::rgb(134, 138, 147),
             PackedRgba::rgb(161, 99, 158),
@@ -211,27 +211,27 @@ const THEMES: [ThemePalette; 5] = [
         fg_disabled: PackedRgba::rgb(160, 172, 181),
         accent_primary: PackedRgba::rgb(37, 99, 235),
         accent_secondary: PackedRgba::rgb(124, 58, 237),
-        accent_success: PackedRgba::rgb(22, 163, 74),
-        accent_warning: PackedRgba::rgb(245, 158, 11),
-        accent_error: PackedRgba::rgb(220, 38, 38),
+        accent_success: PackedRgba::rgb(15, 120, 55), // Darkened for WCAG 4.5:1 on light bg
+        accent_warning: PackedRgba::rgb(180, 83, 9),  // Darkened for WCAG 3:1 on light bg
+        accent_error: PackedRgba::rgb(185, 28, 28),   // Darkened for WCAG 4.5:1 on light bg
         accent_info: PackedRgba::rgb(2, 132, 199),
         accent_link: PackedRgba::rgb(37, 99, 235),
         accent_slots: [
             PackedRgba::rgb(37, 99, 235),
             PackedRgba::rgb(124, 58, 237),
-            PackedRgba::rgb(22, 163, 74),
-            PackedRgba::rgb(245, 158, 11),
-            PackedRgba::rgb(220, 38, 38),
+            PackedRgba::rgb(15, 120, 55), // Updated to match accent_success
+            PackedRgba::rgb(180, 83, 9),  // Updated to match accent_warning
+            PackedRgba::rgb(185, 28, 28), // Updated to match accent_error
             PackedRgba::rgb(2, 132, 199),
-            PackedRgba::rgb(20, 184, 166),
-            PackedRgba::rgb(219, 39, 119),
-            PackedRgba::rgb(99, 102, 241),
-            PackedRgba::rgb(234, 88, 12),
-            PackedRgba::rgb(16, 185, 129),
-            PackedRgba::rgb(168, 85, 247),
+            PackedRgba::rgb(13, 148, 136), // Darkened teal for WCAG
+            PackedRgba::rgb(190, 24, 93),  // Darkened pink for WCAG
+            PackedRgba::rgb(79, 70, 229),  // Darkened indigo for WCAG
+            PackedRgba::rgb(194, 65, 12),  // Darkened orange for WCAG
+            PackedRgba::rgb(13, 148, 136), // Darkened emerald for WCAG
+            PackedRgba::rgb(126, 34, 206), // Darkened purple for WCAG
         ],
         syntax_keyword: PackedRgba::rgb(124, 58, 237),
-        syntax_string: PackedRgba::rgb(22, 163, 74),
+        syntax_string: PackedRgba::rgb(15, 120, 55), // Updated to match accent_success
         syntax_number: PackedRgba::rgb(217, 119, 6),
         syntax_comment: PackedRgba::rgb(154, 165, 177),
         syntax_function: PackedRgba::rgb(37, 99, 235),
@@ -253,7 +253,7 @@ const THEMES: [ThemePalette; 5] = [
         accent_secondary: PackedRgba::rgb(129, 161, 193),
         accent_success: PackedRgba::rgb(163, 190, 140),
         accent_warning: PackedRgba::rgb(235, 203, 139),
-        accent_error: PackedRgba::rgb(191, 97, 106),
+        accent_error: PackedRgba::rgb(240, 150, 160), // Brightened for WCAG 4.5:1
         accent_info: PackedRgba::rgb(143, 188, 187),
         accent_link: PackedRgba::rgb(136, 192, 208),
         accent_slots: [
@@ -261,7 +261,7 @@ const THEMES: [ThemePalette; 5] = [
             PackedRgba::rgb(129, 161, 193),
             PackedRgba::rgb(163, 190, 140),
             PackedRgba::rgb(235, 203, 139),
-            PackedRgba::rgb(191, 97, 106),
+            PackedRgba::rgb(240, 150, 160), // Updated to match accent_error
             PackedRgba::rgb(143, 188, 187),
             PackedRgba::rgb(180, 142, 173),
             PackedRgba::rgb(94, 129, 172),
@@ -616,7 +616,17 @@ fn semantic_text(token: ColorToken) -> PackedRgba {
         PackedRgba::WHITE,
         PackedRgba::BLACK,
     ];
-    contrast::best_text_color(composed, &candidates)
+    let best = contrast::best_text_color(composed, &candidates);
+    // Ensure WCAG AA compliance - fall back to black or white if needed
+    if contrast::meets_wcag_aa(best, composed) {
+        best
+    } else if contrast::contrast_ratio(PackedRgba::BLACK, composed)
+        >= contrast::contrast_ratio(PackedRgba::WHITE, composed)
+    {
+        PackedRgba::BLACK
+    } else {
+        PackedRgba::WHITE
+    }
 }
 
 /// Background colors.

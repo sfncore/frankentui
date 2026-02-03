@@ -74,3 +74,19 @@ All tasks are complete. The codebase has been extensively refactored for Unicode
     - Updated `emit_cell` to detect non-empty, non-continuation cells with zero width.
     - Replaced such content with `U+FFFD` (Replacement Character, width 1) to ensure the visual grid alignment is maintained and the cursor advances correctly.
     - Added a regression test `zero_width_chars_replaced_with_placeholder`.
+
+## 70. Inline Mode Ghosting (Overlay Invalidation)
+**File:** `crates/ftui-runtime/src/terminal_writer.rs`
+**Issue:** In inline mode with overlay strategy (no scroll region), writing logs scrolls the screen, invalidating the previous UI position. However, `TerminalWriter` was not invalidating `prev_buffer`, causing the next frame's diff to assume the screen still contained the old UI. This led to ghosting where the renderer failed to redraw the UI on the new, empty rows created by scrolling.
+**Fix:**
+    - Updated `write_log` to invalidate `prev_buffer` and `last_inline_region` if `!scroll_region_active`.
+    - Updated `present_inline` to explicitly clear the UI region rows when `prev_buffer` is `None` (full redraw). This restores correctness for invalidated states while maintaining flicker-free diffing for stable states (addressing the root cause of the regression from Fix #63).
+
+## 71. Scrollbar Wide-Character Corruption
+**File:** `crates/ftui-widgets/src/scrollbar.rs`
+**Issue:** The `Scrollbar` widget's rendering loop iterated by cell index (`i`), drawing a symbol at each position. When using wide Unicode characters (e.g., emojis "🔴", "👍") for the track or thumb, drawing a symbol at index `i` would populate cells `i` and `i+1`. The subsequent iteration at `i+1` would then overwrite the "tail" of the previous wide character with a new "head", resulting in visual corruption.
+**Fix:**
+    - Modified the `render` method to conditionally skip iteration indices based on the drawn symbol's width and orientation:
+        - **Horizontal:** The loop now skips `symbol_width` cells after drawing, preserving wide characters.
+        - **Vertical:** The loop continues to increment by 1 (row), as wide characters stack vertically without overlapping.
+

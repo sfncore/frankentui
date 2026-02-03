@@ -2,15 +2,44 @@
 //!
 //! Run with: `cargo bench --package ftui-text --bench search_bench`
 //!
-//! # Performance Baselines
+//! # Performance Baselines (bd-12o8.8)
 //!
-//! These benchmarks establish baselines for:
-//! - Single-pattern exact search
-//! - Multi-pattern Aho-Corasick search
-//! - Replace operations
-//! - Unicode-aware search
+//! Measured on 100KB text corpus (2026-02-03):
 //!
-//! # JSONL Logging
+//! | Operation                | Throughput  | Latency  | Notes                    |
+//! |--------------------------|-------------|----------|--------------------------|
+//! | Single-pattern (common)  | 2.2 GiB/s   | ~42µs    | stdlib SIMD-optimized    |
+//! | Single-pattern (rare)    | 3.1 GiB/s   | ~30µs    | Fewer result allocations |
+//! | Single-pattern (no match)| 7.7 GiB/s   | ~12µs    | No allocations           |
+//! | Multi-pattern (20 ptns)  | 154 MiB/s   | ~618µs   | Sequential passes        |
+//! | Replace (single)         | 2.9 GiB/s   | ~32µs    | Includes allocation      |
+//! | Unicode (emoji/CJK)      | 2.0-2.4 GiB/s| ~4µs    | Same algorithm           |
+//!
+//! # Performance Budget (Regression Gates)
+//!
+//! These thresholds trigger CI warnings if exceeded:
+//!
+//! | Benchmark                     | Budget    | Rationale                    |
+//! |-------------------------------|-----------|------------------------------|
+//! | search_exact/common_word/100K | ≤ 60µs    | 20% headroom from baseline   |
+//! | search_exact/no_match/100K    | ≤ 18µs    | Primary fast path            |
+//! | search_multi/20_patterns      | ≤ 800µs   | Allow 30% regression margin  |
+//! | replace_all/common/100K       | ≤ 45µs    | Includes string allocation   |
+//! | unicode_search/*              | ≤ 6µs     | Parity with ASCII search     |
+//!
+//! # Optimization Analysis
+//!
+//! **Single-pattern search**: Rust's stdlib `str::find()` uses a two-way string
+//! searching algorithm with SIMD intrinsics. At 2+ GiB/s throughput, this is
+//! already near memory bandwidth limits. **No optimization needed.**
+//!
+//! **Multi-pattern search**: Currently sequential (20 passes for 20 patterns).
+//! Aho-Corasick automaton would reduce to 1 pass (~15-20x speedup potential).
+//! **Deferred**: Multi-pattern search is rare in text editors; single-pattern
+//! find/replace is the common case. Add Aho-Corasick only if profiling shows
+//! multi-pattern as a real bottleneck in user workflows.
+//!
+//! # Criterion Output
 //!
 //! Results are written to `target/criterion/search_bench/` with:
 //! - Raw timing data per iteration

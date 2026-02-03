@@ -2,9 +2,7 @@
 
 use crate::block::{Alignment, Block};
 use crate::measurable::{MeasurableWidget, SizeConstraints};
-use crate::{
-    Widget, draw_text_span, draw_text_span_scrolled, draw_text_span_with_link, set_style_area,
-};
+use crate::{Widget, draw_text_span_scrolled, draw_text_span_with_link, set_style_area};
 use ftui_core::geometry::{Rect, Size};
 use ftui_render::frame::Frame;
 use ftui_style::Style;
@@ -118,53 +116,11 @@ impl Widget for Paragraph<'_> {
         let mut current_visual_line = 0;
         let scroll_offset = self.scroll.0 as usize;
 
-        for line in self.text.lines() {
-            if y >= text_area.bottom() {
-                break;
-            }
-
-            // If wrapping is enabled and line is wider than area, wrap it
-            if let Some(wrap_mode) = self.wrap {
-                let plain = line.to_plain_text();
-                let line_width = plain.width();
-
-                if line_width > text_area.width as usize {
-                    let wrapped = wrap_text(&plain, text_area.width as usize, wrap_mode);
-                    for wrapped_line in &wrapped {
-                        if current_visual_line < scroll_offset {
-                            current_visual_line += 1;
-                            continue;
-                        }
-
-                        if y >= text_area.bottom() {
-                            break;
-                        }
-                        let w = wrapped_line.width();
-                        let x = align_x(text_area, w, self.alignment);
-                        draw_text_span(frame, x, y, wrapped_line, text_style, text_area.right());
-                        y += 1;
-                        current_visual_line += 1;
-                    }
-                    continue;
-                }
-            }
-
-            // Non-wrapped line (or fits in width)
-            if current_visual_line < scroll_offset {
-                current_visual_line += 1;
-                continue;
-            }
-
+        let mut render_line = |line: &ftui_text::Line, y: u16| {
             // Render spans with proper Unicode widths
             let line_width: usize = line.width();
 
-            // Calculate base alignment x (without scroll)
-            // let align_offset = align_x(text_area, line_width, self.alignment).saturating_sub(text_area.x);
-            // Effective visual start relative to text_area.left() is align_offset.
-
             let scroll_x = self.scroll.1;
-            // let mut current_visual_x = align_offset;
-
             let start_x = align_x(text_area, line_width, self.alignment);
 
             // Let's iterate spans.
@@ -176,11 +132,9 @@ impl Widget for Paragraph<'_> {
 
             for span in line.spans() {
                 let span_width = span.width();
-                // let span_end = span_visual_offset + span_width as u16;
 
                 // Effective position of this span relative to text_area.x
                 // pos = alignment_offset + span_visual_offset - scroll_x
-
                 let line_rel_start = alignment_offset.saturating_add(span_visual_offset);
 
                 // Check visibility
@@ -244,6 +198,43 @@ impl Widget for Paragraph<'_> {
 
                 span_visual_offset = span_visual_offset.saturating_add(span_width as u16);
             }
+        };
+
+        for line in self.text.lines() {
+            if y >= text_area.bottom() {
+                break;
+            }
+
+            // If wrapping is enabled and line is wider than area, wrap it
+            if let Some(wrap_mode) = self.wrap {
+                let line_width = line.width();
+                if line_width > text_area.width as usize {
+                    let wrapped = line.wrap(text_area.width as usize, wrap_mode);
+                    for wrapped_line in &wrapped {
+                        if current_visual_line < scroll_offset {
+                            current_visual_line += 1;
+                            continue;
+                        }
+
+                        if y >= text_area.bottom() {
+                            break;
+                        }
+
+                        render_line(wrapped_line, y);
+                        y += 1;
+                        current_visual_line += 1;
+                    }
+                    continue;
+                }
+            }
+
+            // Non-wrapped line (or fits in width)
+            if current_visual_line < scroll_offset {
+                current_visual_line += 1;
+                continue;
+            }
+
+            render_line(line, y);
             y = y.saturating_add(1);
             current_visual_line += 1;
         }

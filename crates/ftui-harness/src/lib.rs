@@ -528,8 +528,10 @@ pub struct ProfileSnapshot {
 
 /// Run a test closure across multiple profiles and optionally compare outputs.
 ///
-/// Use `FTUI_TEST_PROFILE_COMPARE=strict` to fail on differences or
-/// `FTUI_TEST_PROFILE_COMPARE=report` to emit diffs without failing.
+/// The closure receives the profile id and a `TerminalCapabilities` derived
+/// from that profile. Use `FTUI_TEST_PROFILE_COMPARE=strict` to fail on
+/// differences or `FTUI_TEST_PROFILE_COMPARE=report` to emit diffs without
+/// failing.
 pub fn profile_matrix_text<F>(profiles: &[TerminalProfile], mut render: F) -> Vec<ProfileSnapshot>
 where
     F: FnMut(TerminalProfile, &TerminalCapabilities) -> String,
@@ -811,5 +813,30 @@ mod tests {
 
         let buf = Buffer::new(3, 1);
         assert_buffer_snapshot("nonexistent", &buf, dir.to_str().unwrap(), MatchMode::Exact);
+    }
+
+    #[test]
+    fn profile_matrix_collects_outputs() {
+        let profiles = [TerminalProfile::Modern, TerminalProfile::Dumb];
+        let outputs = profile_matrix_text_with_options(
+            &profiles,
+            ProfileCompareMode::Report,
+            MatchMode::Exact,
+            &mut |profile, _caps| format!("profile:{}", profile.as_str()),
+        );
+        assert_eq!(outputs.len(), 2);
+        assert!(outputs.iter().all(|o| o.checksum.starts_with("sha256:")));
+    }
+
+    #[test]
+    fn profile_matrix_strict_allows_identical_output() {
+        let profiles = [TerminalProfile::Modern, TerminalProfile::Dumb];
+        let outputs = profile_matrix_text_with_options(
+            &profiles,
+            ProfileCompareMode::Strict,
+            MatchMode::Exact,
+            &mut |_profile, _caps| "same".to_string(),
+        );
+        assert_eq!(outputs.len(), 2);
     }
 }

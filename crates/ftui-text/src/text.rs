@@ -30,9 +30,11 @@
 
 use crate::TextMeasurement;
 use crate::segment::{Segment, SegmentLine, SegmentLines, split_into_lines};
-use crate::wrap::truncate_to_width_with_info;
+use crate::wrap::{WrapMode, graphemes, truncate_to_width_with_info};
 use ftui_style::Style;
 use std::borrow::Cow;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 /// A styled span of text.
 ///
@@ -91,6 +93,37 @@ impl<'a> Span<'a> {
     #[must_use]
     pub fn width(&self) -> usize {
         crate::display_width(&self.content)
+    }
+
+    /// Split the span at a cell position.
+    ///
+    /// Returns `(left, right)` where the split respects grapheme boundaries.
+    #[must_use]
+    pub fn split_at_cell(&self, cell_pos: usize) -> (Self, Self) {
+        if self.content.is_empty() || cell_pos == 0 {
+            return (Self::raw(""), self.clone());
+        }
+
+        let total_width = self.width();
+        if cell_pos >= total_width {
+            return (self.clone(), Self::raw(""));
+        }
+
+        let (byte_pos, _actual_width) = find_cell_boundary(&self.content, cell_pos);
+        let (left, right) = self.content.split_at(byte_pos);
+
+        (
+            Self {
+                content: Cow::Owned(left.to_string()),
+                style: self.style,
+                link: self.link.clone(),
+            },
+            Self {
+                content: Cow::Owned(right.to_string()),
+                style: self.style,
+                link: self.link.clone(),
+            },
+        )
     }
 
     /// Return bounds-based measurement for this span.
@@ -297,6 +330,25 @@ impl Line {
     #[must_use]
     pub fn to_plain_text(&self) -> String {
         self.spans.iter().map(|s| s.as_str()).collect()
+    }
+
+    /// Wrap this line to the given width, preserving span styles.
+    #[must_use]
+    pub fn wrap(&self, width: usize, mode: WrapMode) -> Vec<Line> {
+        if mode == WrapMode::None || width == 0 {
+            return vec![self.clone()];
+        }
+
+        if self.is_empty() {
+            return vec![Line::new()];
+        }
+
+        match mode {
+            WrapMode::None => vec![self.clone()],
+            WrapMode::Char => wrap_line_chars(self, width),
+            WrapMode::Word => wrap_line_words(self, width, false),
+            WrapMode::WordChar => wrap_line_words(self, width, true),
+        }
     }
 
     /// Convert to segments.
@@ -626,6 +678,308 @@ impl Text {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Wrap Helpers (style-preserving)
+// ---------------------------------------------------------------------------
+
+fn find_cell_boundary(text: &str, target_cells: usize) -> (usize, usize) {
+    let mut current_cells = 0;
+    let mut byte_pos = 0;
+
+    for grapheme in graphemes(text) {
+        let grapheme_width = grapheme.width();
+
+        if current_cells + grapheme_width > target_cells {
+            break;
+        }
+
+        current_cells += grapheme_width;
+        byte_pos += grapheme.len();
+
+        if current_cells >= target_cells {
+            break;
+        }
+    }
+
+    (byte_pos, current_cells)
+}
+
+fn span_is_whitespace(span: &Span<'static>) -> bool {
+    span.as_str()
+        .graphemes(true)
+        .all(|g| g.chars().all(|c| c.is_whitespace()))
+}
+
+fn trim_span_start(span: Span<'static>) -> Span<'static> {
+    let text = span.as_str();
+    let mut start = 0;
+    let mut found = false;
+
+    for (idx, grapheme) in text.grapheme_indices(true) {
+        if grapheme.chars().all(|c| c.is_whitespace()) {
+            start = idx + grapheme.len();
+            continue;
+        }
+        found = true;
+        break;
+    }
+
+    if !found {
+        return Span::raw("");
+    }
+
+    Span {
+        content: Cow::Owned(text[start..].to_string()),
+        style: span.style,
+        link: span.link,
+    }
+}
+
+fn trim_span_end(span: Span<'static>) -> Span<'static> {
+    let text = span.as_str();
+    let mut end = text.len();
+    let mut found = false;
+
+    for (idx, grapheme) in text.grapheme_indices(true).rev() {
+        if grapheme.chars().all(|c| c.is_whitespace()) {
+            end = idx;
+            continue;
+        }
+        found = true;
+        break;
+    }
+
+    if !found {
+        return Span::raw("");
+    }
+
+    Span {
+        content: Cow::Owned(text[..end].to_string()),
+        style: span.style,
+        link: span.link,
+    }
+}
+
+fn trim_line_trailing(mut line: Line) -> Line {
+    while let Some(last) = line.spans.last().cloned() {
+        let trimmed = trim_span_end(last);
+        if trimmed.is_empty() {
+            line.spans.pop();
+            continue;
+        }
+        let len = line.spans.len();
+        if len > 0 {
+            line.spans[len - 1] = trimmed;
+        }
+        break;
+    }
+    line
+}
+
+fn push_span_merged(line: &mut Line, span: Span<'static>) {
+    if span.is_empty() {
+        return;
+    }
+
+    if let Some(last) = line.spans.last_mut()
+        && last.style == span.style
+        && last.link == span.link
+    {
+        let mut merged = String::with_capacity(last.as_str().len() + span.as_str().len());
+        merged.push_str(last.as_str());
+        merged.push_str(span.as_str());
+        last.content = Cow::Owned(merged);
+        return;
+    }
+
+    line.spans.push(span);
+}
+
+fn split_span_words(span: &Span<'static>) -> Vec<Span<'static>> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut in_whitespace = false;
+
+    for grapheme in span.as_str().graphemes(true) {
+        let is_ws = grapheme.chars().all(|c| c.is_whitespace());
+
+        if is_ws != in_whitespace && !current.is_empty() {
+            segments.push(Span {
+                content: Cow::Owned(std::mem::take(&mut current)),
+                style: span.style,
+                link: span.link.clone(),
+            });
+        }
+
+        current.push_str(grapheme);
+        in_whitespace = is_ws;
+    }
+
+    if !current.is_empty() {
+        segments.push(Span {
+            content: Cow::Owned(current),
+            style: span.style,
+            link: span.link.clone(),
+        });
+    }
+
+    segments
+}
+
+fn wrap_line_chars(line: &Line, width: usize) -> Vec<Line> {
+    let mut lines = Vec::new();
+    let mut current = Line::new();
+    let mut current_width = 0;
+
+    for span in line.spans.iter().cloned() {
+        let mut remaining = span;
+        while !remaining.is_empty() {
+            if current_width >= width && !current.is_empty() {
+                lines.push(trim_line_trailing(current));
+                current = Line::new();
+                current_width = 0;
+            }
+
+            let available = width.saturating_sub(current_width).max(1);
+            let span_width = remaining.width();
+
+            if span_width <= available {
+                current_width += span_width;
+                push_span_merged(&mut current, remaining);
+                break;
+            }
+
+            let (left, right) = remaining.split_at_cell(available);
+            if !left.is_empty() {
+                push_span_merged(&mut current, left);
+            }
+            lines.push(trim_line_trailing(current));
+            current = Line::new();
+            current_width = 0;
+            remaining = right;
+        }
+    }
+
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(trim_line_trailing(current));
+    }
+
+    lines
+}
+
+fn wrap_line_words(line: &Line, width: usize, char_fallback: bool) -> Vec<Line> {
+    let mut pieces = Vec::new();
+    for span in &line.spans {
+        pieces.extend(split_span_words(span));
+    }
+
+    let mut lines = Vec::new();
+    let mut current = Line::new();
+    let mut current_width = 0;
+    let mut first_line = true;
+
+    for piece in pieces {
+        let piece_width = piece.width();
+        let is_ws = span_is_whitespace(&piece);
+
+        if current_width + piece_width <= width {
+            if current_width == 0 && !first_line && is_ws {
+                continue;
+            }
+            current_width += piece_width;
+            push_span_merged(&mut current, piece);
+            continue;
+        }
+
+        if !current.is_empty() {
+            lines.push(trim_line_trailing(current));
+            current = Line::new();
+            current_width = 0;
+            first_line = false;
+        }
+
+        if piece_width > width {
+            if char_fallback {
+                let mut remaining = piece;
+                while !remaining.is_empty() {
+                    if current_width >= width && !current.is_empty() {
+                        lines.push(trim_line_trailing(current));
+                        current = Line::new();
+                        current_width = 0;
+                        first_line = false;
+                    }
+
+                    let available = width.saturating_sub(current_width).max(1);
+                    let (left, right) = remaining.split_at_cell(available);
+
+                    // Force progress if the first grapheme is too wide for `available`
+                    // and we are at the start of a line (so we can't wrap further).
+                    let (left, right) =
+                        if left.is_empty() && current.is_empty() && !remaining.is_empty() {
+                            let first_w = remaining
+                                .as_str()
+                                .graphemes(true)
+                                .next()
+                                .map(|g| g.width())
+                                .unwrap_or(1);
+                            remaining.split_at_cell(first_w.max(1))
+                        } else {
+                            (left, right)
+                        };
+
+                    let mut left = left;
+
+                    if current_width == 0 && !first_line {
+                        left = trim_span_start(left);
+                    }
+
+                    if !left.is_empty() {
+                        current_width += left.width();
+                        push_span_merged(&mut current, left);
+                    }
+
+                    if current_width >= width && !current.is_empty() {
+                        lines.push(trim_line_trailing(current));
+                        current = Line::new();
+                        current_width = 0;
+                        first_line = false;
+                    }
+
+                    remaining = right;
+                }
+            } else if !is_ws {
+                let mut trimmed = piece;
+                if !first_line {
+                    trimmed = trim_span_start(trimmed);
+                }
+                if !trimmed.is_empty() {
+                    push_span_merged(&mut current, trimmed);
+                }
+                lines.push(trim_line_trailing(current));
+                current = Line::new();
+                current_width = 0;
+                first_line = false;
+            }
+            continue;
+        }
+
+        let mut trimmed = piece;
+        if !first_line {
+            trimmed = trim_span_start(trimmed);
+        }
+        if !trimmed.is_empty() {
+            current_width += trimmed.width();
+            push_span_merged(&mut current, trimmed);
+        }
+    }
+
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(trim_line_trailing(current));
+    }
+
+    lines
+}
+
 impl From<&str> for Text {
     fn from(s: &str) -> Self {
         Self::raw(s)
@@ -777,6 +1131,20 @@ mod tests {
         let second_style = line.spans()[1].style.unwrap();
         assert!(second_style.has_attr(StyleFlags::BOLD));
         assert!(second_style.has_attr(StyleFlags::ITALIC));
+    }
+
+    #[test]
+    fn line_wrap_preserves_styles_word() {
+        let bold = Style::new().bold();
+        let italic = Style::new().italic();
+        let line = Line::from_spans([Span::styled("Hello", bold), Span::styled(" world", italic)]);
+
+        let wrapped = line.wrap(6, WrapMode::Word);
+        assert_eq!(wrapped.len(), 2);
+        assert_eq!(wrapped[0].spans()[0].as_str(), "Hello");
+        assert_eq!(wrapped[0].spans()[0].style, Some(bold));
+        assert_eq!(wrapped[1].spans()[0].as_str(), "world");
+        assert_eq!(wrapped[1].spans()[0].style, Some(italic));
     }
 
     // ==========================================================================

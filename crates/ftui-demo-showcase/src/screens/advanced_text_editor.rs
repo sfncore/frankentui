@@ -7,6 +7,23 @@
 //! - Search/replace functionality with match navigation
 //! - Cursor position and selection length tracking
 //! - Undo/redo integration
+//!
+//! # Telemetry and Diagnostics (bd-12o8.5)
+//!
+//! This module provides rich diagnostic logging and telemetry hooks:
+//! - JSONL diagnostic output via `DiagnosticLog`
+//! - Observable hooks for search, replace, undo/redo, and text edit events
+//! - Deterministic mode for reproducible testing
+//!
+//! ## Environment Variables
+//!
+//! - `FTUI_TEXTEDITOR_DIAGNOSTICS=true` - Enable verbose diagnostic output
+//! - `FTUI_TEXTEDITOR_DETERMINISTIC=true` - Enable deterministic mode
+
+use std::collections::VecDeque;
+use std::io::Write;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Instant;
 
 use ftui_core::event::{Event, KeyCode, KeyEvent, KeyEventKind, Modifiers};
 use ftui_core::geometry::Rect;
@@ -25,9 +42,509 @@ use ftui_widgets::textarea::TextArea;
 use super::{HelpEntry, Screen};
 use crate::theme;
 
-use std::collections::VecDeque;
-
 const UNDO_HISTORY_LIMIT: usize = 64;
+
+// =============================================================================
+// Diagnostic Logging (bd-12o8.5)
+// =============================================================================
+
+/// Global diagnostic enable flag (checked once at startup).
+static TEXTEDITOR_DIAGNOSTICS_ENABLED: AtomicBool = AtomicBool::new(false);
+/// Global monotonic event counter for deterministic ordering.
+static TEXTEDITOR_EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Initialize diagnostic settings from environment.
+pub fn init_diagnostics() {
+    let enabled = std::env::var("FTUI_TEXTEDITOR_DIAGNOSTICS")
+        .map(|v| v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    TEXTEDITOR_DIAGNOSTICS_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+/// Check if diagnostics are enabled.
+#[inline]
+pub fn diagnostics_enabled() -> bool {
+    TEXTEDITOR_DIAGNOSTICS_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Set diagnostics enabled state (for testing).
+pub fn set_diagnostics_enabled(enabled: bool) {
+    TEXTEDITOR_DIAGNOSTICS_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+/// Get next monotonic event sequence number.
+#[inline]
+fn next_event_seq() -> u64 {
+    TEXTEDITOR_EVENT_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Reset event counter (for testing determinism).
+pub fn reset_event_counter() {
+    TEXTEDITOR_EVENT_COUNTER.store(0, Ordering::Relaxed);
+}
+
+/// Check if deterministic mode is enabled.
+pub fn is_deterministic_mode() -> bool {
+    std::env::var("FTUI_TEXTEDITOR_DETERMINISTIC")
+        .map(|v| v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+/// Diagnostic event types for JSONL logging.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticEventKind {
+    /// Search panel opened.
+    SearchOpened,
+    /// Search panel closed.
+    SearchClosed,
+    /// Search query updated.
+    QueryUpdated,
+    /// Match navigation (next/prev).
+    MatchNavigation,
+    /// Single replace performed.
+    ReplacePerformed,
+    /// Replace all performed.
+    ReplaceAllPerformed,
+    /// Undo performed.
+    UndoPerformed,
+    /// Redo performed.
+    RedoPerformed,
+    /// Text edited (character inserted/deleted).
+    TextEdited,
+    /// Focus changed between panels.
+    FocusChanged,
+    /// Undo history panel toggled.
+    HistoryPanelToggled,
+    /// Selection cleared.
+    SelectionCleared,
+}
+
+impl DiagnosticEventKind {
+    /// Get the JSONL event type string.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SearchOpened => "search_opened",
+            Self::SearchClosed => "search_closed",
+            Self::QueryUpdated => "query_updated",
+            Self::MatchNavigation => "match_navigation",
+            Self::ReplacePerformed => "replace_performed",
+            Self::ReplaceAllPerformed => "replace_all_performed",
+            Self::UndoPerformed => "undo_performed",
+            Self::RedoPerformed => "redo_performed",
+            Self::TextEdited => "text_edited",
+            Self::FocusChanged => "focus_changed",
+            Self::HistoryPanelToggled => "history_panel_toggled",
+            Self::SelectionCleared => "selection_cleared",
+        }
+    }
+}
+
+/// JSONL diagnostic log entry.
+#[derive(Debug, Clone)]
+pub struct DiagnosticEntry {
+    /// Monotonic sequence number.
+    pub seq: u64,
+    /// Timestamp in microseconds.
+    pub timestamp_us: u64,
+    /// Event kind.
+    pub kind: DiagnosticEventKind,
+    /// Current search query.
+    pub query: Option<String>,
+    /// Current replacement text.
+    pub replacement: Option<String>,
+    /// Match count.
+    pub match_count: Option<usize>,
+    /// Current match position (1-based).
+    pub match_position: Option<usize>,
+    /// Replace count (for replace all).
+    pub replace_count: Option<usize>,
+    /// Undo stack depth.
+    pub undo_depth: Option<usize>,
+    /// Redo stack depth.
+    pub redo_depth: Option<usize>,
+    /// Current focus panel.
+    pub focus: Option<String>,
+    /// Navigation direction.
+    pub direction: Option<String>,
+    /// Panel visibility state.
+    pub panel_visible: Option<bool>,
+    /// Cursor line (0-based).
+    pub cursor_line: Option<usize>,
+    /// Cursor column (0-based).
+    pub cursor_col: Option<usize>,
+    /// Selection length in chars.
+    pub selection_len: Option<usize>,
+    /// Text length in chars.
+    pub text_len: Option<usize>,
+    /// Additional context.
+    pub context: Option<String>,
+    /// Checksum for determinism verification.
+    pub checksum: u64,
+}
+
+impl DiagnosticEntry {
+    /// Create a new diagnostic entry with current timestamp.
+    pub fn new(kind: DiagnosticEventKind) -> Self {
+        let timestamp_us = if is_deterministic_mode() {
+            next_event_seq() * 1000
+        } else {
+            static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+            let start = START.get_or_init(Instant::now);
+            start.elapsed().as_micros() as u64
+        };
+
+        Self {
+            seq: next_event_seq(),
+            timestamp_us,
+            kind,
+            query: None,
+            replacement: None,
+            match_count: None,
+            match_position: None,
+            replace_count: None,
+            undo_depth: None,
+            redo_depth: None,
+            focus: None,
+            direction: None,
+            panel_visible: None,
+            cursor_line: None,
+            cursor_col: None,
+            selection_len: None,
+            text_len: None,
+            context: None,
+            checksum: 0,
+        }
+    }
+
+    /// Set query.
+    #[must_use]
+    pub fn with_query(mut self, query: impl Into<String>) -> Self {
+        self.query = Some(query.into());
+        self
+    }
+
+    /// Set replacement.
+    #[must_use]
+    pub fn with_replacement(mut self, replacement: impl Into<String>) -> Self {
+        self.replacement = Some(replacement.into());
+        self
+    }
+
+    /// Set match count.
+    #[must_use]
+    pub fn with_match_count(mut self, count: usize) -> Self {
+        self.match_count = Some(count);
+        self
+    }
+
+    /// Set match position.
+    #[must_use]
+    pub fn with_match_position(mut self, pos: usize) -> Self {
+        self.match_position = Some(pos);
+        self
+    }
+
+    /// Set replace count.
+    #[must_use]
+    pub fn with_replace_count(mut self, count: usize) -> Self {
+        self.replace_count = Some(count);
+        self
+    }
+
+    /// Set undo depth.
+    #[must_use]
+    pub fn with_undo_depth(mut self, depth: usize) -> Self {
+        self.undo_depth = Some(depth);
+        self
+    }
+
+    /// Set redo depth.
+    #[must_use]
+    pub fn with_redo_depth(mut self, depth: usize) -> Self {
+        self.redo_depth = Some(depth);
+        self
+    }
+
+    /// Set focus.
+    #[must_use]
+    pub fn with_focus(mut self, focus: impl Into<String>) -> Self {
+        self.focus = Some(focus.into());
+        self
+    }
+
+    /// Set direction.
+    #[must_use]
+    pub fn with_direction(mut self, direction: impl Into<String>) -> Self {
+        self.direction = Some(direction.into());
+        self
+    }
+
+    /// Set panel visibility.
+    #[must_use]
+    pub fn with_panel_visible(mut self, visible: bool) -> Self {
+        self.panel_visible = Some(visible);
+        self
+    }
+
+    /// Set cursor position.
+    #[must_use]
+    pub fn with_cursor(mut self, line: usize, col: usize) -> Self {
+        self.cursor_line = Some(line);
+        self.cursor_col = Some(col);
+        self
+    }
+
+    /// Set selection length.
+    #[must_use]
+    pub fn with_selection_len(mut self, len: usize) -> Self {
+        self.selection_len = Some(len);
+        self
+    }
+
+    /// Set text length.
+    #[must_use]
+    pub fn with_text_len(mut self, len: usize) -> Self {
+        self.text_len = Some(len);
+        self
+    }
+
+    /// Set context.
+    #[must_use]
+    pub fn with_context(mut self, context: impl Into<String>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    /// Compute and set checksum.
+    #[must_use]
+    pub fn with_checksum(mut self) -> Self {
+        self.checksum = self.compute_checksum();
+        self
+    }
+
+    /// Compute FNV-1a hash of entry fields.
+    fn compute_checksum(&self) -> u64 {
+        let mut hash: u64 = 0xcbf29ce484222325;
+        let payload = format!(
+            "{:?}{}{}{}{}{}{}{}",
+            self.kind,
+            self.query.as_deref().unwrap_or(""),
+            self.match_count.unwrap_or(0),
+            self.match_position.unwrap_or(0),
+            self.undo_depth.unwrap_or(0),
+            self.redo_depth.unwrap_or(0),
+            self.focus.as_deref().unwrap_or(""),
+            self.context.as_deref().unwrap_or("")
+        );
+        for &b in payload.as_bytes() {
+            hash ^= b as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash
+    }
+
+    /// Format as JSONL string.
+    pub fn to_jsonl(&self) -> String {
+        let mut parts = vec![
+            format!("\"seq\":{}", self.seq),
+            format!("\"ts_us\":{}", self.timestamp_us),
+            format!("\"kind\":\"{}\"", self.kind.as_str()),
+        ];
+
+        if let Some(ref q) = self.query {
+            let escaped = q.replace('\\', "\\\\").replace('"', "\\\"");
+            parts.push(format!("\"query\":\"{escaped}\""));
+        }
+        if let Some(ref r) = self.replacement {
+            let escaped = r.replace('\\', "\\\\").replace('"', "\\\"");
+            parts.push(format!("\"replacement\":\"{escaped}\""));
+        }
+        if let Some(c) = self.match_count {
+            parts.push(format!("\"match_count\":{c}"));
+        }
+        if let Some(p) = self.match_position {
+            parts.push(format!("\"match_position\":{p}"));
+        }
+        if let Some(c) = self.replace_count {
+            parts.push(format!("\"replace_count\":{c}"));
+        }
+        if let Some(d) = self.undo_depth {
+            parts.push(format!("\"undo_depth\":{d}"));
+        }
+        if let Some(d) = self.redo_depth {
+            parts.push(format!("\"redo_depth\":{d}"));
+        }
+        if let Some(ref f) = self.focus {
+            parts.push(format!("\"focus\":\"{f}\""));
+        }
+        if let Some(ref d) = self.direction {
+            parts.push(format!("\"direction\":\"{d}\""));
+        }
+        if let Some(v) = self.panel_visible {
+            parts.push(format!("\"panel_visible\":{v}"));
+        }
+        if let Some(l) = self.cursor_line {
+            parts.push(format!("\"cursor_line\":{l}"));
+        }
+        if let Some(c) = self.cursor_col {
+            parts.push(format!("\"cursor_col\":{c}"));
+        }
+        if let Some(l) = self.selection_len {
+            parts.push(format!("\"selection_len\":{l}"));
+        }
+        if let Some(l) = self.text_len {
+            parts.push(format!("\"text_len\":{l}"));
+        }
+        if let Some(ref ctx) = self.context {
+            let escaped = ctx.replace('\\', "\\\\").replace('"', "\\\"");
+            parts.push(format!("\"context\":\"{escaped}\""));
+        }
+        parts.push(format!("\"checksum\":\"{:016x}\"", self.checksum));
+
+        format!("{{{}}}", parts.join(","))
+    }
+}
+
+/// Diagnostic log collector.
+#[derive(Debug, Default)]
+pub struct DiagnosticLog {
+    entries: Vec<DiagnosticEntry>,
+    max_entries: usize,
+    write_stderr: bool,
+}
+
+impl DiagnosticLog {
+    /// Create a new diagnostic log.
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            max_entries: 10000,
+            write_stderr: false,
+        }
+    }
+
+    /// Create a log that writes to stderr.
+    pub fn with_stderr(mut self) -> Self {
+        self.write_stderr = true;
+        self
+    }
+
+    /// Set maximum entries to keep.
+    pub fn with_max_entries(mut self, max: usize) -> Self {
+        self.max_entries = max;
+        self
+    }
+
+    /// Record a diagnostic entry.
+    pub fn record(&mut self, entry: DiagnosticEntry) {
+        if self.write_stderr {
+            let _ = writeln!(std::io::stderr(), "{}", entry.to_jsonl());
+        }
+        if self.max_entries > 0 && self.entries.len() >= self.max_entries {
+            self.entries.remove(0);
+        }
+        self.entries.push(entry);
+    }
+
+    /// Get all entries.
+    pub fn entries(&self) -> &[DiagnosticEntry] {
+        &self.entries
+    }
+
+    /// Get entries of a specific kind.
+    pub fn entries_of_kind(&self, kind: DiagnosticEventKind) -> Vec<&DiagnosticEntry> {
+        self.entries.iter().filter(|e| e.kind == kind).collect()
+    }
+
+    /// Clear all entries.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// Export all entries as JSONL string.
+    pub fn to_jsonl(&self) -> String {
+        self.entries
+            .iter()
+            .map(DiagnosticEntry::to_jsonl)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Get summary statistics.
+    pub fn summary(&self) -> DiagnosticSummary {
+        let mut summary = DiagnosticSummary::default();
+        for entry in &self.entries {
+            match entry.kind {
+                DiagnosticEventKind::SearchOpened => summary.search_opened_count += 1,
+                DiagnosticEventKind::SearchClosed => summary.search_closed_count += 1,
+                DiagnosticEventKind::QueryUpdated => summary.query_updated_count += 1,
+                DiagnosticEventKind::MatchNavigation => summary.match_navigation_count += 1,
+                DiagnosticEventKind::ReplacePerformed => summary.replace_performed_count += 1,
+                DiagnosticEventKind::ReplaceAllPerformed => {
+                    summary.replace_all_performed_count += 1
+                }
+                DiagnosticEventKind::UndoPerformed => summary.undo_performed_count += 1,
+                DiagnosticEventKind::RedoPerformed => summary.redo_performed_count += 1,
+                DiagnosticEventKind::TextEdited => summary.text_edited_count += 1,
+                DiagnosticEventKind::FocusChanged => summary.focus_changed_count += 1,
+                DiagnosticEventKind::HistoryPanelToggled => {
+                    summary.history_panel_toggled_count += 1
+                }
+                DiagnosticEventKind::SelectionCleared => summary.selection_cleared_count += 1,
+            }
+        }
+        summary.total_entries = self.entries.len();
+        summary
+    }
+}
+
+/// Summary statistics from a diagnostic log.
+#[derive(Debug, Default, Clone)]
+pub struct DiagnosticSummary {
+    pub total_entries: usize,
+    pub search_opened_count: usize,
+    pub search_closed_count: usize,
+    pub query_updated_count: usize,
+    pub match_navigation_count: usize,
+    pub replace_performed_count: usize,
+    pub replace_all_performed_count: usize,
+    pub undo_performed_count: usize,
+    pub redo_performed_count: usize,
+    pub text_edited_count: usize,
+    pub focus_changed_count: usize,
+    pub history_panel_toggled_count: usize,
+    pub selection_cleared_count: usize,
+}
+
+impl DiagnosticSummary {
+    /// Format as JSONL.
+    pub fn to_jsonl(&self) -> String {
+        format!(
+            "{{\"summary\":true,\"total\":{},\"search_opened\":{},\"search_closed\":{},\
+             \"query_updated\":{},\"match_navigation\":{},\"replace_performed\":{},\
+             \"replace_all_performed\":{},\"undo_performed\":{},\"redo_performed\":{},\
+             \"text_edited\":{},\"focus_changed\":{},\"history_panel_toggled\":{},\
+             \"selection_cleared\":{}}}",
+            self.total_entries,
+            self.search_opened_count,
+            self.search_closed_count,
+            self.query_updated_count,
+            self.match_navigation_count,
+            self.replace_performed_count,
+            self.replace_all_performed_count,
+            self.undo_performed_count,
+            self.redo_performed_count,
+            self.text_edited_count,
+            self.focus_changed_count,
+            self.history_panel_toggled_count,
+            self.selection_cleared_count
+        )
+    }
+}
+
+// =============================================================================
+// Editor Implementation
+// =============================================================================
 
 #[derive(Debug, Clone, Copy)]
 struct KeyChord {
@@ -89,6 +606,14 @@ impl Focus {
             Self::Replace => Self::Search,
         }
     }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Editor => "editor",
+            Self::Search => "search",
+            Self::Replace => "replace",
+        }
+    }
 }
 
 /// Advanced Text Editor demo screen.
@@ -117,6 +642,8 @@ pub struct AdvancedTextEditor {
     undo_panel_visible: bool,
     /// Undo/redo keybindings.
     undo_keys: UndoKeybindings,
+    /// Diagnostic log for telemetry (bd-12o8.5).
+    diagnostic_log: DiagnosticLog,
 }
 
 impl Default for AdvancedTextEditor {
@@ -166,6 +693,13 @@ and proper Unicode handling throughout.
             .with_placeholder("Replace with...")
             .with_focused(false);
 
+        // Create diagnostic log (writes to stderr if env var enabled)
+        let diagnostic_log = if diagnostics_enabled() {
+            DiagnosticLog::new().with_stderr()
+        } else {
+            DiagnosticLog::new()
+        };
+
         Self {
             editor,
             search_input,
@@ -179,6 +713,7 @@ and proper Unicode handling throughout.
             redo_stack: VecDeque::new(),
             undo_panel_visible: false,
             undo_keys: UndoKeybindings::default(),
+            diagnostic_log,
         }
     }
 
@@ -187,6 +722,23 @@ and proper Unicode handling throughout.
     fn with_undo_keybindings(mut self, bindings: UndoKeybindings) -> Self {
         self.undo_keys = bindings;
         self
+    }
+
+    /// Get the diagnostic log (for testing/inspection).
+    pub fn diagnostic_log(&self) -> &DiagnosticLog {
+        &self.diagnostic_log
+    }
+
+    /// Get mutable diagnostic log.
+    pub fn diagnostic_log_mut(&mut self) -> &mut DiagnosticLog {
+        &mut self.diagnostic_log
+    }
+
+    /// Log a diagnostic event if diagnostics are enabled.
+    fn log_event(&mut self, entry: DiagnosticEntry) {
+        if diagnostics_enabled() {
+            self.diagnostic_log.record(entry.with_checksum());
+        }
     }
 
     /// Apply the current theme to all widgets.
@@ -243,6 +795,12 @@ and proper Unicode handling throughout.
 
         let text = self.editor.text();
         self.search_results = search_ascii_case_insensitive(&text, &query);
+
+        // Log query update
+        let entry = DiagnosticEntry::new(DiagnosticEventKind::QueryUpdated)
+            .with_query(&query)
+            .with_match_count(self.search_results.len());
+        self.log_event(entry);
 
         if self.search_results.is_empty() {
             self.current_match = None;
@@ -327,6 +885,13 @@ and proper Unicode handling throughout.
         self.current_match = Some((idx + 1) % self.search_results.len());
         self.jump_to_current_match();
         self.update_status();
+
+        // Log navigation
+        let entry = DiagnosticEntry::new(DiagnosticEventKind::MatchNavigation)
+            .with_direction("next")
+            .with_match_position(self.current_match.map_or(0, |i| i + 1))
+            .with_match_count(self.search_results.len());
+        self.log_event(entry);
     }
 
     /// Move to the previous search match.
@@ -338,6 +903,13 @@ and proper Unicode handling throughout.
         self.current_match = Some(idx.checked_sub(1).unwrap_or(self.search_results.len() - 1));
         self.jump_to_current_match();
         self.update_status();
+
+        // Log navigation
+        let entry = DiagnosticEntry::new(DiagnosticEventKind::MatchNavigation)
+            .with_direction("prev")
+            .with_match_position(self.current_match.map_or(0, |i| i + 1))
+            .with_match_count(self.search_results.len());
+        self.log_event(entry);
     }
 
     /// Replace the current match with the replacement text.
@@ -359,6 +931,14 @@ and proper Unicode handling throughout.
             replacement,
             &text[result.range.end..]
         );
+
+        // Log replace
+        let entry = DiagnosticEntry::new(DiagnosticEventKind::ReplacePerformed)
+            .with_query(self.search_input.value())
+            .with_replacement(&replacement)
+            .with_match_position(idx + 1)
+            .with_text_len(new_text.chars().count());
+        self.log_event(entry);
 
         self.editor.set_text(&new_text);
         self.do_search(); // Re-run search
@@ -391,6 +971,15 @@ and proper Unicode handling throughout.
         }
 
         let count = self.search_results.len();
+
+        // Log replace all
+        let entry = DiagnosticEntry::new(DiagnosticEventKind::ReplaceAllPerformed)
+            .with_query(&query)
+            .with_replacement(&replacement)
+            .with_replace_count(count)
+            .with_text_len(new_text.chars().count());
+        self.log_event(entry);
+
         self.editor.set_text(&new_text);
         self.search_results.clear();
         self.current_match = None;
@@ -582,6 +1171,12 @@ and proper Unicode handling throughout.
         if self.undo_stack.pop_back().is_some() {
             self.editor.undo();
             self.redo_stack.push_back("Redo edit".to_string());
+
+            // Log undo
+            let entry = DiagnosticEntry::new(DiagnosticEventKind::UndoPerformed)
+                .with_undo_depth(self.undo_stack.len())
+                .with_redo_depth(self.redo_stack.len());
+            self.log_event(entry);
         }
         self.update_status();
     }
@@ -590,6 +1185,12 @@ and proper Unicode handling throughout.
         if self.redo_stack.pop_back().is_some() {
             self.editor.redo();
             self.undo_stack.push_back("Edit text".to_string());
+
+            // Log redo
+            let entry = DiagnosticEntry::new(DiagnosticEventKind::RedoPerformed)
+                .with_undo_depth(self.undo_stack.len())
+                .with_redo_depth(self.redo_stack.len());
+            self.log_event(entry);
         }
         self.update_status();
     }
@@ -609,8 +1210,16 @@ impl Screen for AdvancedTextEditor {
             && modifiers.contains(Modifiers::CTRL)
             && self.search_visible
         {
+            let old_focus = self.focus;
             self.focus = self.focus.next();
             self.update_focus_states();
+
+            // Log focus change
+            let entry = DiagnosticEntry::new(DiagnosticEventKind::FocusChanged)
+                .with_focus(self.focus.as_str())
+                .with_context(format!("from {} via Ctrl+Right", old_focus.as_str()));
+            self.log_event(entry);
+
             return Cmd::None;
         }
         if let Event::Key(KeyEvent {
@@ -622,8 +1231,16 @@ impl Screen for AdvancedTextEditor {
             && modifiers.contains(Modifiers::CTRL)
             && self.search_visible
         {
+            let old_focus = self.focus;
             self.focus = self.focus.prev();
             self.update_focus_states();
+
+            // Log focus change
+            let entry = DiagnosticEntry::new(DiagnosticEventKind::FocusChanged)
+                .with_focus(self.focus.as_str())
+                .with_context(format!("from {} via Ctrl+Left", old_focus.as_str()));
+            self.log_event(entry);
+
             return Cmd::None;
         }
 
@@ -654,6 +1271,12 @@ impl Screen for AdvancedTextEditor {
                 (KeyCode::Char('u'), true, false) => {
                     self.undo_panel_visible = !self.undo_panel_visible;
                     self.update_status();
+
+                    // Log history panel toggle
+                    let entry = DiagnosticEntry::new(DiagnosticEventKind::HistoryPanelToggled)
+                        .with_panel_visible(self.undo_panel_visible);
+                    self.log_event(entry);
+
                     return Cmd::None;
                 }
                 // Ctrl+F: Toggle search panel and focus search input
@@ -661,6 +1284,13 @@ impl Screen for AdvancedTextEditor {
                     self.search_visible = true;
                     self.focus = Focus::Search;
                     self.update_focus_states();
+
+                    // Log search opened
+                    let entry = DiagnosticEntry::new(DiagnosticEventKind::SearchOpened)
+                        .with_focus("search")
+                        .with_panel_visible(true);
+                    self.log_event(entry);
+
                     return Cmd::None;
                 }
                 // Ctrl+H: Toggle replace panel
@@ -668,6 +1298,13 @@ impl Screen for AdvancedTextEditor {
                     self.search_visible = true;
                     self.focus = Focus::Replace;
                     self.update_focus_states();
+
+                    // Log search opened (replace mode)
+                    let entry = DiagnosticEntry::new(DiagnosticEventKind::SearchOpened)
+                        .with_focus("replace")
+                        .with_panel_visible(true);
+                    self.log_event(entry);
+
                     return Cmd::None;
                 }
                 // Escape: Close search panel if open, or clear selection
@@ -676,8 +1313,18 @@ impl Screen for AdvancedTextEditor {
                         self.search_visible = false;
                         self.focus = Focus::Editor;
                         self.update_focus_states();
+
+                        // Log search closed
+                        let entry = DiagnosticEntry::new(DiagnosticEventKind::SearchClosed)
+                            .with_focus("editor")
+                            .with_panel_visible(false);
+                        self.log_event(entry);
                     } else {
                         self.editor.clear_selection();
+
+                        // Log selection cleared
+                        let entry = DiagnosticEntry::new(DiagnosticEventKind::SelectionCleared);
+                        self.log_event(entry);
                     }
                     self.update_status();
                     return Cmd::None;
@@ -704,6 +1351,14 @@ impl Screen for AdvancedTextEditor {
                 let after = self.editor.text();
                 if before != after {
                     self.record_undo("Edit text");
+
+                    // Log text edit
+                    let cursor = self.editor.cursor();
+                    let entry = DiagnosticEntry::new(DiagnosticEventKind::TextEdited)
+                        .with_text_len(after.chars().count())
+                        .with_cursor(cursor.line, cursor.grapheme)
+                        .with_undo_depth(self.undo_stack.len());
+                    self.log_event(entry);
                 }
                 self.update_status();
             }
@@ -1096,5 +1751,146 @@ mod tests {
         // Replace all
         screen.replace_all();
         assert_eq!(screen.editor.text(), "XXX bar XXX baz XXX");
+    }
+
+    // =============================================================================
+    // Diagnostic Logging Tests (bd-12o8.5)
+    // =============================================================================
+
+    #[test]
+    fn diagnostic_entry_jsonl_format() {
+        reset_event_counter();
+        let entry = DiagnosticEntry::new(DiagnosticEventKind::SearchOpened)
+            .with_query("test")
+            .with_match_count(5)
+            .with_focus("search")
+            .with_checksum();
+
+        let jsonl = entry.to_jsonl();
+        assert!(jsonl.contains("\"kind\":\"search_opened\""));
+        assert!(jsonl.contains("\"query\":\"test\""));
+        assert!(jsonl.contains("\"match_count\":5"));
+        assert!(jsonl.contains("\"focus\":\"search\""));
+        assert!(jsonl.contains("\"checksum\":"));
+    }
+
+    #[test]
+    fn diagnostic_log_records_entries() {
+        let mut log = DiagnosticLog::new();
+        assert!(log.entries().is_empty());
+
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SearchOpened));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::QueryUpdated));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SearchClosed));
+
+        assert_eq!(log.entries().len(), 3);
+        assert_eq!(
+            log.entries_of_kind(DiagnosticEventKind::SearchOpened).len(),
+            1
+        );
+        assert_eq!(
+            log.entries_of_kind(DiagnosticEventKind::QueryUpdated).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn diagnostic_summary_counts() {
+        let mut log = DiagnosticLog::new();
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SearchOpened));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::QueryUpdated));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::QueryUpdated));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::MatchNavigation));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ReplacePerformed));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::UndoPerformed));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::UndoPerformed));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::UndoPerformed));
+
+        let summary = log.summary();
+        assert_eq!(summary.total_entries, 8);
+        assert_eq!(summary.search_opened_count, 1);
+        assert_eq!(summary.query_updated_count, 2);
+        assert_eq!(summary.match_navigation_count, 1);
+        assert_eq!(summary.replace_performed_count, 1);
+        assert_eq!(summary.undo_performed_count, 3);
+    }
+
+    #[test]
+    fn diagnostic_log_to_jsonl() {
+        reset_event_counter();
+        let mut log = DiagnosticLog::new();
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::TextEdited).with_text_len(100));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::UndoPerformed).with_undo_depth(5));
+
+        let jsonl = log.to_jsonl();
+        let lines: Vec<&str> = jsonl.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("text_edited"));
+        assert!(lines[1].contains("undo_performed"));
+    }
+
+    #[test]
+    fn diagnostic_log_max_entries() {
+        let mut log = DiagnosticLog::new().with_max_entries(3);
+
+        for _ in 0..5 {
+            log.record(DiagnosticEntry::new(DiagnosticEventKind::TextEdited));
+        }
+
+        assert_eq!(log.entries().len(), 3);
+    }
+
+    #[test]
+    fn diagnostic_log_clear() {
+        let mut log = DiagnosticLog::new();
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SearchOpened));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SearchClosed));
+        assert_eq!(log.entries().len(), 2);
+
+        log.clear();
+        assert!(log.entries().is_empty());
+    }
+
+    #[test]
+    fn diagnostic_entry_escapes_special_chars() {
+        let entry = DiagnosticEntry::new(DiagnosticEventKind::QueryUpdated)
+            .with_query("test \"quoted\" \\backslash")
+            .with_context("context with \"quotes\"");
+
+        let jsonl = entry.to_jsonl();
+        assert!(jsonl.contains("\\\"quoted\\\""));
+        assert!(jsonl.contains("\\\\backslash"));
+    }
+
+    #[test]
+    fn editor_has_diagnostic_log() {
+        let screen = AdvancedTextEditor::new();
+        // Should have an empty diagnostic log by default (diagnostics disabled)
+        assert!(screen.diagnostic_log().entries().is_empty());
+    }
+
+    #[test]
+    fn diagnostic_summary_jsonl_format() {
+        let summary = DiagnosticSummary {
+            total_entries: 10,
+            search_opened_count: 2,
+            search_closed_count: 2,
+            query_updated_count: 3,
+            match_navigation_count: 1,
+            replace_performed_count: 1,
+            replace_all_performed_count: 0,
+            undo_performed_count: 1,
+            redo_performed_count: 0,
+            text_edited_count: 0,
+            focus_changed_count: 0,
+            history_panel_toggled_count: 0,
+            selection_cleared_count: 0,
+        };
+
+        let jsonl = summary.to_jsonl();
+        assert!(jsonl.contains("\"summary\":true"));
+        assert!(jsonl.contains("\"total\":10"));
+        assert!(jsonl.contains("\"search_opened\":2"));
+        assert!(jsonl.contains("\"query_updated\":3"));
     }
 }

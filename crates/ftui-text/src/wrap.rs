@@ -126,7 +126,7 @@ fn wrap_chars(text: &str, options: &WrapOptions) -> Vec<String> {
 
     for grapheme in text.graphemes(true) {
         // Handle newlines
-        if grapheme == "\n" {
+        if grapheme == "\n" || grapheme == "\r\n" {
             lines.push(finalize_line(&current_line, options));
             current_line.clear();
             current_width = 0;
@@ -665,6 +665,13 @@ fn kp_tokenize(text: &str) -> Vec<KpWord> {
                 let w: &mut KpWord = last;
                 w.text.push_str(seg);
                 w.space_width += UnicodeWidthStr::width(seg);
+            } else {
+                // Handle leading whitespace as a word with 0 content width
+                words.push(KpWord {
+                    text: seg.to_string(),
+                    content_width: 0,
+                    space_width: UnicodeWidthStr::width(seg),
+                });
             }
             i += 1;
         } else {

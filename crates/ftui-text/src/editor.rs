@@ -95,6 +95,10 @@ pub struct Editor {
     redo_stack: Vec<(EditOp, CursorPosition)>,
     /// Maximum undo history depth.
     max_history: usize,
+    /// Current size of undo history in bytes.
+    current_undo_size: usize,
+    /// Maximum size of undo history in bytes (default 10MB).
+    max_undo_size: usize,
 }
 
 impl Default for Editor {
@@ -114,6 +118,8 @@ impl Editor {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             max_history: 1000,
+            current_undo_size: 0,
+            max_undo_size: 10 * 1024 * 1024, // 10MB default
         }
     }
 
@@ -130,12 +136,24 @@ impl Editor {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             max_history: 1000,
+            current_undo_size: 0,
+            max_undo_size: 10 * 1024 * 1024,
         }
     }
 
     /// Set the maximum undo history depth.
     pub fn set_max_history(&mut self, max: usize) {
         self.max_history = max;
+    }
+
+    /// Set the maximum undo history size in bytes.
+    pub fn set_max_undo_size(&mut self, bytes: usize) {
+        self.max_undo_size = bytes;
+        // Prune if now over limit
+        while self.current_undo_size > self.max_undo_size && !self.undo_stack.is_empty() {
+            let (op, _) = self.undo_stack.remove(0);
+            self.current_undo_size -= op.byte_len();
+        }
     }
 
     /// Get the full text content as a string.
@@ -214,10 +232,24 @@ impl Editor {
     }
 
     /// Insert text at the cursor position. Deletes selection first if active.
+    ///
+    /// Control characters (except newline and tab) are stripped to prevent
+    /// terminal corruption.
     pub fn insert_text(&mut self, text: &str) {
         if text.is_empty() {
             return;
         }
+
+        // Sanitize input: allow \n and \t, strip other control chars
+        let sanitized: String = text
+            .chars()
+            .filter(|&c| !c.is_control() || c == '\n' || c == '\t')
+            .collect();
+
+        if sanitized.is_empty() {
+            return;
+        }
+
         self.delete_selection_inner();
         let nav = CursorNavigator::new(&self.rope);
         let byte_idx = nav.to_byte_index(self.cursor);
@@ -225,13 +257,13 @@ impl Editor {
 
         self.push_undo(EditOp::Insert {
             byte_offset: byte_idx,
-            text: text.to_string(),
+            text: sanitized.clone(),
         });
 
-        self.rope.insert(char_idx, text);
+        self.rope.insert(char_idx, &sanitized);
 
         // Move cursor to end of inserted text
-        let new_byte_idx = byte_idx + text.len();
+        let new_byte_idx = byte_idx + sanitized.len();
         let nav = CursorNavigator::new(&self.rope);
         self.cursor = nav.from_byte_index(new_byte_idx);
     }
@@ -385,10 +417,25 @@ impl Editor {
 
     /// Push an edit operation onto the undo stack.
     fn push_undo(&mut self, op: EditOp) {
+        let op_len = op.byte_len();
         self.undo_stack.push((op, self.cursor));
+        self.current_undo_size += op_len;
+
+        // Prune by count
         if self.undo_stack.len() > self.max_history {
+            if let Some((removed_op, _)) = self.undo_stack.first() {
+                self.current_undo_size =
+                    self.current_undo_size.saturating_sub(removed_op.byte_len());
+            }
             self.undo_stack.remove(0);
         }
+
+        // Prune by size
+        while self.current_undo_size > self.max_undo_size && !self.undo_stack.is_empty() {
+            let (removed_op, _) = self.undo_stack.remove(0);
+            self.current_undo_size = self.current_undo_size.saturating_sub(removed_op.byte_len());
+        }
+
         self.redo_stack.clear();
     }
 
@@ -397,6 +444,7 @@ impl Editor {
         let Some((op, cursor_before)) = self.undo_stack.pop() else {
             return false;
         };
+        self.current_undo_size = self.current_undo_size.saturating_sub(op.byte_len());
         let inverse = op.inverse();
         self.apply_op(&inverse);
         self.redo_stack.push((inverse, self.cursor));
@@ -412,7 +460,17 @@ impl Editor {
         };
         let inverse = op.inverse();
         self.apply_op(&inverse);
+
+        let op_len = inverse.byte_len();
         self.undo_stack.push((inverse, self.cursor));
+        self.current_undo_size += op_len;
+
+        // Ensure size limit after redo (edge case where redo grows stack)
+        while self.current_undo_size > self.max_undo_size && !self.undo_stack.is_empty() {
+            let (removed_op, _) = self.undo_stack.remove(0);
+            self.current_undo_size = self.current_undo_size.saturating_sub(removed_op.byte_len());
+        }
+
         self.cursor = cursor_before;
         self.selection = None;
         // Move cursor to the correct position after redo
@@ -633,6 +691,7 @@ impl Editor {
         self.selection = None;
         self.undo_stack.clear();
         self.redo_stack.clear();
+        self.current_undo_size = 0;
     }
 
     /// Clear all content and reset cursor. Clears undo history.
@@ -642,6 +701,16 @@ impl Editor {
         self.selection = None;
         self.undo_stack.clear();
         self.redo_stack.clear();
+        self.current_undo_size = 0;
+    }
+}
+
+impl EditOp {
+    fn byte_len(&self) -> usize {
+        match self {
+            Self::Insert { text, .. } => text.len(),
+            Self::Delete { text, .. } => text.len(),
+        }
     }
 }
 
@@ -1388,6 +1457,15 @@ mod tests {
         let ed = Editor::with_text("test");
         let rope = ed.rope();
         assert_eq!(rope.len_bytes(), 4);
+    }
+
+    #[test]
+    fn insert_text_sanitizes_controls() {
+        let mut ed = Editor::new();
+        // Insert text with ESC (\x1b) and BEL (\x07) mixed with safe chars
+        ed.insert_text("hello\x1bworld\x07\n\t!");
+        // Should contain "hello", "world", "\n", "\t", "!" but NO control chars
+        assert_eq!(ed.text(), "helloworld\n\t!");
     }
 
     #[test]

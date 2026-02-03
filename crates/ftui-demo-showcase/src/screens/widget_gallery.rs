@@ -1847,7 +1847,7 @@ impl WidgetGallery {
                 .entry("j/k", "Navigate")
                 .entry("enter", "Select")
                 .entry("?", "Help");
-            help.render(help_cols[1], frame);
+            Widget::render(&help, help_cols[1], frame);
         }
     }
 }

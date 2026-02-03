@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-ftui-core = { path = "../ftui-core" }
+ftui-core = { path = "../ftui-core", features = ["caps-probe"] }
 ftui-render = { path = "../ftui-render" }
 ftui-style = { path = "../ftui-style" }
 ftui-text = { path = "../ftui-text", features = ["markup"] }
@@ -39,6 +39,8 @@ unicode-width = "0.2.2"
 
 [features]
 debug-render = []
+caps-probe = ["ftui-core/caps-probe"]
+default = ["caps-probe"]
 
 [dev-dependencies]
 ftui-harness = { path = "../ftui-harness" }

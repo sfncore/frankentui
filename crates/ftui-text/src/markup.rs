@@ -460,6 +460,11 @@ fn parse_hex_color(hex: &str, position: usize) -> Result<PackedRgba, MarkupError
         position,
     };
 
+    // Ensure valid hex characters to prevent panics on slicing and invalid values
+    if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(make_err());
+    }
+
     match hex.len() {
         3 => {
             // #rgb -> #rrggbb

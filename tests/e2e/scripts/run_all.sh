@@ -152,6 +152,9 @@ else
     if [[ -x "$SCRIPT_DIR/test_virtualized_search.sh" ]]; then
         run_suite "virtualized_search" "$SCRIPT_DIR/test_virtualized_search.sh"
     fi
+    if [[ -x "$SCRIPT_DIR/test_layout_composer_resize.sh" ]]; then
+        run_suite "layout_composer_resize" "$SCRIPT_DIR/test_layout_composer_resize.sh"
+    fi
     if [[ -x "$SCRIPT_DIR/test_terminal_quirks.sh" ]]; then
         run_suite "terminal_quirks" "$SCRIPT_DIR/test_terminal_quirks.sh"
     fi

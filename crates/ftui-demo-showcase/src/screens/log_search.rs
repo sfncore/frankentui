@@ -1751,4 +1751,669 @@ mod tests {
         // Should have recorded events
         assert!(event_count.load(Ordering::Relaxed) >= 2);
     }
+
+    // =========================================================================
+    // Unit Tests + Property Coverage (bd-1b5h.7)
+    // =========================================================================
+
+    /// Helper to create a key event with modifiers.
+    fn key_press_with_mod(code: KeyCode, modifiers: Modifiers) -> Event {
+        Event::Key(KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+        })
+    }
+
+    // -------------------------------------------------------------------------
+    // Literal vs Regex Match Correctness
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_search_literal_finds_exact_substring() {
+        let mut screen = LogSearch::new();
+
+        // Search for literal "INFO"
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "INFO");
+        screen.update(&key_press(KeyCode::Enter));
+
+        // Should find matches in the initial 50 log lines
+        let info = screen.viewer.search_info();
+        assert!(info.is_some(), "Should find INFO matches in log lines");
+        let (_, total) = info.unwrap();
+        assert!(total > 0, "Should have at least one INFO match");
+    }
+
+    #[test]
+    fn test_search_literal_special_chars_not_regex() {
+        let mut screen = LogSearch::new();
+
+        // Add a line with regex special characters
+        screen.viewer.push("test [bracket] pattern");
+
+        // Search for literal "[bracket]" - should not be treated as regex
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "[bracket]");
+        screen.update(&key_press(KeyCode::Enter));
+
+        let info = screen.viewer.search_info();
+        assert!(info.is_some(), "Should find literal [bracket] match");
+        let (_, total) = info.unwrap();
+        assert_eq!(total, 1, "Should find exactly one match");
+    }
+
+    #[test]
+    fn test_search_regex_mode_toggle() {
+        let mut screen = LogSearch::new().with_diagnostics();
+
+        // Open search mode
+        screen.update(&key_press(KeyCode::Char('/')));
+        assert_eq!(screen.search_config.mode, SearchMode::Literal);
+
+        // Toggle to regex mode with Ctrl+R
+        screen.update(&key_press_with_mod(KeyCode::Char('r'), Modifiers::CTRL));
+        assert_eq!(screen.search_config.mode, SearchMode::Regex);
+
+        // Toggle back to literal
+        screen.update(&key_press_with_mod(KeyCode::Char('r'), Modifiers::CTRL));
+        assert_eq!(screen.search_config.mode, SearchMode::Literal);
+
+        // Verify diagnostic recorded the mode change
+        let log = screen.diagnostic_log().unwrap();
+        let updates = log.entries_of_kind(DiagnosticEventKind::QueryUpdated);
+        assert!(
+            updates
+                .iter()
+                .any(|e| e.context.as_deref() == Some("mode toggled"))
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Case Sensitivity Toggle
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_search_case_sensitivity_toggle() {
+        let mut screen = LogSearch::new().with_diagnostics();
+
+        // Open search mode
+        screen.update(&key_press(KeyCode::Char('/')));
+        assert!(
+            !screen.search_config.case_sensitive,
+            "Default should be case-insensitive"
+        );
+
+        // Toggle case sensitivity with Ctrl+C
+        screen.update(&key_press_with_mod(KeyCode::Char('c'), Modifiers::CTRL));
+        assert!(
+            screen.search_config.case_sensitive,
+            "Should be case-sensitive after toggle"
+        );
+
+        // Toggle back
+        screen.update(&key_press_with_mod(KeyCode::Char('c'), Modifiers::CTRL));
+        assert!(
+            !screen.search_config.case_sensitive,
+            "Should be case-insensitive after second toggle"
+        );
+
+        // Verify diagnostic recorded the toggle
+        let log = screen.diagnostic_log().unwrap();
+        let updates = log.entries_of_kind(DiagnosticEventKind::QueryUpdated);
+        assert!(
+            updates
+                .iter()
+                .any(|e| e.context.as_deref() == Some("case sensitivity toggled"))
+        );
+    }
+
+    #[test]
+    fn test_search_case_sensitive_vs_insensitive() {
+        let mut screen = LogSearch::new();
+
+        // Clear initial lines and add controlled test content
+        screen.viewer.clear();
+        screen.viewer.push("ERROR: critical failure");
+        screen.viewer.push("error: minor issue");
+        screen.viewer.push("Error: warning");
+
+        // Case-insensitive search (default)
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "error");
+        screen.update(&key_press(KeyCode::Enter));
+
+        let info = screen.viewer.search_info();
+        assert!(
+            info.is_some(),
+            "Case-insensitive search should find matches"
+        );
+        let (_, total_insensitive) = info.unwrap();
+        assert_eq!(
+            total_insensitive, 3,
+            "Case-insensitive should find all 3 error variants"
+        );
+
+        // Now search case-sensitive for uppercase ERROR only
+        screen.update(&key_press(KeyCode::Char('/')));
+        screen.update(&key_press_with_mod(KeyCode::Char('c'), Modifiers::CTRL)); // Toggle to case-sensitive
+        // Clear and type the uppercase search term
+        screen.update(&key_press_with_mod(KeyCode::Char('u'), Modifiers::CTRL)); // Clear query
+        type_chars(&mut screen, "ERROR");
+        screen.update(&key_press(KeyCode::Enter));
+
+        let info = screen.viewer.search_info();
+        assert!(
+            info.is_some(),
+            "Case-sensitive search should find at least one match"
+        );
+        let (_, total_sensitive) = info.unwrap();
+        assert_eq!(
+            total_sensitive, 1,
+            "Case-sensitive 'ERROR' should find exactly 1 match"
+        );
+        assert!(
+            total_sensitive < total_insensitive,
+            "Case-sensitive should find fewer matches"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Context Line Inclusion
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_search_context_lines_toggle() {
+        let mut screen = LogSearch::new().with_diagnostics();
+
+        // Open search mode
+        screen.update(&key_press(KeyCode::Char('/')));
+        assert_eq!(
+            screen.search_config.context_lines, 0,
+            "Default should be 0 context lines"
+        );
+
+        // Cycle context lines with Ctrl+X: 0 -> 1
+        screen.update(&key_press_with_mod(KeyCode::Char('x'), Modifiers::CTRL));
+        assert_eq!(screen.search_config.context_lines, 1);
+
+        // 1 -> 2
+        screen.update(&key_press_with_mod(KeyCode::Char('x'), Modifiers::CTRL));
+        assert_eq!(screen.search_config.context_lines, 2);
+
+        // 2 -> 5
+        screen.update(&key_press_with_mod(KeyCode::Char('x'), Modifiers::CTRL));
+        assert_eq!(screen.search_config.context_lines, 5);
+
+        // 5 -> 0 (wrap)
+        screen.update(&key_press_with_mod(KeyCode::Char('x'), Modifiers::CTRL));
+        assert_eq!(screen.search_config.context_lines, 0);
+
+        // Verify diagnostic recorded context changes
+        let log = screen.diagnostic_log().unwrap();
+        let updates = log.entries_of_kind(DiagnosticEventKind::QueryUpdated);
+        assert!(updates.iter().any(|e| {
+            e.context
+                .as_deref()
+                .is_some_and(|c| c.starts_with("context lines:"))
+        }));
+    }
+
+    // -------------------------------------------------------------------------
+    // Highlight Span Correctness
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_highlight_ranges_no_overlap() {
+        let mut screen = LogSearch::new();
+
+        // Add a line with multiple occurrences
+        screen.viewer.push("foo bar foo baz foo qux foo");
+
+        // Search for "foo"
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "foo");
+        screen.update(&key_press(KeyCode::Enter));
+
+        // Get highlight ranges for the last line (where we pushed "foo bar foo...")
+        let line_count = screen.viewer.line_count();
+        let ranges = screen.viewer.highlight_ranges_for_line(line_count - 1);
+        assert!(
+            ranges.is_some(),
+            "Should have highlight ranges for matching line"
+        );
+
+        let ranges = ranges.unwrap();
+        assert!(
+            ranges.len() >= 4,
+            "Should find at least 4 'foo' occurrences"
+        );
+
+        // Verify no overlaps: each range's end should be <= next range's start
+        for window in ranges.windows(2) {
+            let (_, end1) = window[0];
+            let (start2, _) = window[1];
+            assert!(
+                end1 <= start2,
+                "Highlight ranges should not overlap: end {} > start {}",
+                end1,
+                start2
+            );
+        }
+
+        // Verify ranges are in ascending order
+        for window in ranges.windows(2) {
+            let (start1, _) = window[0];
+            let (start2, _) = window[1];
+            assert!(
+                start1 < start2,
+                "Highlight ranges should be in ascending order"
+            );
+        }
+    }
+
+    #[test]
+    fn test_highlight_ranges_valid_byte_offsets() {
+        let mut screen = LogSearch::new();
+
+        // Add lines with various content
+        screen.viewer.push("simple match here");
+        screen.viewer.push("unicode: café résumé");
+        screen.viewer.push("empty");
+
+        // Search for a common word
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "é");
+        screen.update(&key_press(KeyCode::Enter));
+
+        // Check all highlight ranges are valid byte indices
+        for idx in 0..screen.viewer.line_count() {
+            if let Some(ranges) = screen.viewer.highlight_ranges_for_line(idx) {
+                for &(start, end) in ranges {
+                    assert!(
+                        start <= end,
+                        "Range start {} should be <= end {}",
+                        start,
+                        end
+                    );
+                    // Note: We can't easily check upper bound without access to line content,
+                    // but the invariant start <= end should hold
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Edge Cases
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_search_empty_query_no_results() {
+        let mut screen = LogSearch::new();
+
+        // Open search and submit empty
+        screen.update(&key_press(KeyCode::Char('/')));
+        screen.update(&key_press(KeyCode::Enter));
+
+        assert!(
+            screen.viewer.search_info().is_none(),
+            "Empty query should yield no results"
+        );
+        assert!(screen.last_search.is_empty(), "Last search should be empty");
+    }
+
+    #[test]
+    fn test_search_no_matches() {
+        let mut screen = LogSearch::new();
+
+        // Search for something that doesn't exist
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "ZZZZNONEXISTENT12345");
+        screen.update(&key_press(KeyCode::Enter));
+
+        // search_info returns None when there are 0 matches
+        assert!(
+            screen.viewer.search_info().is_none(),
+            "Non-matching query should yield no results"
+        );
+        assert_eq!(
+            screen.last_search, "ZZZZNONEXISTENT12345",
+            "Last search should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_filter_empty_query_clears_filter() {
+        let mut screen = LogSearch::new();
+
+        // First set a filter
+        screen.update(&key_press(KeyCode::Char('f')));
+        type_chars(&mut screen, "ERROR");
+        screen.update(&key_press(KeyCode::Enter));
+        assert!(screen.filter_active);
+
+        // Now clear with empty filter
+        screen.update(&key_press(KeyCode::Char('f')));
+        screen.update(&key_press_with_mod(KeyCode::Char('u'), Modifiers::CTRL)); // Ctrl+U clears
+        screen.update(&key_press(KeyCode::Enter));
+
+        assert!(
+            !screen.filter_active,
+            "Empty filter should deactivate filter"
+        );
+        assert!(screen.filter_query.is_empty());
+    }
+
+    #[test]
+    fn test_navigate_without_search_noop() {
+        let mut screen = LogSearch::new();
+
+        // Try to navigate without any active search
+        let before_scroll = screen.viewer.is_at_bottom();
+        screen.update(&key_press(KeyCode::Char('n'))); // next match
+        screen.update(&key_press(KeyCode::Char('N'))); // prev match
+        let after_scroll = screen.viewer.is_at_bottom();
+
+        // Should not crash and scroll state should be unchanged (or at least valid)
+        assert_eq!(
+            before_scroll, after_scroll,
+            "Navigation without search should be a no-op"
+        );
+    }
+
+    #[test]
+    fn test_clear_search_via_escape() {
+        let mut screen = LogSearch::new();
+
+        // Perform a search
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "INFO");
+        screen.update(&key_press(KeyCode::Enter));
+        assert!(screen.viewer.search_info().is_some());
+
+        // Clear with Escape in normal mode
+        screen.update(&key_press(KeyCode::Escape));
+        assert!(
+            screen.viewer.search_info().is_none(),
+            "Escape should clear search"
+        );
+        assert!(
+            screen.last_search.is_empty(),
+            "Last search should be cleared"
+        );
+    }
+
+    #[test]
+    fn test_clear_filter_via_shift_f() {
+        let mut screen = LogSearch::new();
+
+        // Set a filter
+        screen.update(&key_press(KeyCode::Char('f')));
+        type_chars(&mut screen, "ERROR");
+        screen.update(&key_press(KeyCode::Enter));
+        assert!(screen.filter_active);
+
+        // Clear with Shift+F (capital F)
+        screen.update(&key_press(KeyCode::Char('F')));
+        assert!(!screen.filter_active, "F should clear filter");
+        assert!(screen.filter_query.is_empty());
+    }
+
+    // -------------------------------------------------------------------------
+    // Property Tests: Determinism
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_search_ordering_deterministic() {
+        // Run the same search twice and verify identical results
+        for _ in 0..3 {
+            let mut screen = LogSearch::new();
+
+            // Add predictable content
+            for i in 0..20 {
+                screen.viewer.push(format!("line {} match", i));
+            }
+
+            screen.update(&key_press(KeyCode::Char('/')));
+            type_chars(&mut screen, "match");
+            screen.update(&key_press(KeyCode::Enter));
+
+            let info = screen.viewer.search_info();
+            assert!(info.is_some());
+            let (current, total) = info.unwrap();
+            assert_eq!(current, 1, "First match should always be position 1");
+            assert_eq!(total, 20, "Should find all 20 matches");
+
+            // Navigate through and verify order
+            let mut positions = vec![1];
+            for _ in 0..19 {
+                screen.update(&key_press(KeyCode::Char('n')));
+                if let Some((pos, _)) = screen.viewer.search_info() {
+                    positions.push(pos);
+                }
+            }
+
+            // Positions should be sequential 1..=20
+            let expected: Vec<usize> = (1..=20).collect();
+            assert_eq!(positions, expected, "Navigation should be deterministic");
+        }
+    }
+
+    #[test]
+    fn test_log_line_generation_deterministic() {
+        // Same sequence number should always produce same output
+        let seeds = [0, 42, 100, 999, 12345];
+        for seed in seeds {
+            let line1 = generate_log_line(seed).to_plain_text();
+            let line2 = generate_log_line(seed).to_plain_text();
+            assert_eq!(
+                line1, line2,
+                "Log line generation should be deterministic for seed {}",
+                seed
+            );
+        }
+    }
+
+    #[test]
+    fn test_filter_result_ordering_stable() {
+        let mut screen = LogSearch::new();
+
+        // Clear and add predictable content
+        screen.viewer.clear();
+        screen.viewer.push("ERROR: first");
+        screen.viewer.push("INFO: second");
+        screen.viewer.push("ERROR: third");
+        screen.viewer.push("INFO: fourth");
+        screen.viewer.push("ERROR: fifth");
+
+        // Apply filter
+        screen.update(&key_press(KeyCode::Char('f')));
+        type_chars(&mut screen, "ERROR");
+        screen.update(&key_press(KeyCode::Enter));
+
+        // Verify filter is active and results are in order
+        assert!(screen.filter_active);
+
+        // Search within filtered results
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "ERROR");
+        screen.update(&key_press(KeyCode::Enter));
+
+        let info = screen.viewer.search_info();
+        assert!(info.is_some());
+        let (_, total) = info.unwrap();
+        assert_eq!(total, 3, "Should find 3 ERROR lines");
+    }
+
+    // -------------------------------------------------------------------------
+    // Property Tests: Invariants
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_search_matches_subset_of_all_lines() {
+        let mut screen = LogSearch::new();
+
+        // Add some lines
+        for i in 0..100 {
+            if i % 3 == 0 {
+                screen.viewer.push(format!("TARGET line {}", i));
+            } else {
+                screen.viewer.push(format!("other line {}", i));
+            }
+        }
+
+        let total_lines = screen.viewer.line_count();
+
+        // Search for TARGET
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "TARGET");
+        screen.update(&key_press(KeyCode::Enter));
+
+        let info = screen.viewer.search_info();
+        assert!(info.is_some());
+        let (_, match_count) = info.unwrap();
+
+        // Invariant: matches <= total lines
+        assert!(
+            match_count <= total_lines,
+            "Match count {} should be <= total lines {}",
+            match_count,
+            total_lines
+        );
+
+        // We added TARGET to every 3rd line of 100, so ~34 matches expected
+        // (plus initial 50 lines without TARGET)
+        assert!(match_count > 0, "Should have some matches");
+    }
+
+    #[test]
+    fn test_live_search_updates_incrementally() {
+        let mut screen = LogSearch::new();
+
+        // Open search and type incrementally
+        screen.update(&key_press(KeyCode::Char('/')));
+
+        // Type "E" - should update live
+        screen.update(&key_press(KeyCode::Char('E')));
+        let after_e = screen.viewer.search_info();
+
+        // Type "R" - should update live with "ER"
+        screen.update(&key_press(KeyCode::Char('R')));
+        let after_er = screen.viewer.search_info();
+
+        // Type "ROR" - should update live with "ERROR"
+        type_chars(&mut screen, "ROR");
+        let _after_error = screen.viewer.search_info();
+
+        // Each step should have valid search state
+        // (may have matches or not, but shouldn't crash)
+        if let Some((_, total_e)) = after_e
+            && let Some((_, total_er)) = after_er
+        {
+            // Generally, longer queries should have <= matches
+            // (not always true but usually)
+            assert!(total_er <= total_e || total_e == 0);
+        }
+
+        // Final query should be "ERROR"
+        assert_eq!(screen.query, "ERROR");
+    }
+
+    #[test]
+    fn test_backspace_updates_search_live() {
+        let mut screen = LogSearch::new();
+
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "ERROR");
+        let before_backspace = screen.viewer.search_info();
+
+        // Backspace to "ERRO"
+        screen.update(&key_press(KeyCode::Backspace));
+        assert_eq!(screen.query, "ERRO");
+        let after_backspace = screen.viewer.search_info();
+
+        // Both should be valid states (may differ in match count)
+        // The key invariant is no crash and query is updated
+        if let (Some((_, before)), Some((_, after))) = (before_backspace, after_backspace) {
+            // More general query should have >= matches
+            assert!(after >= before || after == 0);
+        }
+    }
+
+    #[test]
+    fn test_ctrl_u_clears_query_in_search_mode() {
+        let mut screen = LogSearch::new();
+
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "ERROR");
+        assert_eq!(screen.query, "ERROR");
+
+        // Ctrl+U clears
+        screen.update(&key_press_with_mod(KeyCode::Char('u'), Modifiers::CTRL));
+        assert!(screen.query.is_empty(), "Ctrl+U should clear query");
+    }
+
+    // -------------------------------------------------------------------------
+    // Regression Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_search_after_filter_respects_filter() {
+        let mut screen = LogSearch::new();
+
+        // Add mixed content
+        screen.viewer.push("ERROR: findme");
+        screen.viewer.push("INFO: findme");
+        screen.viewer.push("ERROR: other");
+
+        // Filter to ERROR only
+        screen.update(&key_press(KeyCode::Char('f')));
+        type_chars(&mut screen, "ERROR");
+        screen.update(&key_press(KeyCode::Enter));
+        assert!(screen.filter_active);
+
+        // Search within filtered results
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "findme");
+        screen.update(&key_press(KeyCode::Enter));
+
+        let info = screen.viewer.search_info();
+        assert!(info.is_some());
+        let (_, total) = info.unwrap();
+        // Should only find "findme" in ERROR lines, not INFO
+        assert_eq!(total, 1, "Search should respect active filter");
+    }
+
+    #[test]
+    fn test_mode_transitions_preserve_state() {
+        let mut screen = LogSearch::new();
+
+        // Configure search settings
+        screen.update(&key_press(KeyCode::Char('/')));
+        screen.update(&key_press_with_mod(KeyCode::Char('c'), Modifiers::CTRL)); // case sensitive
+        let case_before = screen.search_config.case_sensitive;
+        screen.update(&key_press(KeyCode::Escape));
+
+        // Re-open search
+        screen.update(&key_press(KeyCode::Char('/')));
+        assert_eq!(
+            screen.search_config.case_sensitive, case_before,
+            "Search config should persist across mode transitions"
+        );
+    }
+
+    #[test]
+    fn test_query_recalled_on_reopen() {
+        let mut screen = LogSearch::new();
+
+        // Perform a search
+        screen.update(&key_press(KeyCode::Char('/')));
+        type_chars(&mut screen, "TEST");
+        screen.update(&key_press(KeyCode::Enter));
+        assert_eq!(screen.last_search, "TEST");
+
+        // Reopen search - query should be recalled
+        screen.update(&key_press(KeyCode::Char('/')));
+        assert_eq!(screen.query, "TEST", "Previous search should be recalled");
+    }
 }

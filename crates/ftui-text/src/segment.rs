@@ -331,7 +331,7 @@ impl From<String> for Segment<'static> {
 /// Returns `(byte_pos, actual_cell_width)` where `actual_cell_width`
 /// is the width up to `byte_pos` (may be less than target if we can't
 /// reach it exactly without breaking a grapheme).
-fn find_cell_boundary(text: &str, target_cells: usize) -> (usize, usize) {
+pub fn find_cell_boundary(text: &str, target_cells: usize) -> (usize, usize) {
     let mut current_cells = 0;
     let mut byte_pos = 0;
 

@@ -282,6 +282,21 @@ impl<'a> Frame<'a> {
         }
     }
 
+    /// Create a frame from an existing buffer.
+    ///
+    /// This avoids per-frame buffer allocation when callers reuse buffers.
+    pub fn from_buffer(buffer: Buffer, pool: &'a mut GraphemePool) -> Self {
+        Self {
+            buffer,
+            pool,
+            links: None,
+            hit_grid: None,
+            cursor_position: None,
+            cursor_visible: true,
+            degradation: DegradationLevel::Full,
+        }
+    }
+
     /// Create a new frame with grapheme pool and link registry.
     ///
     /// This avoids double-borrowing issues when both pool and links

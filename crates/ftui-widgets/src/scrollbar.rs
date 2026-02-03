@@ -6,7 +6,7 @@
 
 use crate::{StatefulWidget, Widget, draw_text_span};
 use ftui_core::geometry::Rect;
-use ftui_render::frame::Frame;
+use ftui_render::frame::{Frame, HitId, HitRegion};
 use ftui_style::Style;
 
 /// Scrollbar orientation.
@@ -23,6 +23,15 @@ pub enum ScrollbarOrientation {
     HorizontalTop,
 }
 
+/// Hit data part for track (background).
+pub const SCROLLBAR_PART_TRACK: u64 = 0;
+/// Hit data part for thumb (draggable).
+pub const SCROLLBAR_PART_THUMB: u64 = 1;
+/// Hit data part for begin button (up/left).
+pub const SCROLLBAR_PART_BEGIN: u64 = 2;
+/// Hit data part for end button (down/right).
+pub const SCROLLBAR_PART_END: u64 = 3;
+
 /// A widget to display a scrollbar.
 #[derive(Debug, Clone, Default)]
 pub struct Scrollbar<'a> {
@@ -33,6 +42,7 @@ pub struct Scrollbar<'a> {
     end_symbol: Option<&'a str>,
     track_symbol: Option<&'a str>,
     thumb_symbol: Option<&'a str>,
+    hit_id: Option<HitId>,
 }
 
 impl<'a> Scrollbar<'a> {
@@ -46,6 +56,7 @@ impl<'a> Scrollbar<'a> {
             end_symbol: None,
             track_symbol: None,
             thumb_symbol: None,
+            hit_id: None,
         }
     }
 
@@ -73,6 +84,12 @@ impl<'a> Scrollbar<'a> {
         self.thumb_symbol = Some(thumb);
         self.begin_symbol = begin;
         self.end_symbol = end;
+        self
+    }
+
+    /// Set a hit ID for mouse interaction.
+    pub fn hit_id(mut self, id: HitId) -> Self {
+        self.hit_id = Some(id);
         self
     }
 }
@@ -165,17 +182,29 @@ impl<'a> StatefulWidget for Scrollbar<'a> {
             .unwrap_or(if is_vertical { "▼" } else { "►" });
 
         // Draw
+        let mut next_draw_index = 0;
         for i in 0..track_len {
+            if i < next_draw_index {
+                continue;
+            }
+
             let is_thumb = i >= thumb_offset && i < thumb_offset + thumb_size;
-            let symbol = if is_thumb {
-                thumb_char
+            let (symbol, part) = if is_thumb {
+                (thumb_char, SCROLLBAR_PART_THUMB)
             } else if i == 0 && self.begin_symbol.is_some() {
-                begin_char
+                (begin_char, SCROLLBAR_PART_BEGIN)
             } else if i == track_len - 1 && self.end_symbol.is_some() {
-                end_char
+                (end_char, SCROLLBAR_PART_END)
             } else {
-                track_char
+                (track_char, SCROLLBAR_PART_TRACK)
             };
+
+            let symbol_width = unicode_width::UnicodeWidthStr::width(symbol);
+            if is_vertical {
+                next_draw_index = i + 1;
+            } else {
+                next_draw_index = i + symbol_width;
+            }
 
             let style = if !frame.buffer.degradation.apply_styling() {
                 Style::default()
@@ -205,6 +234,11 @@ impl<'a> StatefulWidget for Scrollbar<'a> {
             if x < area.right() && y < area.bottom() {
                 // Use draw_text_span to handle graphemes correctly
                 draw_text_span(frame, x, y, symbol, style, x + 1);
+
+                if let Some(id) = self.hit_id {
+                    let data = (part << 56) | (i as u64);
+                    frame.register_hit(Rect::new(x, y, 1, 1), id, HitRegion::Scrollbar, data);
+                }
             }
         }
     }
@@ -494,5 +528,61 @@ mod tests {
         // SimpleBorders still renders decorative content
         let top_cell = frame.buffer.get(0, 0).unwrap();
         assert!(top_cell.content.as_char().is_some());
+    }
+
+    #[test]
+    fn scrollbar_wide_symbols_horizontal() {
+        let sb =
+            Scrollbar::new(ScrollbarOrientation::HorizontalBottom).symbols("🔴", "👍", None, None);
+        // Area width 4. Expect "🔴🔴" (2 chars * 2 width = 4 cells)
+        let area = Rect::new(0, 0, 4, 1);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(4, 1, &mut pool);
+        // Track only (thumb size 0 or pos 0?)
+        // Let's make thumb small/invisible or check track part.
+        // If content_length=10, viewport=10, thumb fills all.
+        // Let's fill with thumb "👍"
+        let mut state = ScrollbarState::new(10, 0, 10);
+
+        StatefulWidget::render(&sb, area, &mut frame, &mut state);
+
+        // x=0: Head "👍"
+        let c0 = frame.buffer.get(0, 0).unwrap();
+        assert!(c0.content.as_char().is_some()); // Head
+        // x=1: Continuation
+        let c1 = frame.buffer.get(1, 0).unwrap();
+        assert!(c1.is_continuation());
+
+        // x=2: Head "👍"
+        let c2 = frame.buffer.get(2, 0).unwrap();
+        assert!(c2.content.as_char().is_some()); // Head
+        // x=3: Continuation
+        let c3 = frame.buffer.get(3, 0).unwrap();
+        assert!(c3.is_continuation());
+    }
+
+    #[test]
+    fn scrollbar_wide_symbols_vertical() {
+        let sb =
+            Scrollbar::new(ScrollbarOrientation::VerticalRight).symbols("🔴", "👍", None, None);
+        // Area height 2. Width 2 (to fit the wide char).
+        let area = Rect::new(0, 0, 2, 2);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(2, 2, &mut pool);
+        let mut state = ScrollbarState::new(10, 0, 10); // Fill with thumb
+
+        StatefulWidget::render(&sb, area, &mut frame, &mut state);
+
+        // Row 0: "👍" at x=0
+        let r0_c0 = frame.buffer.get(0, 0).unwrap();
+        assert!(r0_c0.content.as_char().is_some()); // Head
+        let r0_c1 = frame.buffer.get(1, 0).unwrap();
+        assert!(r0_c1.is_continuation()); // Tail
+
+        // Row 1: "👍" at x=0 (should NOT be skipped)
+        let r1_c0 = frame.buffer.get(0, 1).unwrap();
+        assert!(r1_c0.content.as_char().is_some()); // Head
+        let r1_c1 = frame.buffer.get(1, 1).unwrap();
+        assert!(r1_c1.is_continuation()); // Tail
     }
 }

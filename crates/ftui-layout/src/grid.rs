@@ -104,6 +104,10 @@ pub struct GridLayout {
     col_positions: Vec<u16>,
     /// Named areas from the grid definition.
     named_areas: HashMap<String, GridArea>,
+    /// Gap between rows.
+    row_gap: u16,
+    /// Gap between columns.
+    col_gap: u16,
 }
 
 impl Grid {
@@ -179,6 +183,8 @@ impl Grid {
                 row_positions: vec![area.y; num_rows],
                 col_positions: vec![area.x; num_cols],
                 named_areas: self.named_areas.clone(),
+                row_gap: self.row_gap,
+                col_gap: self.col_gap,
             };
         }
 
@@ -212,6 +218,8 @@ impl Grid {
             row_positions,
             col_positions,
             named_areas: self.named_areas.clone(),
+            row_gap: self.row_gap,
+            col_gap: self.col_gap,
         }
     }
 
@@ -267,15 +275,7 @@ impl GridLayout {
         // Add gaps between columns (not after last)
         if end_col > col + 1 {
             let gap_count = (end_col - col - 1) as u16;
-            let col_gap = if let Some(&last_pos) = self.col_positions.get(1) {
-                let first_width = self.col_widths.first().copied().unwrap_or(0);
-                last_pos
-                    .saturating_sub(self.col_positions[0])
-                    .saturating_sub(first_width)
-            } else {
-                0
-            };
-            width = width.saturating_add(col_gap.saturating_mul(gap_count));
+            width = width.saturating_add(self.col_gap.saturating_mul(gap_count));
         }
 
         // Calculate total height (sum of heights + gaps between spanned rows)
@@ -285,15 +285,7 @@ impl GridLayout {
         }
         if end_row > row + 1 {
             let gap_count = (end_row - row - 1) as u16;
-            let row_gap = if let Some(&last_pos) = self.row_positions.get(1) {
-                let first_height = self.row_heights.first().copied().unwrap_or(0);
-                last_pos
-                    .saturating_sub(self.row_positions[0])
-                    .saturating_sub(first_height)
-            } else {
-                0
-            };
-            height = height.saturating_add(row_gap.saturating_mul(gap_count));
+            height = height.saturating_add(self.row_gap.saturating_mul(gap_count));
         }
 
         Rect::new(x, y, width, height)

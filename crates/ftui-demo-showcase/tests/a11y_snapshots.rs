@@ -23,6 +23,7 @@ use ftui_render::grapheme_pool::GraphemePool;
 use ftui_runtime::program::Model;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Instant;
 
 // ---------------------------------------------------------------------------
@@ -105,11 +106,63 @@ fn log_e2e(
     }
 }
 
+fn a11y_seed() -> u64 {
+    std::env::var("A11Y_TEST_SEED")
+        .ok()
+        .and_then(|val| val.parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn log_transition_e2e(
+    run_id: &str,
+    case: &str,
+    step: &str,
+    a11y: &theme::A11ySettings,
+    width: u16,
+    height: u16,
+    frame_hash: u64,
+    settings_hash: u64,
+    render_ms: f64,
+    total_ms: f64,
+    seed: u64,
+) {
+    if std::env::var("E2E_JSONL").is_ok() || std::env::var("CI").is_ok() {
+        eprintln!(
+            r#"{{"run_id":"{}","case":"{}","step":"{}","env":{{"os":"{}","test_module":"a11y_transitions"}},"seed":{},"timings":{{"render_ms":{:.3},"total_ms":{:.3}}},"checksums":{{"frame_hash":{},"a11y_settings_hash":{}}},"capabilities":{{"high_contrast":{},"reduced_motion":{},"large_text":{},"terminal_width":{},"terminal_height":{}}},"outcome":"pass"}}"#,
+            run_id,
+            case,
+            step,
+            std::env::consts::OS,
+            seed,
+            render_ms,
+            total_ms,
+            frame_hash,
+            settings_hash,
+            a11y.high_contrast,
+            a11y.reduced_motion,
+            a11y.large_text,
+            width,
+            height
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Test Helpers
 // ---------------------------------------------------------------------------
 
+fn a11y_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn a11y_guard() -> MutexGuard<'static, ()> {
+    a11y_lock().lock().expect("a11y lock poisoned")
+}
+
 struct A11yTestContext {
+    _guard: MutexGuard<'static, ()>,
     app: AppModel,
     run_id: String,
     setup_start: Instant,
@@ -118,7 +171,9 @@ struct A11yTestContext {
 impl A11yTestContext {
     fn new() -> Self {
         let setup_start = Instant::now();
+        let guard = a11y_guard();
         Self {
+            _guard: guard,
             app: AppModel::new(),
             run_id: generate_run_id(),
             setup_start,
@@ -205,6 +260,7 @@ fn render_screen_with_a11y<S: Screen>(
     width: u16,
     height: u16,
 ) -> Frame<'static> {
+    let _guard = a11y_guard();
     // Always set theme state explicitly for test isolation
     let theme_id = if a11y.high_contrast {
         theme::ThemeId::Darcula
@@ -220,6 +276,57 @@ fn render_screen_with_a11y<S: Screen>(
     let area = Rect::new(0, 0, width, height);
     screen.view(&mut frame, area);
     frame
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_transition_step(
+    run_id: &str,
+    case: &str,
+    step: &str,
+    app: &mut AppModel,
+    width: u16,
+    height: u16,
+    seed: u64,
+    start: &Instant,
+) -> u64 {
+    let render_start = Instant::now();
+
+    let theme_id = if app.a11y.high_contrast {
+        theme::ThemeId::Darcula
+    } else {
+        theme::ThemeId::CyberpunkAurora
+    };
+    theme::set_theme(theme_id);
+    theme::set_motion_scale(if app.a11y.reduced_motion { 0.0 } else { 1.0 });
+    theme::set_large_text(app.a11y.large_text);
+
+    app.terminal_width = width;
+    app.terminal_height = height;
+
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(width, height, &mut pool);
+    app.view(&mut frame);
+
+    let render_ms = render_start.elapsed().as_secs_f64() * 1000.0;
+    let total_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let frame_hash = hash_frame(&frame.buffer);
+    let settings_hash = hash_a11y_settings(&app.a11y);
+
+    log_transition_e2e(
+        run_id,
+        case,
+        step,
+        &app.a11y,
+        width,
+        height,
+        frame_hash,
+        settings_hash,
+        render_ms,
+        total_ms,
+        seed,
+    );
+
+    frame_hash
 }
 
 // ============================================================================
@@ -573,6 +680,7 @@ fn a11y_dashboard_screen_reduced_motion_80x24() {
 
 #[test]
 fn a11y_zero_area_high_contrast() {
+    let _guard = a11y_guard();
     let mut app = AppModel::new();
     app.a11y.high_contrast = true;
     theme::set_theme(theme::ThemeId::Darcula);
@@ -584,6 +692,7 @@ fn a11y_zero_area_high_contrast() {
 
 #[test]
 fn a11y_zero_area_large_text() {
+    let _guard = a11y_guard();
     let mut app = AppModel::new();
     app.a11y.large_text = true;
     theme::set_large_text(true);
@@ -595,6 +704,7 @@ fn a11y_zero_area_large_text() {
 
 #[test]
 fn a11y_zero_area_all_modes() {
+    let _guard = a11y_guard();
     let mut app = AppModel::new();
     app.a11y = theme::A11ySettings::all();
     theme::set_theme(theme::ThemeId::Darcula);
@@ -647,6 +757,271 @@ fn a11y_settings_none_equals_default() {
     let none = theme::A11ySettings::none();
     let default = theme::A11ySettings::default();
     assert_eq!(none, default);
+}
+
+// ============================================================================
+// Transition Regression Tests (mode toggles should be stable and round-trip)
+// ============================================================================
+
+#[test]
+fn a11y_transition_high_contrast_roundtrip() {
+    // Invariant: toggling high-contrast on/off should round-trip to baseline.
+    let _guard = a11y_guard();
+    let mut app = AppModel::new();
+    let run_id = generate_run_id();
+    let start = Instant::now();
+    let seed = a11y_seed();
+    let width = 80;
+    let height = 24;
+
+    let baseline = render_transition_step(
+        &run_id,
+        "a11y_transition_high_contrast_roundtrip",
+        "baseline",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+
+    app.a11y.high_contrast = true;
+    let on_hash = render_transition_step(
+        &run_id,
+        "a11y_transition_high_contrast_roundtrip",
+        "high_contrast_on",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    let on_repeat = render_transition_step(
+        &run_id,
+        "a11y_transition_high_contrast_roundtrip",
+        "high_contrast_on_repeat",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    assert_eq!(
+        on_hash, on_repeat,
+        "High contrast render should be stable across repeated frames"
+    );
+
+    app.a11y.high_contrast = false;
+    let off_hash = render_transition_step(
+        &run_id,
+        "a11y_transition_high_contrast_roundtrip",
+        "high_contrast_off",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    assert_eq!(
+        baseline, off_hash,
+        "High contrast round-trip should restore baseline frame"
+    );
+}
+
+#[test]
+fn a11y_transition_reduced_motion_roundtrip() {
+    // Invariant: reduced-motion toggles should be stable and round-trip cleanly.
+    let _guard = a11y_guard();
+    let mut app = AppModel::new();
+    app.current_screen = ftui_demo_showcase::app::ScreenId::DataViz;
+    let run_id = generate_run_id();
+    let start = Instant::now();
+    let seed = a11y_seed();
+    let width = 80;
+    let height = 24;
+
+    let baseline = render_transition_step(
+        &run_id,
+        "a11y_transition_reduced_motion_roundtrip",
+        "baseline",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+
+    app.a11y.reduced_motion = true;
+    let on_hash = render_transition_step(
+        &run_id,
+        "a11y_transition_reduced_motion_roundtrip",
+        "reduced_motion_on",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    let on_repeat = render_transition_step(
+        &run_id,
+        "a11y_transition_reduced_motion_roundtrip",
+        "reduced_motion_on_repeat",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    assert_eq!(
+        on_hash, on_repeat,
+        "Reduced-motion render should be stable across repeated frames"
+    );
+
+    app.a11y.reduced_motion = false;
+    let off_hash = render_transition_step(
+        &run_id,
+        "a11y_transition_reduced_motion_roundtrip",
+        "reduced_motion_off",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    assert_eq!(
+        baseline, off_hash,
+        "Reduced-motion round-trip should restore baseline frame"
+    );
+}
+
+#[test]
+fn a11y_transition_large_text_roundtrip() {
+    // Invariant: large-text toggles should be stable and round-trip cleanly.
+    let _guard = a11y_guard();
+    let mut app = AppModel::new();
+    let run_id = generate_run_id();
+    let start = Instant::now();
+    let seed = a11y_seed();
+    let width = 80;
+    let height = 24;
+
+    let baseline = render_transition_step(
+        &run_id,
+        "a11y_transition_large_text_roundtrip",
+        "baseline",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+
+    app.a11y.large_text = true;
+    let on_hash = render_transition_step(
+        &run_id,
+        "a11y_transition_large_text_roundtrip",
+        "large_text_on",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    let on_repeat = render_transition_step(
+        &run_id,
+        "a11y_transition_large_text_roundtrip",
+        "large_text_on_repeat",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    assert_eq!(
+        on_hash, on_repeat,
+        "Large-text render should be stable across repeated frames"
+    );
+
+    app.a11y.large_text = false;
+    let off_hash = render_transition_step(
+        &run_id,
+        "a11y_transition_large_text_roundtrip",
+        "large_text_off",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    assert_eq!(
+        baseline, off_hash,
+        "Large-text round-trip should restore baseline frame"
+    );
+}
+
+#[test]
+fn a11y_transition_all_modes_roundtrip() {
+    // Failure modes: theme globals leak or motion scale persists after toggling off.
+    let _guard = a11y_guard();
+    let mut app = AppModel::new();
+    let run_id = generate_run_id();
+    let start = Instant::now();
+    let seed = a11y_seed();
+    let width = 80;
+    let height = 24;
+
+    let baseline = render_transition_step(
+        &run_id,
+        "a11y_transition_all_modes_roundtrip",
+        "baseline",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+
+    app.a11y = theme::A11ySettings::all();
+    let all_on = render_transition_step(
+        &run_id,
+        "a11y_transition_all_modes_roundtrip",
+        "all_modes_on",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    let all_on_repeat = render_transition_step(
+        &run_id,
+        "a11y_transition_all_modes_roundtrip",
+        "all_modes_on_repeat",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    assert_eq!(
+        all_on, all_on_repeat,
+        "All-modes render should be stable across repeated frames"
+    );
+
+    app.a11y = theme::A11ySettings::none();
+    let all_off = render_transition_step(
+        &run_id,
+        "a11y_transition_all_modes_roundtrip",
+        "all_modes_off",
+        &mut app,
+        width,
+        height,
+        seed,
+        &start,
+    );
+    assert_eq!(
+        baseline, all_off,
+        "All-modes round-trip should restore baseline frame"
+    );
 }
 
 // ============================================================================
@@ -713,6 +1088,7 @@ fn a11y_panel_with_all_modes_120x40() {
 
 #[test]
 fn a11y_determinism_high_contrast() {
+    let _guard = a11y_guard();
     // Render twice and verify identical output
     let mut app1 = AppModel::new();
     app1.a11y.high_contrast = true;
@@ -738,6 +1114,7 @@ fn a11y_determinism_high_contrast() {
 
 #[test]
 fn a11y_determinism_all_modes() {
+    let _guard = a11y_guard();
     // Render twice with all a11y modes and verify identical output
     let mut app1 = AppModel::new();
     app1.a11y = theme::A11ySettings::all();

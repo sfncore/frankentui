@@ -134,6 +134,8 @@ pub struct TerminalWriter<W: Write> {
     ui_anchor: UiAnchor,
     /// Previous buffer for diffing.
     prev_buffer: Option<Buffer>,
+    /// Spare buffer for reuse as the next render target.
+    spare_buffer: Option<Buffer>,
     /// Grapheme pool for complex characters.
     pool: GraphemePool,
     /// Link registry for hyperlinks.
@@ -179,6 +181,7 @@ impl<W: Write> TerminalWriter<W> {
             auto_ui_height,
             ui_anchor,
             prev_buffer: None,
+            spare_buffer: None,
             pool: GraphemePool::new(),
             links: LinkRegistry::new(),
             capabilities,
@@ -213,10 +216,26 @@ impl<W: Write> TerminalWriter<W> {
         }
         // Clear prev_buffer to force full redraw after resize
         self.prev_buffer = None;
+        self.spare_buffer = None;
         // Reset scroll region on resize; it will be re-established on next present
         if self.scroll_region_active {
             let _ = self.deactivate_scroll_region();
         }
+    }
+
+    /// Take a reusable render buffer sized for the current frame.
+    ///
+    /// Uses a spare buffer when available to avoid per-frame allocation.
+    pub fn take_render_buffer(&mut self, width: u16, height: u16) -> Buffer {
+        if let Some(mut buffer) = self.spare_buffer.take()
+            && buffer.width() == width
+            && buffer.height() == height
+        {
+            buffer.reset_for_frame();
+            return buffer;
+        }
+
+        Buffer::new(width, height)
     }
 
     /// Get the current terminal width.
@@ -496,6 +515,7 @@ impl<W: Write> TerminalWriter<W> {
         };
 
         if result.is_ok() {
+            self.spare_buffer = self.prev_buffer.take();
             self.prev_buffer = Some(buffer.clone());
         }
         result
@@ -533,6 +553,7 @@ impl<W: Write> TerminalWriter<W> {
         };
 
         if result.is_ok() {
+            self.spare_buffer = self.prev_buffer.take();
             self.prev_buffer = Some(buffer);
         }
         result
@@ -587,13 +608,19 @@ impl<W: Write> TerminalWriter<W> {
         self.clear_inline_region_diff(current_region)?;
 
         if visible_height > 0 {
-            // If the buffer is shorter than the visible height, clear the remaining rows
-            // to prevent ghosting from previous larger buffers.
-            let buf_height = buffer.height().min(visible_height);
-            if buf_height < visible_height {
-                let clear_start = ui_y_start.saturating_add(buf_height);
-                let clear_height = visible_height.saturating_sub(buf_height);
-                self.clear_rows(clear_start, clear_height)?;
+            // If this is a full redraw (no previous buffer), we must clear the
+            // entire UI region first to ensure we aren't diffing against garbage.
+            if self.prev_buffer.is_none() {
+                self.clear_rows(ui_y_start, visible_height)?;
+            } else {
+                // If the buffer is shorter than the visible height, clear the remaining rows
+                // to prevent ghosting from previous larger buffers.
+                let buf_height = buffer.height().min(visible_height);
+                if buf_height < visible_height {
+                    let clear_start = ui_y_start.saturating_add(buf_height);
+                    let clear_height = visible_height.saturating_sub(buf_height);
+                    self.clear_rows(clear_start, clear_height)?;
+                }
             }
 
             // Compute diff
@@ -904,6 +931,13 @@ impl<W: Write> TerminalWriter<W> {
     pub fn write_log(&mut self, text: &str) -> io::Result<()> {
         match self.screen_mode {
             ScreenMode::Inline { ui_height } => {
+                // Invalidate state if we are not using a scroll region, as the log write
+                // might scroll the terminal and shift/corrupt the UI region.
+                if !self.scroll_region_active {
+                    self.prev_buffer = None;
+                    self.last_inline_region = None;
+                }
+
                 // Position cursor in the log region before writing.
                 // This ensures log output never corrupts the UI region.
                 self.position_cursor_for_log(ui_height)?;
@@ -911,6 +945,12 @@ impl<W: Write> TerminalWriter<W> {
                 self.writer().flush()
             }
             ScreenMode::InlineAuto { .. } => {
+                // Invalidate state if we are not using a scroll region.
+                if !self.scroll_region_active {
+                    self.prev_buffer = None;
+                    self.last_inline_region = None;
+                }
+
                 // InlineAuto: use effective_ui_height for positioning.
                 let ui_height = self.effective_ui_height();
                 self.position_cursor_for_log(ui_height)?;

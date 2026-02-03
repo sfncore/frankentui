@@ -13,14 +13,19 @@ use ftui_render::budget::DegradationLevel;
 use ftui_render::cell::Cell;
 use ftui_render::frame::{Frame, HitId};
 use ftui_render::grapheme_pool::GraphemePool;
+use ftui_widgets::StatefulWidget;
 use ftui_widgets::Widget;
 use ftui_widgets::block::Block;
 use ftui_widgets::borders::BorderType;
+use ftui_widgets::help::{Help, HelpEntry, HelpMode, HelpRenderState};
 use ftui_widgets::input::TextInput;
 use ftui_widgets::list::List;
 use ftui_widgets::paragraph::Paragraph;
 use ftui_widgets::progress::ProgressBar;
 use ftui_widgets::rule::Rule;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::time::Instant;
 use tracing::{Level, info};
 
 fn init_tracing() {
@@ -28,6 +33,42 @@ fn init_tracing() {
         .with_test_writer()
         .with_max_level(Level::INFO)
         .try_init();
+}
+
+fn jsonl_enabled() -> bool {
+    std::env::var("E2E_JSONL").is_ok() || std::env::var("CI").is_ok()
+}
+
+fn jsonl_timestamp() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("T{n:06}")
+}
+
+fn log_jsonl(step: &str, fields: &[(&str, String)]) {
+    let mut parts = Vec::with_capacity(fields.len() + 2);
+    parts.push(format!("\"ts\":\"{}\"", jsonl_timestamp()));
+    parts.push(format!("\"step\":\"{}\"", step));
+    parts.extend(fields.iter().map(|(k, v)| format!("\"{}\":\"{}\"", k, v)));
+    eprintln!("{{{}}}", parts.join(","));
+}
+
+fn buffer_checksum(frame: &Frame) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    let width = frame.buffer.width();
+    let height = frame.buffer.height();
+    for y in 0..height {
+        for x in 0..width {
+            if let Some(cell) = frame.buffer.get(x, y) {
+                cell.content.hash(&mut hasher);
+                cell.fg.0.hash(&mut hasher);
+                cell.bg.0.hash(&mut hasher);
+                cell.attrs.hash(&mut hasher);
+            }
+        }
+    }
+    hasher.finish()
 }
 
 struct BufferWidget;
@@ -192,7 +233,7 @@ fn list_registers_hit_regions_in_frame() {
     let mut frame = Frame::with_hit_grid(4, 2, &mut pool);
     let list = List::new(["a", "b"]).hit_id(HitId::new(7));
 
-    list.render(Rect::new(0, 0, 4, 2), &mut frame);
+    Widget::render(&list, Rect::new(0, 0, 4, 2), &mut frame);
 
     let hit0 = frame.hit_test(0, 0).expect("expected hit at row 0");
     let hit1 = frame.hit_test(0, 1).expect("expected hit at row 1");
@@ -245,4 +286,147 @@ fn zero_area_widgets_do_not_panic() {
     Block::bordered().render(area, &mut frame);
     Paragraph::new("Hi").render(area, &mut frame);
     Rule::new().render(area, &mut frame);
+}
+
+#[test]
+fn help_hints_focus_change_storm_e2e() {
+    init_tracing();
+    info!("help hints focus-change storm with cache/dirty logging");
+
+    let mut entries = vec![
+        HelpEntry::new("^T", "Theme"),
+        HelpEntry::new("^C", "Open"),
+        HelpEntry::new("?", "Help"),
+        HelpEntry::new("F12", "Debug"),
+    ];
+    let mut help = Help::new()
+        .with_mode(HelpMode::Short)
+        .with_entries(entries.clone());
+
+    let mut state = HelpRenderState::default();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 1, &mut pool);
+    let area = Rect::new(0, 0, 120, 1);
+
+    StatefulWidget::render(&help, area, &mut frame, &mut state);
+
+    let iterations = 200usize;
+    let run_id = format!("bd-a8wk-{}", std::process::id());
+    let log_enabled = jsonl_enabled();
+
+    if log_enabled {
+        log_jsonl(
+            "env",
+            &[
+                ("run_id", run_id.clone()),
+                ("case", "help_hints_focus_storm".to_string()),
+                ("mode", "short".to_string()),
+                ("width", area.width.to_string()),
+                ("height", area.height.to_string()),
+                ("iterations", iterations.to_string()),
+                ("term", std::env::var("TERM").unwrap_or_default()),
+                ("colorterm", std::env::var("COLORTERM").unwrap_or_default()),
+            ],
+        );
+    }
+
+    let mut times_us = Vec::with_capacity(iterations);
+    let mut dirty_cells = Vec::with_capacity(iterations);
+    let mut dirty_counts = Vec::with_capacity(iterations);
+    let mut total_hits = 0u64;
+    let mut total_misses = 0u64;
+    let mut total_dirty_updates = 0u64;
+    let mut total_layout_rebuilds = 0u64;
+
+    for i in 0..iterations {
+        let label = if i % 2 == 0 { "Open" } else { "Edit" };
+        entries[1].desc.clear();
+        entries[1].desc.push_str(label);
+        help = help.with_entries(entries.clone());
+
+        let before = state.stats();
+        let start = Instant::now();
+        StatefulWidget::render(&help, area, &mut frame, &mut state);
+        let render_us = start.elapsed().as_micros() as u64;
+        let after = state.stats();
+
+        let hits = after.hits.saturating_sub(before.hits);
+        let misses = after.misses.saturating_sub(before.misses);
+        let dirty_updates = after.dirty_updates.saturating_sub(before.dirty_updates);
+        let layout_rebuilds = after.layout_rebuilds.saturating_sub(before.layout_rebuilds);
+
+        let dirty = state.take_dirty_rects();
+        let dirty_cell_count: u64 = dirty
+            .iter()
+            .map(|rect| rect.width as u64 * rect.height as u64)
+            .sum();
+        let checksum = buffer_checksum(&frame);
+
+        times_us.push(render_us);
+        dirty_cells.push(dirty_cell_count);
+        dirty_counts.push(dirty.len() as u64);
+        total_hits += hits;
+        total_misses += misses;
+        total_dirty_updates += dirty_updates;
+        total_layout_rebuilds += layout_rebuilds;
+
+        if log_enabled {
+            log_jsonl(
+                "frame",
+                &[
+                    ("run_id", run_id.clone()),
+                    ("idx", i.to_string()),
+                    ("render_us", render_us.to_string()),
+                    ("dirty_rects", dirty.len().to_string()),
+                    ("dirty_cells", dirty_cell_count.to_string()),
+                    ("hits", hits.to_string()),
+                    ("misses", misses.to_string()),
+                    ("dirty_updates", dirty_updates.to_string()),
+                    ("layout_rebuilds", layout_rebuilds.to_string()),
+                    ("checksum", format!("{checksum:016x}")),
+                ],
+            );
+        }
+    }
+
+    times_us.sort();
+    dirty_cells.sort();
+    dirty_counts.sort();
+    let p50 = times_us[times_us.len() / 2];
+    let p95 = times_us[(times_us.len() as f64 * 0.95) as usize];
+    let p99 = times_us[(times_us.len() as f64 * 0.99) as usize];
+    let dirty_p50 = dirty_cells[dirty_cells.len() / 2];
+    let dirty_p95 = dirty_cells[(dirty_cells.len() as f64 * 0.95) as usize];
+    let dirty_rect_p50 = dirty_counts[dirty_counts.len() / 2];
+    let dirty_rect_p95 = dirty_counts[(dirty_counts.len() as f64 * 0.95) as usize];
+
+    if log_enabled {
+        log_jsonl(
+            "summary",
+            &[
+                ("run_id", run_id),
+                ("p50_us", p50.to_string()),
+                ("p95_us", p95.to_string()),
+                ("p99_us", p99.to_string()),
+                ("dirty_cells_p50", dirty_p50.to_string()),
+                ("dirty_cells_p95", dirty_p95.to_string()),
+                ("dirty_rects_p50", dirty_rect_p50.to_string()),
+                ("dirty_rects_p95", dirty_rect_p95.to_string()),
+                ("hits_total", total_hits.to_string()),
+                ("misses_total", total_misses.to_string()),
+                ("dirty_updates_total", total_dirty_updates.to_string()),
+                ("layout_rebuilds_total", total_layout_rebuilds.to_string()),
+            ],
+        );
+    }
+
+    assert_eq!(
+        total_misses, 0,
+        "focus-change updates should not trigger layout rebuilds"
+    );
+    assert_eq!(
+        total_layout_rebuilds, 0,
+        "layout rebuilds should be avoided for stable hint widths"
+    );
+    assert!(total_dirty_updates > 0, "dirty updates should be recorded");
 }

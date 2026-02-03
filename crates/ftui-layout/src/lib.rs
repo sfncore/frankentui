@@ -34,6 +34,8 @@ pub mod debug;
 pub mod grid;
 #[cfg(test)]
 mod repro_max_constraint;
+#[cfg(test)]
+mod repro_space_around;
 pub mod responsive;
 pub mod responsive_layout;
 pub mod visibility;
@@ -508,7 +510,8 @@ impl Flex {
                     // slots = sizes.len() * 2. Use usize to prevent overflow.
                     let slots = sizes.len() * 2;
                     let unit = (leftover as usize / slots) as u16;
-                    (unit, 0)
+                    let rem = (leftover as usize % slots) as u16;
+                    (unit + rem / 2, 0)
                 }
             }
         };
@@ -725,7 +728,8 @@ where
         for &i in &grow_indices {
             match constraints[i] {
                 Constraint::Ratio(n, d) => {
-                    total_weight += n as u64 * WEIGHT_SCALE / d.max(1) as u64
+                    let w = n as u64 * WEIGHT_SCALE / d.max(1) as u64;
+                    total_weight += w.max(1);
                 }
                 _ => total_weight += WEIGHT_SCALE,
             }
@@ -741,7 +745,10 @@ where
 
         for (idx, &i) in grow_indices.iter().enumerate() {
             let weight = match constraints[i] {
-                Constraint::Ratio(n, d) => n as u64 * WEIGHT_SCALE / d.max(1) as u64,
+                Constraint::Ratio(n, d) => {
+                    let w = n as u64 * WEIGHT_SCALE / d.max(1) as u64;
+                    w.max(1)
+                }
                 _ => WEIGHT_SCALE,
             };
 
