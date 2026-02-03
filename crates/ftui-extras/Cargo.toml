@@ -64,6 +64,9 @@ ftui-harness = { path = "../ftui-harness" }
 ftui-core = { path = "../ftui-core" }
 ftui-render = { path = "../ftui-render" }
 ftui-widgets = { path = "../ftui-widgets" }
+ftui-pty = { path = "../ftui-pty" }
+ftui-style = { path = "../ftui-style" }
+portable-pty = "0.8.1"
 
 [[bench]]
 name = "text_effects_bench"

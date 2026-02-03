@@ -234,10 +234,13 @@ impl ActionTimeline {
             }
             Event::Clipboard(clipboard) => {
                 let summary = "Clipboard data received".to_string();
-                let fields = vec![(
-                    "chars".to_string(),
-                    clipboard.text.chars().count().to_string(),
-                )];
+                let fields: Vec<(String, String)> = vec![
+                    (
+                        "chars".to_string(),
+                        clipboard.content.chars().count().to_string(),
+                    ),
+                    ("source".to_string(), format!("{:?}", clipboard.source)),
+                ];
                 (summary, fields, Severity::Info)
             }
             Event::Resize { width, height } => {
@@ -369,6 +372,7 @@ impl ActionTimeline {
         indices
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn push_custom_event(
         &mut self,
         tick: u64,
@@ -1178,7 +1182,7 @@ mod tests {
         timeline.update(&press(KeyCode::Down));
 
         // Selection is clamped by sync_selection
-        assert!(timeline.selected > 5 || timeline.selected == 5);
+        assert!(timeline.selected >= 5);
     }
 
     #[test]
@@ -1403,6 +1407,55 @@ mod tests {
                 break;
             }
         }
+    }
+
+    // =========================================================================
+    // External Event Recording Tests
+    // =========================================================================
+
+    #[test]
+    fn record_input_event_appends_event_with_fields() {
+        let mut timeline = ActionTimeline::new();
+        timeline.events.clear();
+        timeline.next_id = 1;
+
+        let event = press(KeyCode::Char('a'));
+        timeline.record_input_event(42, &event, "user", "Dashboard");
+
+        assert_eq!(timeline.events.len(), 1);
+        let recorded = timeline.events.back().unwrap();
+        assert_eq!(recorded.kind, EventKind::Input);
+        assert_eq!(recorded.tick, 42);
+        assert!(
+            recorded
+                .fields
+                .iter()
+                .any(|(k, v)| k == "source" && v == "user")
+        );
+        assert!(
+            recorded
+                .fields
+                .iter()
+                .any(|(k, v)| k == "screen" && v == "Dashboard")
+        );
+    }
+
+    #[test]
+    fn record_command_event_sets_kind_and_component() {
+        let mut timeline = ActionTimeline::new();
+        timeline.events.clear();
+        timeline.next_id = 1;
+
+        timeline.record_command_event(
+            7,
+            "Toggle help overlay",
+            vec![("state".to_string(), "on".to_string())],
+        );
+
+        let recorded = timeline.events.back().unwrap();
+        assert_eq!(recorded.kind, EventKind::Command);
+        assert_eq!(recorded.component, Component::Runtime);
+        assert_eq!(recorded.tick, 7);
     }
 
     // =========================================================================

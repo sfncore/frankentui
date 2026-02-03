@@ -162,17 +162,22 @@ fn speed_scaled_replay_preserves_events() {
 fn speed_2x_halves_effective_timing() {
     let m = fixture("speed2x", &[('a', 0), ('b', 100)]);
 
-    // At 1x, event 'b' is due at 100ms
+    // At 1x: 'a' fires immediately (delay=0), 'b' fires at 100ms
     let mut pb1 = MacroPlayback::new(m.clone());
-    assert!(pb1.advance(Duration::from_millis(50)).is_empty());
+    // First advance: 'a' fires immediately (delay=0), but 'b' (due at 100ms) hasn't yet
     let events = pb1.advance(Duration::from_millis(50));
-    assert_eq!(events.len(), 1); // 'b' due at 100ms
+    assert_eq!(events.len(), 1);
+    assert!(events.iter().any(|e| *e == key('a')));
+    // Second advance: now at 100ms total, 'b' fires
+    let events = pb1.advance(Duration::from_millis(50));
+    assert_eq!(events.len(), 1);
+    assert!(events.iter().any(|e| *e == key('b')));
 
     // At 2x, event 'b' is due at 50ms effective
     let mut pb2 = MacroPlayback::new(m.clone()).with_speed(2.0);
     let events = pb2.advance(Duration::from_millis(1)); // 2ms virtual -> gets 'a' (due at 0)
     assert!(events.iter().any(|e| *e == key('a')));
-    let events = pb2.advance(Duration::from_millis(50)); // 100ms virtual total -> gets 'b'
+    let events = pb2.advance(Duration::from_millis(50)); // 102ms virtual total -> gets 'b'
     assert!(events.iter().any(|e| *e == key('b')));
 }
 

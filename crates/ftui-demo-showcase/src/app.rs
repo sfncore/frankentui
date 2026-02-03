@@ -582,38 +582,88 @@ impl AppModel {
             AppMsg::Quit => Cmd::Quit,
 
             AppMsg::SwitchScreen(id) => {
+                let from = self.current_screen.title();
                 self.current_screen = id;
+                self.screens.action_timeline.record_command_event(
+                    self.tick_count,
+                    "Switch screen",
+                    vec![
+                        ("from".to_string(), from.to_string()),
+                        ("to".to_string(), id.title().to_string()),
+                    ],
+                );
                 Cmd::None
             }
 
             AppMsg::NextScreen => {
+                let from = self.current_screen.title();
                 self.current_screen = self.current_screen.next();
+                self.screens.action_timeline.record_command_event(
+                    self.tick_count,
+                    "Next screen",
+                    vec![
+                        ("from".to_string(), from.to_string()),
+                        ("to".to_string(), self.current_screen.title().to_string()),
+                    ],
+                );
                 Cmd::None
             }
 
             AppMsg::PrevScreen => {
+                let from = self.current_screen.title();
                 self.current_screen = self.current_screen.prev();
+                self.screens.action_timeline.record_command_event(
+                    self.tick_count,
+                    "Previous screen",
+                    vec![
+                        ("from".to_string(), from.to_string()),
+                        ("to".to_string(), self.current_screen.title().to_string()),
+                    ],
+                );
                 Cmd::None
             }
 
             AppMsg::ToggleHelp => {
                 self.help_visible = !self.help_visible;
+                let state = if self.help_visible { "on" } else { "off" };
+                self.screens.action_timeline.record_command_event(
+                    self.tick_count,
+                    "Toggle help overlay",
+                    vec![("state".to_string(), state.to_string())],
+                );
                 Cmd::None
             }
 
             AppMsg::ToggleDebug => {
                 self.debug_visible = !self.debug_visible;
+                let state = if self.debug_visible { "on" } else { "off" };
+                self.screens.action_timeline.record_command_event(
+                    self.tick_count,
+                    "Toggle debug overlay",
+                    vec![("state".to_string(), state.to_string())],
+                );
                 Cmd::None
             }
 
             AppMsg::TogglePerfHud => {
                 self.perf_hud_visible = !self.perf_hud_visible;
+                let state = if self.perf_hud_visible { "on" } else { "off" };
+                self.screens.action_timeline.record_command_event(
+                    self.tick_count,
+                    "Toggle performance HUD",
+                    vec![("state".to_string(), state.to_string())],
+                );
                 Cmd::None
             }
 
             AppMsg::CycleTheme => {
                 theme::cycle_theme();
                 self.screens.apply_theme();
+                self.screens.action_timeline.record_command_event(
+                    self.tick_count,
+                    "Cycle theme",
+                    vec![("theme".to_string(), theme::current_theme_name().to_string())],
+                );
                 Cmd::None
             }
 
@@ -635,6 +685,14 @@ impl AppModel {
                 self.terminal_width = width;
                 self.terminal_height = height;
                 self.screens.macro_recorder.set_terminal_size(width, height);
+                self.screens.action_timeline.record_capability_event(
+                    self.tick_count,
+                    "Terminal resized",
+                    vec![
+                        ("width".to_string(), width.to_string()),
+                        ("height".to_string(), height.to_string()),
+                    ],
+                );
                 Cmd::None
             }
 
@@ -890,7 +948,16 @@ impl AppModel {
                     for &sid in ScreenId::ALL {
                         let expected = sid.title().to_lowercase().replace(' ', "_");
                         if expected == screen_name {
+                            let from = self.current_screen.title();
                             self.current_screen = sid;
+                            self.screens.action_timeline.record_command_event(
+                                self.tick_count,
+                                "Switch screen (palette)",
+                                vec![
+                                    ("from".to_string(), from.to_string()),
+                                    ("to".to_string(), sid.title().to_string()),
+                                ],
+                            );
                             return Cmd::None;
                         }
                     }
@@ -899,18 +966,48 @@ impl AppModel {
                 match id.as_str() {
                     "cmd:toggle_help" => {
                         self.help_visible = !self.help_visible;
+                        let state = if self.help_visible { "on" } else { "off" };
+                        self.screens.action_timeline.record_command_event(
+                            self.tick_count,
+                            "Toggle help overlay (palette)",
+                            vec![("state".to_string(), state.to_string())],
+                        );
                     }
                     "cmd:toggle_debug" => {
                         self.debug_visible = !self.debug_visible;
+                        let state = if self.debug_visible { "on" } else { "off" };
+                        self.screens.action_timeline.record_command_event(
+                            self.tick_count,
+                            "Toggle debug overlay (palette)",
+                            vec![("state".to_string(), state.to_string())],
+                        );
                     }
                     "cmd:toggle_perf_hud" => {
                         self.perf_hud_visible = !self.perf_hud_visible;
+                        let state = if self.perf_hud_visible { "on" } else { "off" };
+                        self.screens.action_timeline.record_command_event(
+                            self.tick_count,
+                            "Toggle performance HUD (palette)",
+                            vec![("state".to_string(), state.to_string())],
+                        );
                     }
                     "cmd:cycle_theme" => {
                         theme::cycle_theme();
                         self.screens.apply_theme();
+                        self.screens.action_timeline.record_command_event(
+                            self.tick_count,
+                            "Cycle theme (palette)",
+                            vec![("theme".to_string(), theme::current_theme_name().to_string())],
+                        );
                     }
-                    "cmd:quit" => return Cmd::Quit,
+                    "cmd:quit" => {
+                        self.screens.action_timeline.record_command_event(
+                            self.tick_count,
+                            "Quit requested (palette)",
+                            Vec::new(),
+                        );
+                        return Cmd::Quit;
+                    }
                     _ => {}
                 }
                 Cmd::None
