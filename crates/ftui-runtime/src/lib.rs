@@ -17,9 +17,12 @@
 
 pub mod allocation_budget;
 pub mod asciicast;
+pub mod bocpd;
 pub mod conformal_alert;
+pub mod conformal_predictor;
 pub mod debug_trace;
 pub mod eprocess_throttle;
+pub mod evidence_sink;
 pub mod flake_detector;
 pub mod input_fairness;
 pub mod input_macro;
@@ -45,8 +48,10 @@ pub mod reactive;
 pub mod schedule_trace;
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
+pub mod voi_telemetry;
 
 pub use asciicast::{AsciicastRecorder, AsciicastWriter};
+pub use evidence_sink::{EvidenceSink, EvidenceSinkConfig, EvidenceSinkDestination};
 pub use input_macro::{
     EventRecorder, FilteredEventRecorder, InputMacro, MacroPlayback, MacroPlayer, MacroRecorder,
     RecordingFilter, RecordingState, TimedEvent,
@@ -63,6 +68,9 @@ pub use simulator::ProgramSimulator;
 pub use string_model::{StringModel, StringModelAdapter};
 pub use subscription::{Every, MockSubscription, StopSignal, SubId, Subscription};
 pub use terminal_writer::{ScreenMode, TerminalWriter, UiAnchor};
+pub use voi_telemetry::{
+    clear_inline_auto_voi_snapshot, inline_auto_voi_snapshot, set_inline_auto_voi_snapshot,
+};
 
 #[cfg(feature = "render-thread")]
 pub use render_thread::{OutMsg, RenderThread};
@@ -75,6 +83,10 @@ pub use allocation_budget::{
 };
 pub use conformal_alert::{
     AlertConfig, AlertDecision, AlertEvidence, AlertReason, AlertStats, ConformalAlert,
+};
+pub use conformal_predictor::{
+    BucketKey, ConformalConfig, ConformalPrediction, ConformalPredictor, ConformalUpdate,
+    DiffBucket, ModeBucket,
 };
 pub use eprocess_throttle::{
     EProcessThrottle, ThrottleConfig, ThrottleDecision, ThrottleLog, ThrottleStats,
@@ -98,7 +110,7 @@ pub use validation_pipeline::{
     ValidationPipeline, ValidatorStats,
 };
 pub use voi_sampling::{
-    VoiConfig, VoiDecision, VoiLogEntry, VoiObservation, VoiSampler, VoiSummary,
+    VoiConfig, VoiDecision, VoiLogEntry, VoiObservation, VoiSampler, VoiSamplerSnapshot, VoiSummary,
 };
 
 // State persistence
@@ -113,6 +125,12 @@ pub use schedule_trace::{
     CancelReason, GoldenCompareResult, IsomorphismProof, ScheduleTrace, SchedulerPolicy, TaskEvent,
     TraceConfig, TraceEntry, TraceSummary, WakeupReason, compare_golden,
 };
+
+// Diff strategy (re-exports from ftui-render)
+pub use ftui_render::diff_strategy::{
+    DiffStrategy, DiffStrategyConfig, DiffStrategySelector, StrategyEvidence,
+};
+pub use terminal_writer::RuntimeDiffConfig;
 
 #[cfg(feature = "telemetry")]
 pub use telemetry::{
