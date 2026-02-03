@@ -425,17 +425,19 @@ impl MeasurableWidget for Table<'_> {
         }
 
         // Total width = sum of column widths + column spacing
+        // Use saturating arithmetic to prevent overflow with many/wide columns
         let separator_width = if col_count > 1 {
-            (col_count - 1) as u16 * self.column_spacing
+            ((col_count - 1) as u16).saturating_mul(self.column_spacing)
         } else {
             0
         };
         let content_width: u16 = col_widths
             .iter()
-            .sum::<u16>()
+            .fold(0u16, |acc, &w| acc.saturating_add(w))
             .saturating_add(separator_width);
 
         // Total height = header height + row heights + margins
+        // Use saturating arithmetic to prevent overflow with many rows
         let header_height = self
             .header
             .as_ref()
@@ -445,8 +447,9 @@ impl MeasurableWidget for Table<'_> {
         let rows_height: u16 = self
             .rows
             .iter()
-            .map(|r| r.height.saturating_add(r.bottom_margin))
-            .sum();
+            .fold(0u16, |acc, r| {
+                acc.saturating_add(r.height.saturating_add(r.bottom_margin))
+            });
 
         let content_height = header_height.saturating_add(rows_height);
 
