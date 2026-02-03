@@ -1,4 +1,6 @@
-#![forbid(unsafe_code)]
+// Forbid unsafe in production; deny (with targeted allows) in tests for env var helpers.
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![cfg_attr(test, deny(unsafe_code))]
 
 //! Core: terminal lifecycle, capability detection, events, and input parsing.
 
