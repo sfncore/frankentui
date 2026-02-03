@@ -154,10 +154,10 @@ cargo bench -p ftui-render --bench diff_bench -- --baseline baseline_2026-02-03
 - p95: 172.368ms
 - p99: 246.832ms
 
-**Flamegraph:** failed due to `perf_event_paranoid=4` (no perf access).
+**Flamegraph:** captured 2026-02-03 at `docs/profiling/bd-1rz0.28/voi_sampling_flamegraph.svg` (release profile, no debuginfo).
 
-### Opportunity Matrix (Blocked)
-Profiling blocked; no reliable hotspots yet. Retry once perf access is enabled.
+### Opportunity Matrix (Pending Analysis)
+Flamegraph captured; hotspots still need to be summarized.
 
 | ID | Opportunity | Impact | Confidence | Effort | Score | Recommendation |
 |----|-------------|--------|------------|--------|-------|----------------|
@@ -166,6 +166,5 @@ Profiling blocked; no reliable hotspots yet. Retry once perf access is enabled.
 
 ### Notes
 - Flamegraph command: `cargo flamegraph -p ftui-runtime --unit-test -o docs/profiling/bd-1rz0.28/voi_sampling_flamegraph.svg -- perf_voi_sampling_budget --nocapture`
-- Enable perf access via `perf_event_paranoid` or `CAP_PERFMON` to capture hotspots.
- - 2026-02-03 check: `cat /proc/sys/kernel/perf_event_paranoid` → `4` (perf access still blocked in this environment).
- - Once perf access is enabled, re-run the command above and attach the SVG + top hotspots summary here.
+- Perf access was temporarily enabled via `kernel.perf_event_paranoid=1` and then restored to `4`.
+- To improve symbolization, rerun with debuginfo: set `CARGO_PROFILE_RELEASE_DEBUG=true` or add `[profile.release] debug = true`.

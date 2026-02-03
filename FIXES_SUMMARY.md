@@ -150,3 +150,17 @@ All tasks are complete. The codebase has been extensively refactored for Unicode
 **Issue:** `wrap_line_chars` contained the same infinite loop vulnerability as `wrap_line_words` when a grapheme width exceeded the available line width.
 **Fix:**
     - Applied the same forced-progress fallback logic to `wrap_line_chars`.
+
+## 82. TextArea Soft-Wrap Performance Optimization
+**File:** `crates/ftui-widgets/src/textarea.rs`
+**Issue:** `TextArea` in soft-wrap mode exhibited O(N) string allocations per frame for every line in the document (calculating wrapped height for cursor positioning and viewport visibility). This caused severe performance degradation for large documents.
+**Fix:**
+    - Introduced `measure_wrap_count`, a zero-allocation helper that calculates wrapped line count without constructing string slices.
+    - Updated `render` to use `measure_wrap_count` for skipping invisible lines and calculating cursor position, avoiding string allocation for lines outside the viewport.
+
+## 83. Table Intrinsic Width Performance
+**File:** `crates/ftui-widgets/src/table.rs`
+**Issue:** `Table::new` unconditionally scanned all rows (O(N*M)) to compute intrinsic column widths, even when `Constraint::FitContent` was not used. Additionally, `Table::header()` triggered a full re-scan of all rows.
+**Fix:**
+    - Added `requires_measurement` check to skip width calculation if no `FitContent`/`FitMin` constraints are present.
+    - Optimized `header()` to merge header widths into existing intrinsic widths incrementally, avoiding O(N) re-scan.
