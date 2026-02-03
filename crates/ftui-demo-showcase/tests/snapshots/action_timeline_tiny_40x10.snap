@@ -2,9 +2,9 @@
 │Follow[F]: ON  Component[C]: all  Seve│
 ╰──────────────────────────────────────╯
 ╭────────────Event Timeline────────────╮
-│   0 TRACE core    input   Key event p│
-│   1 DEBUG core    input   Key event p│
-│   2 INFO  runtime input   Key event p│
-│   3 WARN  runtime cmd     Command dis│
-│   4 ERROR render  cmd     Command dis│
+│   7 INFO  widgets sub     Subscriptio│
+│   8 WARN  core    sub     Subscriptio│
+│   9 ERROR core    render  Frame diff │
+│  10 TRACE runtime render  Frame diff │
+│  11 DEBUG runtime render  Frame diff │
 ╰──────────────────────────────────────╯

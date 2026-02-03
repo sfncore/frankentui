@@ -2,19 +2,19 @@
 │Follow[F]: ON  Component[C]: all  Severity[S]: all  Type[T]: all  Clear[X]    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭───────────────Event Timeline────────────────╮╭─────────Event Detail──────────╮
-│   0 TRACE core    input   Key event processe││ID: 1                          │
-│   1 DEBUG core    input   Key event processe││Tick: 0                        │
-│   2 INFO  runtime input   Key event processe││Severity: TRACE                │
-│   3 WARN  runtime cmd     Command dispatched││Component: core                │
-│   4 ERROR render  cmd     Command dispatched││Type: input                    │
+│   0 TRACE core    input   Key event processe││ID: 12                         │
+│   1 DEBUG core    input   Key event processe││Tick: 11                       │
+│   2 INFO  runtime input   Key event processe││Severity: DEBUG                │
+│   3 WARN  runtime cmd     Command dispatched││Component: runtime             │
+│   4 ERROR render  cmd     Command dispatched││Type: render                   │
 │   5 TRACE render  cmd     Command dispatched││                               │
 │   6 DEBUG widgets sub     Subscription tick ││Summary:                       │
-│   7 INFO  widgets sub     Subscription tick ││  Key event processed          │
+│   7 INFO  widgets sub     Subscription tick ││  Frame diff computed          │
 │   8 WARN  core    sub     Subscription tick ││                               │
 │   9 ERROR core    render  Frame diff compute││Fields:                        │
-│  10 TRACE runtime render  Frame diff compute││  latency_ms: 2                │
-│  11 DEBUG runtime render  Frame diff compute││  diff_cells: 0                │
-│                                             ││  ansi_bytes: 0                │
+│  10 TRACE runtime render  Frame diff compute││  latency_ms: 14               │
+│  11 DEBUG runtime render  Frame diff compute││  diff_cells: 23               │
+│                                             ││  ansi_bytes: 517              │
 │                                             ││                               │
 │                                             ││                               │
 │                                             ││                               │

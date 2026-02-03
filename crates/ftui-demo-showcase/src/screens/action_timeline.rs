@@ -236,9 +236,13 @@ impl ActionTimeline {
     fn filtered_indices(&self) -> Vec<usize> {
         let mut indices = Vec::new();
         for (idx, event) in self.events.iter().enumerate() {
-            if self.filter_component.map_or(true, |c| c == event.component)
-                && self.filter_severity.map_or(true, |s| s == event.severity)
-                && self.filter_kind.map_or(true, |k| k == event.kind)
+            if self
+                .filter_component
+                .is_none_or(|c| c == event.component)
+                && self
+                    .filter_severity
+                    .is_none_or(|s| s == event.severity)
+                && self.filter_kind.is_none_or(|k| k == event.kind)
             {
                 indices.push(idx);
             }
@@ -253,9 +257,7 @@ impl ActionTimeline {
             return;
         }
 
-        if self.follow {
-            self.selected = filtered_len - 1;
-        } else if self.selected >= filtered_len {
+        if self.follow || self.selected >= filtered_len {
             self.selected = filtered_len - 1;
         }
 
@@ -547,7 +549,7 @@ impl Screen for ActionTimeline {
 
     fn tick(&mut self, tick_count: u64) {
         self.tick_count = tick_count;
-        if tick_count % EVENT_BURST_EVERY == 0 {
+        if tick_count.is_multiple_of(EVENT_BURST_EVERY) {
             let event = self.synthetic_event();
             self.push_event(event);
             self.sync_selection();
