@@ -210,6 +210,7 @@ pub mod screen_accent {
     pub const LOG_SEARCH: ColorToken = accent::ACCENT_3;
     pub const ACTION_TIMELINE: ColorToken = accent::ACCENT_2;
     pub const INTRINSIC_SIZING: ColorToken = accent::ACCENT_8;
+    pub const PERFORMANCE_HUD: ColorToken = accent::ACCENT_9;
 }
 
 // ---------------------------------------------------------------------------
