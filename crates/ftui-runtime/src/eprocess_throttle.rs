@@ -20,7 +20,7 @@
 //! - `X_t ∈ {0, 1}`: whether observation `t` is evidence for recompute
 //!   (e.g., a log line matched the active search/filter query)
 //! - `μ₀`: null hypothesis match rate — the "normal" baseline match frequency
-//! - `λ_t ∈ (0, 1/(1 − μ₀))`: betting fraction (adaptive via GRAPA)
+//! - `λ_t ∈ (0, 1/μ₀)`: betting fraction (adaptive via GRAPA)
 //!
 //! When `W_t ≥ 1/α` (the e-value threshold), we reject H₀ ("results are
 //! still fresh") and trigger recompute. After triggering, `W` resets to 1.

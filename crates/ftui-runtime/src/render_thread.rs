@@ -153,7 +153,7 @@ fn render_loop<W: Write + Send>(
 
         if logs.is_empty() {
             if let Some(buffer) = &latest_render
-                && let Err(e) = writer.present_ui(buffer, None)
+                && let Err(e) = writer.present_ui(buffer, None, true)
             {
                 let _ = err_tx.try_send(e);
                 return;
@@ -177,7 +177,7 @@ fn render_loop<W: Write + Send>(
 
                 // Interleaved render
                 if let Some(buffer) = &latest_render
-                    && let Err(e) = writer.present_ui(buffer, None)
+                    && let Err(e) = writer.present_ui(buffer, None, true)
                 {
                     let _ = err_tx.try_send(e);
                     return;

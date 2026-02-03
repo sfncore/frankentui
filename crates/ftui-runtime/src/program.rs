@@ -52,19 +52,22 @@
 //! ```
 
 use crate::StorageResult;
+use crate::evidence_sink::{EvidenceSink, EvidenceSinkConfig};
 use crate::input_fairness::{FairnessEventType, InputFairnessGuard};
 use crate::input_macro::{EventRecorder, InputMacro};
 use crate::locale::LocaleContext;
 use crate::resize_coalescer::{CoalesceAction, CoalescerConfig, ResizeCoalescer};
 use crate::state_persistence::StateRegistry;
 use crate::subscription::SubscriptionManager;
-use crate::terminal_writer::{ScreenMode, TerminalWriter, UiAnchor};
+use crate::terminal_writer::{RuntimeDiffConfig, ScreenMode, TerminalWriter, UiAnchor};
 use crate::voi_sampling::{VoiConfig, VoiSampler};
+use crate::{BucketKey, ConformalConfig, ConformalPredictor};
 use ftui_core::event::Event;
 use ftui_core::terminal_capabilities::TerminalCapabilities;
 use ftui_core::terminal_session::{SessionOptions, TerminalSession};
 use ftui_render::budget::{FrameBudgetConfig, RenderBudget};
 use ftui_render::buffer::Buffer;
+use ftui_render::diff_strategy::DiffStrategy;
 use ftui_render::frame::Frame;
 use ftui_render::sanitize::sanitize;
 use std::io::{self, Stdout, Write};
@@ -390,6 +393,12 @@ pub struct ProgramConfig {
     pub ui_anchor: UiAnchor,
     /// Frame budget configuration.
     pub budget: FrameBudgetConfig,
+    /// Diff strategy configuration for the terminal writer.
+    pub diff_config: RuntimeDiffConfig,
+    /// Evidence JSONL sink configuration.
+    pub evidence_sink: EvidenceSinkConfig,
+    /// Conformal predictor configuration for frame-time risk gating.
+    pub conformal_config: Option<ConformalConfig>,
     /// Locale context used for rendering.
     pub locale_context: LocaleContext,
     /// Input poll timeout.
@@ -418,6 +427,9 @@ impl Default for ProgramConfig {
             screen_mode: ScreenMode::Inline { ui_height: 4 },
             ui_anchor: UiAnchor::Bottom,
             budget: FrameBudgetConfig::default(),
+            diff_config: RuntimeDiffConfig::default(),
+            evidence_sink: EvidenceSinkConfig::default(),
+            conformal_config: None,
             locale_context: LocaleContext::global(),
             poll_timeout: Duration::from_millis(100),
             resize_coalescer: CoalescerConfig::default(),
@@ -470,6 +482,30 @@ impl ProgramConfig {
     /// Set the budget configuration.
     pub fn with_budget(mut self, budget: FrameBudgetConfig) -> Self {
         self.budget = budget;
+        self
+    }
+
+    /// Set the diff strategy configuration for the terminal writer.
+    pub fn with_diff_config(mut self, diff_config: RuntimeDiffConfig) -> Self {
+        self.diff_config = diff_config;
+        self
+    }
+
+    /// Set the evidence JSONL sink configuration.
+    pub fn with_evidence_sink(mut self, config: EvidenceSinkConfig) -> Self {
+        self.evidence_sink = config;
+        self
+    }
+
+    /// Enable conformal frame-time risk gating with the given config.
+    pub fn with_conformal_config(mut self, config: ConformalConfig) -> Self {
+        self.conformal_config = Some(config);
+        self
+    }
+
+    /// Disable conformal frame-time risk gating.
+    pub fn without_conformal(mut self) -> Self {
+        self.conformal_config = None;
         self
     }
 
@@ -609,6 +645,10 @@ pub struct Program<M: Model, W: Write + Send = Stdout> {
     poll_timeout: Duration,
     /// Frame budget configuration.
     budget: RenderBudget,
+    /// Conformal predictor for frame-time risk gating.
+    conformal_predictor: Option<ConformalPredictor>,
+    /// Last observed frame time (microseconds), used as a baseline predictor.
+    last_frame_time_us: Option<f64>,
     /// Locale context used for rendering.
     locale_context: LocaleContext,
     /// Last observed locale version.
@@ -656,12 +696,18 @@ impl<M: Model> Program<M, Stdout> {
             kitty_keyboard: config.kitty_keyboard,
         })?;
 
-        let mut writer = TerminalWriter::new(
+        let mut writer = TerminalWriter::with_diff_config(
             io::stdout(),
             config.screen_mode,
             config.ui_anchor,
             capabilities,
+            config.diff_config.clone(),
         );
+
+        let evidence_sink = EvidenceSink::from_config(&config.evidence_sink)?;
+        if let Some(ref sink) = evidence_sink {
+            writer.set_evidence_sink(Some(sink.clone()));
+        }
 
         // Get terminal size for initial frame
         let (w, h) = session.size().unwrap_or((80, 24));
@@ -670,10 +716,14 @@ impl<M: Model> Program<M, Stdout> {
         writer.set_size(width, height);
 
         let budget = RenderBudget::from_config(&config.budget);
+        let conformal_predictor = config.conformal_config.clone().map(ConformalPredictor::new);
         let locale_context = config.locale_context.clone();
         let locale_version = locale_context.version();
-        let resize_coalescer =
+        let mut resize_coalescer =
             ResizeCoalescer::new(config.resize_coalescer.clone(), (width, height));
+        if let Some(ref sink) = evidence_sink {
+            resize_coalescer.set_evidence_sink(Some(sink.clone()));
+        }
         let subscriptions = SubscriptionManager::new();
         let (task_sender, task_receiver) = std::sync::mpsc::channel();
         let inline_auto_remeasure = config
@@ -693,6 +743,8 @@ impl<M: Model> Program<M, Stdout> {
             height,
             poll_timeout: config.poll_timeout,
             budget,
+            conformal_predictor,
+            last_frame_time_us: None,
             locale_context,
             locale_version,
             resize_coalescer,
@@ -1150,6 +1202,39 @@ impl<M: Model, W: Write + Send> Program<M, W> {
         // Reset budget for new frame, potentially upgrading quality
         self.budget.next_frame();
 
+        // Apply conformal risk gate before rendering (if enabled)
+        let mut conformal_y_hat_us = None;
+        if let Some(predictor) = self.conformal_predictor.as_ref() {
+            let baseline_us = self
+                .last_frame_time_us
+                .unwrap_or_else(|| self.budget.total().as_secs_f64() * 1_000_000.0);
+            let diff_strategy = self
+                .writer
+                .last_diff_strategy()
+                .unwrap_or(DiffStrategy::Full);
+            let frame_height_hint = self.writer.render_height_hint().max(1);
+            let key = BucketKey::from_context(
+                self.writer.screen_mode(),
+                diff_strategy,
+                self.width,
+                frame_height_hint,
+            );
+            let budget_us = self.budget.total().as_secs_f64() * 1_000_000.0;
+            let prediction = predictor.predict(key, baseline_us, budget_us);
+            if prediction.risk {
+                self.budget.degrade();
+            }
+            debug!(
+                bucket = %prediction.bucket,
+                upper_us = prediction.upper_us,
+                budget_us = prediction.budget_us,
+                fallback = prediction.fallback_level,
+                risk = prediction.risk,
+                "conformal risk gate"
+            );
+            conformal_y_hat_us = Some(baseline_us);
+        }
+
         // Early skip if budget says to skip this frame entirely
         if self.budget.exhausted() {
             self.budget.record_frame_time(Duration::ZERO);
@@ -1175,6 +1260,8 @@ impl<M: Model, W: Write + Send> Program<M, W> {
             if decision.should_sample {
                 should_measure = true;
             }
+        } else {
+            crate::voi_telemetry::clear_inline_auto_voi_snapshot();
         }
 
         // --- Render phase ---
@@ -1198,6 +1285,12 @@ impl<M: Model, W: Write + Send> Program<M, W> {
                 state.sampler.observe(violated);
             }
         }
+        if auto_bounds.is_some()
+            && let Some(state) = self.inline_auto_remeasure.as_ref()
+        {
+            let snapshot = state.sampler.snapshot(8, crate::debug_trace::elapsed_ms());
+            crate::voi_telemetry::set_inline_auto_voi_snapshot(Some(snapshot));
+        }
 
         let frame_height = self.writer.render_height_hint().max(1);
         let _frame_span = info_span!(
@@ -1207,7 +1300,7 @@ impl<M: Model, W: Write + Send> Program<M, W> {
             duration_us = tracing::field::Empty
         )
         .entered();
-        let (buffer, cursor) = self.render_buffer(frame_height);
+        let (buffer, cursor, cursor_visible) = self.render_buffer(frame_height);
         let render_elapsed = render_start.elapsed();
         let mut present_elapsed = Duration::ZERO;
 
@@ -1230,7 +1323,8 @@ impl<M: Model, W: Write + Send> Program<M, W> {
             let present_start = Instant::now();
             {
                 let _present_span = debug_span!("ftui.render.present").entered();
-                self.writer.present_ui_owned(buffer, cursor)?;
+                self.writer
+                    .present_ui_owned(buffer, cursor, cursor_visible)?;
             }
             present_elapsed = present_start.elapsed();
 
@@ -1250,14 +1344,32 @@ impl<M: Model, W: Write + Send> Program<M, W> {
             );
         }
 
-        self.budget
-            .record_frame_time(render_elapsed.saturating_add(present_elapsed));
+        let frame_time = render_elapsed.saturating_add(present_elapsed);
+        self.budget.record_frame_time(frame_time);
+        let frame_time_us = frame_time.as_secs_f64() * 1_000_000.0;
+
+        if let (Some(predictor), Some(y_hat_us)) =
+            (self.conformal_predictor.as_mut(), conformal_y_hat_us)
+        {
+            let diff_strategy = self
+                .writer
+                .last_diff_strategy()
+                .unwrap_or(DiffStrategy::Full);
+            let key = BucketKey::from_context(
+                self.writer.screen_mode(),
+                diff_strategy,
+                self.width,
+                frame_height,
+            );
+            predictor.observe(key, y_hat_us, frame_time_us);
+        }
+        self.last_frame_time_us = Some(frame_time_us);
         self.dirty = false;
 
         Ok(())
     }
 
-    fn render_buffer(&mut self, frame_height: u16) -> (Buffer, Option<(u16, u16)>) {
+    fn render_buffer(&mut self, frame_height: u16) -> (Buffer, Option<(u16, u16)>, bool) {
         // Note: Frame borrows the pool and links from writer.
         // We scope it so it drops before we call present_ui (which needs exclusive writer access).
         let buffer = self.writer.take_render_buffer(self.width, frame_height);
@@ -1277,7 +1389,7 @@ impl<M: Model, W: Write + Send> Program<M, W> {
         tracing::Span::current().record("duration_us", view_start.elapsed().as_micros() as u64);
         // widget_count would require tracking in Frame
 
-        (frame.buffer, frame.cursor_position)
+        (frame.buffer, frame.cursor_position, frame.cursor_visible)
     }
 
     fn render_measure_buffer(&mut self, frame_height: u16) -> (Buffer, Option<(u16, u16)>) {
@@ -1467,6 +1579,7 @@ impl<M: Model, W: Write + Send> Program<M, W> {
             if let Some(state) = self.inline_auto_remeasure.as_mut() {
                 state.reset();
             }
+            crate::voi_telemetry::clear_inline_auto_voi_snapshot();
             self.mark_dirty();
         }
     }
@@ -1575,6 +1688,12 @@ impl<M: Model> AppBuilder<M> {
     /// Set the frame budget configuration.
     pub fn with_budget(mut self, budget: FrameBudgetConfig) -> Self {
         self.config.budget = budget;
+        self
+    }
+
+    /// Set the evidence JSONL sink configuration.
+    pub fn with_evidence_sink(mut self, config: EvidenceSinkConfig) -> Self {
+        self.config.evidence_sink = config;
         self
     }
 
@@ -2346,6 +2465,16 @@ mod tests {
     }
 
     #[test]
+    fn program_config_with_conformal() {
+        let config = ProgramConfig::default().with_conformal_config(ConformalConfig {
+            alpha: 0.2,
+            ..Default::default()
+        });
+        assert!(config.conformal_config.is_some());
+        assert!((config.conformal_config.as_ref().unwrap().alpha - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
     fn program_config_with_resize_coalescer() {
         let config = ProgramConfig::default().with_resize_coalescer(CoalescerConfig {
             steady_delay_ms: 8,
@@ -2356,6 +2485,8 @@ mod tests {
             cooldown_frames: 2,
             rate_window_size: 6,
             enable_logging: true,
+            enable_bocpd: false,
+            bocpd_config: None,
         });
         assert_eq!(config.resize_coalescer.steady_delay_ms, 8);
         assert!(config.resize_coalescer.enable_logging);
