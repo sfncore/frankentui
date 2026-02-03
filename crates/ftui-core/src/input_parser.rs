@@ -322,13 +322,10 @@ impl InputParser {
             return None;
         }
 
-        match byte {
-            // Final byte (0x40-0x7E) - return to ground
-            0x40..=0x7E => {
-                self.state = ParserState::Ground;
-            }
-            // Intermediate bytes - keep ignoring
-            _ => {}
+        // Final byte (0x40-0x7E) - return to ground
+        // Intermediate bytes outside this range are ignored
+        if let 0x40..=0x7E = byte {
+            self.state = ParserState::Ground;
         }
         None
     }
