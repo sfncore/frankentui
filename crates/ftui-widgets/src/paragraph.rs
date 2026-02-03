@@ -288,7 +288,12 @@ impl MeasurableWidget for Paragraph<'_> {
 
         // Convert to u16, saturating at MAX
         let min_w = (min_width as u16).saturating_add(chrome_width);
-        let min_h = (1u16).saturating_add(chrome_height); // At least 1 line of content
+        // Only require 1 line minimum if there's actual content
+        let min_h = if preferred_height > 0 {
+            (1u16).saturating_add(chrome_height)
+        } else {
+            chrome_height
+        };
 
         let pref_w = (preferred_width as u16).saturating_add(chrome_width);
         let pref_h = (preferred_height as u16).saturating_add(chrome_height);

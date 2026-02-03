@@ -4806,8 +4806,10 @@ mod tests {
         let alpha_first = c0.r() as f64 / 255.0;
         let alpha_last = c9.r() as f64 / 255.0;
 
-        assert!(alpha_first > alpha_last || c9 == PackedRgba::TRANSPARENT,
-            "Soft edge should create gradient (first more visible than last)");
+        assert!(
+            alpha_first > alpha_last || c9 == PackedRgba::TRANSPARENT,
+            "Soft edge should create gradient (first more visible than last)"
+        );
     }
 
     #[test]
@@ -4836,10 +4838,16 @@ mod tests {
             .time(0.0);
 
         for i in 0..4 {
-            assert_eq!(text_0.char_color(i, 4), PackedRgba::TRANSPARENT,
-                "All hidden at progress=0");
-            assert_ne!(text_1.char_color(i, 4), PackedRgba::TRANSPARENT,
-                "All visible at progress=1");
+            assert_eq!(
+                text_0.char_color(i, 4),
+                PackedRgba::TRANSPARENT,
+                "All hidden at progress=0"
+            );
+            assert_ne!(
+                text_1.char_color(i, 4),
+                PackedRgba::TRANSPARENT,
+                "All visible at progress=1"
+            );
         }
     }
 }

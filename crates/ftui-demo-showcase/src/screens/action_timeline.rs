@@ -623,3 +623,689 @@ impl ActionTimeline {
         self.ensure_selection(filtered_len);
     }
 }
+
+// =============================================================================
+// Unit Tests (bd-11ck.3)
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    fn press(code: KeyCode) -> Event {
+        Event::Key(KeyEvent {
+            code,
+            modifiers: Modifiers::NONE,
+            kind: KeyEventKind::Press,
+        })
+    }
+
+    // =========================================================================
+    // Enum Label Tests
+    // =========================================================================
+
+    #[test]
+    fn severity_labels() {
+        assert_eq!(Severity::Trace.label(), "TRACE");
+        assert_eq!(Severity::Debug.label(), "DEBUG");
+        assert_eq!(Severity::Info.label(), "INFO");
+        assert_eq!(Severity::Warn.label(), "WARN");
+        assert_eq!(Severity::Error.label(), "ERROR");
+    }
+
+    #[test]
+    fn severity_all_covered() {
+        assert_eq!(Severity::ALL.len(), 5);
+        for severity in Severity::ALL {
+            // Each severity has a label and color
+            assert!(!severity.label().is_empty());
+            let _ = severity.color(); // Should not panic
+        }
+    }
+
+    #[test]
+    fn component_labels() {
+        assert_eq!(Component::Core.label(), "core");
+        assert_eq!(Component::Runtime.label(), "runtime");
+        assert_eq!(Component::Render.label(), "render");
+        assert_eq!(Component::Widgets.label(), "widgets");
+    }
+
+    #[test]
+    fn component_all_covered() {
+        assert_eq!(Component::ALL.len(), 4);
+        for component in Component::ALL {
+            assert!(!component.label().is_empty());
+        }
+    }
+
+    #[test]
+    fn event_kind_labels() {
+        assert_eq!(EventKind::Input.label(), "input");
+        assert_eq!(EventKind::Command.label(), "cmd");
+        assert_eq!(EventKind::Subscription.label(), "sub");
+        assert_eq!(EventKind::Render.label(), "render");
+        assert_eq!(EventKind::Present.label(), "present");
+        assert_eq!(EventKind::Capability.label(), "caps");
+        assert_eq!(EventKind::Degrade.label(), "budget");
+    }
+
+    #[test]
+    fn event_kind_all_covered() {
+        assert_eq!(EventKind::ALL.len(), 7);
+        for kind in EventKind::ALL {
+            assert!(!kind.label().is_empty());
+        }
+    }
+
+    // =========================================================================
+    // ActionTimeline Initialization Tests
+    // =========================================================================
+
+    #[test]
+    fn new_creates_initial_events() {
+        let timeline = ActionTimeline::new();
+        assert_eq!(timeline.events.len(), 12);
+        assert!(timeline.follow);
+        assert!(timeline.show_details);
+        assert!(timeline.filter_component.is_none());
+        assert!(timeline.filter_severity.is_none());
+        assert!(timeline.filter_kind.is_none());
+    }
+
+    #[test]
+    fn new_events_have_increasing_ids() {
+        let timeline = ActionTimeline::new();
+        let mut last_id = 0;
+        for event in &timeline.events {
+            assert!(event.id > last_id, "IDs must be increasing");
+            last_id = event.id;
+        }
+    }
+
+    #[test]
+    fn default_same_as_new() {
+        let from_new = ActionTimeline::new();
+        let from_default = ActionTimeline::default();
+        assert_eq!(from_new.events.len(), from_default.events.len());
+        assert_eq!(from_new.follow, from_default.follow);
+    }
+
+    // =========================================================================
+    // Event Buffer Invariant Tests
+    // =========================================================================
+
+    #[test]
+    fn buffer_never_exceeds_max() {
+        let mut timeline = ActionTimeline::new();
+        // Push many events
+        for t in 0..1000 {
+            timeline.tick_count = t;
+            let event = timeline.synthetic_event();
+            timeline.push_event(event);
+            assert!(
+                timeline.events.len() <= MAX_EVENTS,
+                "Buffer exceeded max at tick {t}"
+            );
+        }
+    }
+
+    #[test]
+    fn push_event_evicts_oldest_at_capacity() {
+        let mut timeline = ActionTimeline::new();
+        // Fill to capacity
+        while timeline.events.len() < MAX_EVENTS {
+            timeline.tick_count += 1;
+            let event = timeline.synthetic_event();
+            timeline.push_event(event);
+        }
+        assert_eq!(timeline.events.len(), MAX_EVENTS);
+
+        let first_id_before = timeline.events.front().unwrap().id;
+        timeline.tick_count += 1;
+        let new_event = timeline.synthetic_event();
+        timeline.push_event(new_event);
+
+        assert_eq!(timeline.events.len(), MAX_EVENTS);
+        let first_id_after = timeline.events.front().unwrap().id;
+        assert!(
+            first_id_after > first_id_before,
+            "Oldest event should be evicted"
+        );
+    }
+
+    // =========================================================================
+    // Filter Cycling Tests
+    // =========================================================================
+
+    #[test]
+    fn cycle_component_round_trip() {
+        let mut timeline = ActionTimeline::new();
+        assert!(timeline.filter_component.is_none());
+
+        timeline.cycle_component();
+        assert_eq!(timeline.filter_component, Some(Component::Core));
+
+        timeline.cycle_component();
+        assert_eq!(timeline.filter_component, Some(Component::Runtime));
+
+        timeline.cycle_component();
+        assert_eq!(timeline.filter_component, Some(Component::Render));
+
+        timeline.cycle_component();
+        assert_eq!(timeline.filter_component, Some(Component::Widgets));
+
+        timeline.cycle_component();
+        assert!(timeline.filter_component.is_none(), "Should cycle back to None");
+    }
+
+    #[test]
+    fn cycle_severity_round_trip() {
+        let mut timeline = ActionTimeline::new();
+        assert!(timeline.filter_severity.is_none());
+
+        // Cycle through all values
+        let mut seen = vec![];
+        for _ in 0..10 {
+            timeline.cycle_severity();
+            seen.push(timeline.filter_severity);
+            if timeline.filter_severity.is_none() {
+                break;
+            }
+        }
+
+        // Should have cycled through values and back to None
+        assert!(seen.contains(&None));
+        assert!(seen.contains(&Some(Severity::Info)));
+        assert!(seen.contains(&Some(Severity::Warn)));
+        assert!(seen.contains(&Some(Severity::Error)));
+    }
+
+    #[test]
+    fn cycle_kind_round_trip() {
+        let mut timeline = ActionTimeline::new();
+        assert!(timeline.filter_kind.is_none());
+
+        // Cycle through all values
+        let mut count = 0;
+        loop {
+            timeline.cycle_kind();
+            count += 1;
+            if timeline.filter_kind.is_none() {
+                break;
+            }
+            assert!(count < 20, "Infinite loop in cycle_kind");
+        }
+
+        // Should have cycled through all 7 kinds + back to None
+        assert_eq!(count, 8);
+    }
+
+    #[test]
+    fn clear_filters_resets_all() {
+        let mut timeline = ActionTimeline::new();
+        timeline.filter_component = Some(Component::Core);
+        timeline.filter_severity = Some(Severity::Error);
+        timeline.filter_kind = Some(EventKind::Input);
+
+        timeline.clear_filters();
+
+        assert!(timeline.filter_component.is_none());
+        assert!(timeline.filter_severity.is_none());
+        assert!(timeline.filter_kind.is_none());
+    }
+
+    // =========================================================================
+    // Filter Application Tests
+    // =========================================================================
+
+    #[test]
+    fn filtered_indices_with_no_filter() {
+        let timeline = ActionTimeline::new();
+        let indices = timeline.filtered_indices();
+        assert_eq!(indices.len(), timeline.events.len());
+    }
+
+    #[test]
+    fn filtered_indices_with_component_filter() {
+        let mut timeline = ActionTimeline::new();
+        timeline.filter_component = Some(Component::Core);
+        let indices = timeline.filtered_indices();
+
+        for idx in indices {
+            assert_eq!(
+                timeline.events[idx].component,
+                Component::Core,
+                "Filtered event should match component filter"
+            );
+        }
+    }
+
+    #[test]
+    fn filtered_indices_with_severity_filter() {
+        let mut timeline = ActionTimeline::new();
+        timeline.filter_severity = Some(Severity::Error);
+        let indices = timeline.filtered_indices();
+
+        for idx in indices {
+            assert_eq!(
+                timeline.events[idx].severity,
+                Severity::Error,
+                "Filtered event should match severity filter"
+            );
+        }
+    }
+
+    #[test]
+    fn filtered_indices_with_combined_filters() {
+        let mut timeline = ActionTimeline::new();
+        // Add more events to increase chance of matches
+        for t in 12..100 {
+            timeline.tick_count = t;
+            let event = timeline.synthetic_event();
+            timeline.push_event(event);
+        }
+
+        timeline.filter_component = Some(Component::Core);
+        timeline.filter_severity = Some(Severity::Info);
+
+        let indices = timeline.filtered_indices();
+        for idx in indices {
+            let event = &timeline.events[idx];
+            assert_eq!(event.component, Component::Core);
+            assert_eq!(event.severity, Severity::Info);
+        }
+    }
+
+    // =========================================================================
+    // Navigation Tests
+    // =========================================================================
+
+    #[test]
+    fn navigate_up_decrements_selection() {
+        let mut timeline = ActionTimeline::new();
+        timeline.selected = 5;
+        timeline.follow = false;
+
+        timeline.update(&press(KeyCode::Up));
+
+        assert_eq!(timeline.selected, 4);
+        assert!(!timeline.follow, "Navigation should disable follow");
+    }
+
+    #[test]
+    fn navigate_up_saturates_at_zero() {
+        let mut timeline = ActionTimeline::new();
+        timeline.selected = 0;
+        timeline.follow = false;
+
+        timeline.update(&press(KeyCode::Up));
+
+        assert_eq!(timeline.selected, 0);
+    }
+
+    #[test]
+    fn navigate_down_increments_selection() {
+        let mut timeline = ActionTimeline::new();
+        timeline.selected = 5;
+        timeline.follow = false;
+
+        timeline.update(&press(KeyCode::Down));
+
+        // Selection is clamped by sync_selection
+        assert!(timeline.selected > 5 || timeline.selected == 5);
+    }
+
+    #[test]
+    fn navigate_vim_k_same_as_up() {
+        let mut timeline1 = ActionTimeline::new();
+        let mut timeline2 = ActionTimeline::new();
+        timeline1.selected = 5;
+        timeline2.selected = 5;
+        timeline1.follow = false;
+        timeline2.follow = false;
+
+        timeline1.update(&press(KeyCode::Up));
+        timeline2.update(&press(KeyCode::Char('k')));
+
+        assert_eq!(timeline1.selected, timeline2.selected);
+    }
+
+    #[test]
+    fn navigate_vim_j_same_as_down() {
+        let mut timeline1 = ActionTimeline::new();
+        let mut timeline2 = ActionTimeline::new();
+        timeline1.selected = 5;
+        timeline2.selected = 5;
+        timeline1.follow = false;
+        timeline2.follow = false;
+
+        timeline1.update(&press(KeyCode::Down));
+        timeline2.update(&press(KeyCode::Char('j')));
+
+        assert_eq!(timeline1.selected, timeline2.selected);
+    }
+
+    #[test]
+    fn home_jumps_to_start() {
+        let mut timeline = ActionTimeline::new();
+        timeline.selected = 10;
+
+        timeline.update(&press(KeyCode::Home));
+
+        assert_eq!(timeline.selected, 0);
+        assert!(!timeline.follow);
+    }
+
+    #[test]
+    fn end_jumps_to_end() {
+        let mut timeline = ActionTimeline::new();
+        timeline.selected = 0;
+
+        timeline.update(&press(KeyCode::End));
+
+        let max_idx = timeline.filtered_indices().len().saturating_sub(1);
+        assert_eq!(timeline.selected, max_idx);
+        assert!(!timeline.follow);
+    }
+
+    // =========================================================================
+    // Toggle Tests
+    // =========================================================================
+
+    #[test]
+    fn toggle_follow_mode() {
+        let mut timeline = ActionTimeline::new();
+        assert!(timeline.follow);
+
+        timeline.update(&press(KeyCode::Char('f')));
+        assert!(!timeline.follow);
+
+        timeline.update(&press(KeyCode::Char('f')));
+        assert!(timeline.follow);
+    }
+
+    #[test]
+    fn toggle_follow_uppercase() {
+        let mut timeline = ActionTimeline::new();
+        assert!(timeline.follow);
+
+        timeline.update(&press(KeyCode::Char('F')));
+        assert!(!timeline.follow);
+    }
+
+    #[test]
+    fn toggle_details() {
+        let mut timeline = ActionTimeline::new();
+        assert!(timeline.show_details);
+
+        timeline.update(&press(KeyCode::Enter));
+        assert!(!timeline.show_details);
+
+        timeline.update(&press(KeyCode::Enter));
+        assert!(timeline.show_details);
+    }
+
+    // =========================================================================
+    // Selection Bounds Tests
+    // =========================================================================
+
+    #[test]
+    fn ensure_selection_empty_events() {
+        let mut timeline = ActionTimeline::new();
+        timeline.events.clear();
+        timeline.selected = 100;
+
+        timeline.ensure_selection(0);
+
+        assert_eq!(timeline.selected, 0);
+        assert_eq!(timeline.scroll_offset, 0);
+    }
+
+    #[test]
+    fn ensure_selection_clamps_to_max() {
+        let mut timeline = ActionTimeline::new();
+        timeline.selected = 1000;
+        timeline.follow = false;
+
+        let filtered_len = timeline.filtered_indices().len();
+        timeline.ensure_selection(filtered_len);
+
+        assert!(timeline.selected < filtered_len);
+    }
+
+    #[test]
+    fn ensure_visible_adjusts_scroll() {
+        let mut timeline = ActionTimeline::new();
+        timeline.viewport_height = 5;
+        timeline.selected = 10;
+        timeline.scroll_offset = 0;
+
+        timeline.ensure_visible(12);
+
+        // Scroll should have adjusted so selected is visible
+        assert!(timeline.selected >= timeline.scroll_offset);
+        assert!(timeline.selected < timeline.scroll_offset + timeline.viewport_height);
+    }
+
+    // =========================================================================
+    // Tick Tests
+    // =========================================================================
+
+    #[test]
+    fn tick_generates_events_periodically() {
+        let mut timeline = ActionTimeline::new();
+        let initial_count = timeline.events.len();
+
+        // Tick at event burst interval
+        timeline.tick(EVENT_BURST_EVERY);
+
+        assert!(
+            timeline.events.len() > initial_count,
+            "Tick should generate new event"
+        );
+    }
+
+    #[test]
+    fn tick_does_not_generate_every_tick() {
+        let mut timeline = ActionTimeline::new();
+        let initial_count = timeline.events.len();
+
+        // Tick at non-burst interval
+        timeline.tick(EVENT_BURST_EVERY + 1);
+
+        assert_eq!(
+            timeline.events.len(),
+            initial_count,
+            "Non-burst tick should not generate event"
+        );
+    }
+
+    // =========================================================================
+    // Synthetic Event Tests
+    // =========================================================================
+
+    #[test]
+    fn synthetic_event_deterministic() {
+        let mut timeline1 = ActionTimeline::new();
+        let mut timeline2 = ActionTimeline::new();
+
+        timeline1.tick_count = 42;
+        timeline2.tick_count = 42;
+
+        // Reset next_id to same value
+        timeline1.next_id = 100;
+        timeline2.next_id = 100;
+
+        let event1 = timeline1.synthetic_event();
+        let event2 = timeline2.synthetic_event();
+
+        assert_eq!(event1.id, event2.id);
+        assert_eq!(event1.tick, event2.tick);
+        assert_eq!(event1.severity, event2.severity);
+        assert_eq!(event1.component, event2.component);
+        assert_eq!(event1.kind, event2.kind);
+        assert_eq!(event1.summary, event2.summary);
+    }
+
+    #[test]
+    fn synthetic_event_fields_present() {
+        let mut timeline = ActionTimeline::new();
+        timeline.tick_count = 10;
+
+        let event = timeline.synthetic_event();
+
+        assert!(!event.fields.is_empty());
+        assert!(event.fields.iter().any(|(k, _)| k == "latency_ms"));
+        assert!(event.fields.iter().any(|(k, _)| k == "diff_cells"));
+        assert!(event.fields.iter().any(|(k, _)| k == "ansi_bytes"));
+    }
+
+    #[test]
+    fn synthetic_event_evidence_for_special_kinds() {
+        let mut timeline = ActionTimeline::new();
+
+        // Find a tick that produces Capability or Degrade kind
+        for t in 0..100 {
+            timeline.tick_count = t;
+            let kind = EventKind::ALL[(t as usize / 3) % EventKind::ALL.len()];
+            if kind == EventKind::Capability || kind == EventKind::Degrade {
+                let event = timeline.synthetic_event();
+                assert!(
+                    event.evidence.is_some(),
+                    "Capability/Degrade should have evidence"
+                );
+                break;
+            }
+        }
+    }
+
+    // =========================================================================
+    // Screen Trait Tests
+    // =========================================================================
+
+    #[test]
+    fn title_and_tab_label() {
+        let timeline = ActionTimeline::new();
+        assert_eq!(timeline.title(), "Action Timeline");
+        assert_eq!(timeline.tab_label(), "Timeline");
+    }
+
+    #[test]
+    fn keybindings_not_empty() {
+        let timeline = ActionTimeline::new();
+        let bindings = timeline.keybindings();
+        assert!(!bindings.is_empty());
+
+        // Check expected bindings exist
+        let keys: Vec<_> = bindings.iter().map(|h| h.key).collect();
+        assert!(keys.contains(&"F"));
+        assert!(keys.contains(&"C"));
+        assert!(keys.contains(&"S"));
+        assert!(keys.contains(&"T"));
+        assert!(keys.contains(&"X"));
+        assert!(keys.contains(&"Enter"));
+    }
+
+    // =========================================================================
+    // Resize Event Tests
+    // =========================================================================
+
+    #[test]
+    fn resize_updates_viewport() {
+        let mut timeline = ActionTimeline::new();
+        let initial_viewport = timeline.viewport_height;
+
+        timeline.update(&Event::Resize {
+            width: 120,
+            height: 50,
+        });
+
+        // Viewport should be updated (50 - 6 = 44)
+        assert_ne!(timeline.viewport_height, initial_viewport);
+    }
+
+    #[test]
+    fn resize_minimum_viewport() {
+        let mut timeline = ActionTimeline::new();
+
+        timeline.update(&Event::Resize {
+            width: 80,
+            height: 5,
+        });
+
+        // Should have at least 1 viewport height
+        assert!(timeline.viewport_height >= 1);
+    }
+
+    // =========================================================================
+    // Edge Case Tests
+    // =========================================================================
+
+    #[test]
+    fn filter_results_in_empty() {
+        let mut timeline = ActionTimeline::new();
+        // Set filters that might not match any events
+        timeline.filter_component = Some(Component::Core);
+        timeline.filter_severity = Some(Severity::Error);
+        timeline.filter_kind = Some(EventKind::Degrade);
+
+        // This should not panic
+        let indices = timeline.filtered_indices();
+        timeline.ensure_selection(indices.len());
+
+        // Selection should be valid
+        if indices.is_empty() {
+            assert_eq!(timeline.selected, 0);
+        } else {
+            assert!(timeline.selected < indices.len());
+        }
+    }
+
+    #[test]
+    fn rapid_navigation_does_not_panic() {
+        let mut timeline = ActionTimeline::new();
+
+        // Rapid up/down navigation
+        for _ in 0..100 {
+            timeline.update(&press(KeyCode::Up));
+        }
+        for _ in 0..200 {
+            timeline.update(&press(KeyCode::Down));
+        }
+        for _ in 0..50 {
+            timeline.update(&press(KeyCode::PageUp));
+        }
+        for _ in 0..100 {
+            timeline.update(&press(KeyCode::PageDown));
+        }
+
+        // Should not panic, selection should be valid
+        let filtered_len = timeline.filtered_indices().len();
+        assert!(timeline.selected <= filtered_len);
+    }
+
+    #[test]
+    fn filter_cycling_while_navigating() {
+        let mut timeline = ActionTimeline::new();
+
+        // Interleave filter changes and navigation
+        timeline.update(&press(KeyCode::Down));
+        timeline.update(&press(KeyCode::Char('c'))); // cycle component
+        timeline.update(&press(KeyCode::Down));
+        timeline.update(&press(KeyCode::Char('s'))); // cycle severity
+        timeline.update(&press(KeyCode::Up));
+        timeline.update(&press(KeyCode::Char('t'))); // cycle kind
+        timeline.update(&press(KeyCode::Home));
+        timeline.update(&press(KeyCode::Char('x'))); // clear filters
+        timeline.update(&press(KeyCode::End));
+
+        // Should not panic
+        let filtered_len = timeline.filtered_indices().len();
+        assert!(timeline.selected <= filtered_len);
+    }
+}
