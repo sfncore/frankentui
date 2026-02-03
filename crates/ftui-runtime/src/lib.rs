@@ -31,6 +31,8 @@ pub mod subscription;
 pub mod terminal_writer;
 pub mod undo;
 
+pub mod reactive;
+
 pub use asciicast::{AsciicastRecorder, AsciicastWriter};
 pub use input_macro::{
     EventRecorder, FilteredEventRecorder, InputMacro, MacroPlayback, MacroPlayer, MacroRecorder,
@@ -52,6 +54,7 @@ pub use stdio_capture::{CapturedWriter, StdioCapture, StdioCaptureError};
 pub use eprocess_throttle::{
     EProcessThrottle, ThrottleConfig, ThrottleDecision, ThrottleLog, ThrottleStats,
 };
+pub use reactive::Observable;
 pub use resize_coalescer::{
     CoalesceAction, CoalescerConfig, CoalescerStats, DecisionLog, Regime, ResizeCoalescer,
 };
