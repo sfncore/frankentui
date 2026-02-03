@@ -451,7 +451,6 @@ fn apply_style(cell: &mut Cell, style: Style) {
 mod tests {
     use super::*;
     use ftui_render::grapheme_pool::GraphemePool;
-    use unicode_width::UnicodeWidthStr;
 
     fn sample_entries() -> Vec<FileEntry> {
         vec![
