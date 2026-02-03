@@ -15,6 +15,7 @@ pub mod layout_lab;
 pub mod macro_recorder;
 pub mod markdown_rich_text;
 pub mod performance;
+pub mod responsive_demo;
 pub mod shakespeare;
 pub mod visual_effects;
 pub mod widget_gallery;

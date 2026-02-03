@@ -60,6 +60,8 @@ pub enum ScreenId {
     MarkdownRichText,
     /// Mind-blowing visual effects with braille.
     VisualEffects,
+    /// Responsive layout breakpoint demo.
+    ResponsiveDemo,
 }
 
 impl ScreenId {
@@ -78,6 +80,7 @@ impl ScreenId {
         Self::MacroRecorder,
         Self::MarkdownRichText,
         Self::VisualEffects,
+        Self::ResponsiveDemo,
     ];
 
     /// 0-based index in the ALL array.
@@ -113,6 +116,7 @@ impl ScreenId {
             Self::Performance => "Performance",
             Self::MarkdownRichText => "Markdown",
             Self::VisualEffects => "Visual Effects",
+            Self::ResponsiveDemo => "Responsive Layout",
         }
     }
 
@@ -132,6 +136,7 @@ impl ScreenId {
             Self::Performance => "Perf",
             Self::MarkdownRichText => "MD",
             Self::VisualEffects => "VFX",
+            Self::ResponsiveDemo => "Resp",
         }
     }
 
@@ -151,6 +156,7 @@ impl ScreenId {
             Self::Performance => "Performance",
             Self::MarkdownRichText => "MarkdownRichText",
             Self::VisualEffects => "VisualEffects",
+            Self::ResponsiveDemo => "ResponsiveDemo",
         }
     }
 
@@ -198,9 +204,11 @@ pub struct ScreenStates {
     pub markdown_rich_text: screens::markdown_rich_text::MarkdownRichText,
     /// Visual effects screen state.
     pub visual_effects: screens::visual_effects::VisualEffectsScreen,
+    /// Responsive layout demo screen state.
+    pub responsive_demo: screens::responsive_demo::ResponsiveDemo,
     /// Tracks whether each screen has errored during rendering.
     /// Indexed by `ScreenId::index()`.
-    screen_errors: [Option<String>; 13],
+    screen_errors: [Option<String>; 14],
 }
 
 impl ScreenStates {
@@ -247,6 +255,9 @@ impl ScreenStates {
             ScreenId::VisualEffects => {
                 self.visual_effects.update(event);
             }
+            ScreenId::ResponsiveDemo => {
+                self.responsive_demo.update(event);
+            }
         }
     }
 
@@ -266,6 +277,7 @@ impl ScreenStates {
         self.performance.tick(tick_count);
         self.markdown_rich_text.tick(tick_count);
         self.visual_effects.tick(tick_count);
+        self.responsive_demo.tick(tick_count);
     }
 
     fn apply_theme(&mut self) {
@@ -307,6 +319,7 @@ impl ScreenStates {
                 ScreenId::Performance => self.performance.view(frame, area),
                 ScreenId::MarkdownRichText => self.markdown_rich_text.view(frame, area),
                 ScreenId::VisualEffects => self.visual_effects.view(frame, area),
+                ScreenId::ResponsiveDemo => self.responsive_demo.view(frame, area),
             }
         }));
 
@@ -740,6 +753,7 @@ impl AppModel {
             ScreenId::Performance => self.screens.performance.keybindings(),
             ScreenId::MarkdownRichText => self.screens.markdown_rich_text.keybindings(),
             ScreenId::VisualEffects => self.screens.visual_effects.keybindings(),
+            ScreenId::ResponsiveDemo => self.screens.responsive_demo.keybindings(),
         };
         // Convert screens::HelpEntry to chrome::HelpEntry (same struct, different module).
         entries
@@ -857,7 +871,7 @@ mod tests {
         assert_eq!(app.current_screen, ScreenId::Dashboard);
 
         app.update(AppMsg::PrevScreen);
-        assert_eq!(app.current_screen, ScreenId::VisualEffects);
+        assert_eq!(app.current_screen, ScreenId::ResponsiveDemo);
     }
 
     #[test]
@@ -934,8 +948,8 @@ mod tests {
     #[test]
     fn screen_next_prev_wraps() {
         assert_eq!(ScreenId::Dashboard.next(), ScreenId::Shakespeare);
-        assert_eq!(ScreenId::VisualEffects.next(), ScreenId::Dashboard);
-        assert_eq!(ScreenId::Dashboard.prev(), ScreenId::VisualEffects);
+        assert_eq!(ScreenId::VisualEffects.next(), ScreenId::ResponsiveDemo);
+        assert_eq!(ScreenId::Dashboard.prev(), ScreenId::ResponsiveDemo);
         assert_eq!(ScreenId::Shakespeare.prev(), ScreenId::Dashboard);
     }
 
@@ -1114,7 +1128,7 @@ mod tests {
     /// Verify all screens have the expected count.
     #[test]
     fn all_screens_count() {
-        assert_eq!(ScreenId::ALL.len(), 13);
+        assert_eq!(ScreenId::ALL.len(), 14);
     }
 
     // -----------------------------------------------------------------------

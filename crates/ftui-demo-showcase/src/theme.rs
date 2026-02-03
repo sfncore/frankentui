@@ -122,6 +122,7 @@ pub mod screen_accent {
     pub const PERFORMANCE: ColorToken = accent::ACCENT_10;
     pub const MARKDOWN: ColorToken = accent::ACCENT_11;
     pub const VISUAL_EFFECTS: ColorToken = accent::ACCENT_12;
+    pub const RESPONSIVE_DEMO: ColorToken = accent::ACCENT_9;
 }
 
 // ---------------------------------------------------------------------------
