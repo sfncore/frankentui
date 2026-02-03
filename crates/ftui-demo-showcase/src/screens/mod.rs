@@ -26,6 +26,8 @@ pub mod notifications;
 pub mod performance;
 pub mod responsive_demo;
 pub mod shakespeare;
+pub mod snapshot_player;
+pub mod terminal_capabilities;
 pub mod theme_studio;
 pub mod virtualized_search;
 pub mod visual_effects;

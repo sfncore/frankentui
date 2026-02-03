@@ -1,5 +1,48 @@
 # Session TODO List
 
+## Current Session (DustyCanyon) — bd-2sog.5 Terminal Capability Explorer Diagnostic Logging
+- [x] Close bd-12o8.5 (Advanced Text Editor Diagnostic Logging) — was completed but not closed
+- [x] Claim bd-2sog.5 (Terminal Capability Explorer — Diagnostic Logging + Telemetry Hooks)
+- [x] Implement DiagnosticEventKind enum (8 event types: ViewModeChanged, SelectionChanged, ProfileCycled, ProfileReset, CapabilityInspected, EvidenceLedgerAccessed, SimulationActivated, EnvironmentRead)
+- [x] Implement DiagnosticEntry struct with builder pattern and JSONL serialization
+- [x] Implement DiagnosticLog collector with max entries and stderr output
+- [x] Implement DiagnosticSummary for aggregated counts
+- [x] Add diagnostic_log field to TerminalCapabilitiesScreen struct
+- [x] Hook diagnostic logging into update() method for all key events
+- [x] Add reset_diagnostic_seq() for test determinism
+- [x] Add 13 diagnostic tests: JSONL format, entry recording, summary counts, max entries, escaping, screen interactions
+- [x] Run `cargo fmt` — passed
+- [x] Run `cargo clippy` — passed
+- [x] Verify all tests pass (13 tests)
+- [x] Close bd-2sog.5 in .beads/issues.jsonl
+
+## Previous Session (ScarletStream) — bd-2sog.1 Terminal Capability Explorer Snapshots
+- [x] Run `bv --robot-next` / `bv --robot-triage` to pick next actionable bead
+- [x] Claim `bd-2sog.1` and notify SunnyHollow/OliveDesert
+- [x] Reserve snapshot edit surface (`crates/ftui-demo-showcase/tests/screen_snapshots.rs`, `tests/snapshots/terminal_capabilities_*`)
+- [x] Add deterministic env override hooks: `EnvSnapshot::from_values`, `TerminalCapabilitiesScreen::set_env_override`
+- [x] Add snapshot tests: initial/evidence/simulation/profile states
+- [x] Generate snapshots with `BLESS=1 cargo test -p ftui-demo-showcase --test screen_snapshots terminal_capabilities`
+- [x] Re-run `cargo fmt --check`
+- [x] Re-run `cargo check --all-targets`
+- [x] Re-run `cargo clippy --all-targets -- -D warnings`
+- [x] Close `bd-2sog.1` after checks pass
+- [x] `br sync --flush-only` after close
+- [ ] Release file reservations for bd-2sog.1 (tool error; retry)
+
+## Current Session (ScarletStream) — bd-32my.2 Layout Composer Resize Regression Tests
+- [x] Claim `bd-32my.2` and attempt to notify OliveDesert (MCP send failed)
+- [x] Create PTY E2E script `tests/e2e/scripts/test_layout_composer_resize.sh`
+- [x] Wire suite into `tests/e2e/scripts/run_all.sh`
+- [x] Run `tests/e2e/scripts/test_layout_composer_resize.sh` (all cases passed)
+- [x] Run `cargo fmt --check`
+- [x] Run `cargo check --all-targets`
+- [x] Run `cargo clippy --all-targets -- -D warnings`
+- [x] Close `bd-32my.2`
+- [x] `br sync --flush-only`
+- [ ] Send completion message to OliveDesert (MCP send failed; retry)
+- [ ] Reserve/release files via MCP (MCP connection error; retry)
+
 ## 8. Current Session (DustyCanyon) — Agent Mail + E2E Kitty Keyboard
 - [x] **Confirm AGENTS.md + README.md fully read** (requirements + architecture context)
 - [x] **Run code investigation agent** to map FrankenTUI architecture and key crates
@@ -109,3 +152,70 @@
 - [x] **Table Scroll**: Fixed scroll-to-bottom logic for variable-height rows.
 - [x] **Markdown Links**: Fixed missing URL propagation in Markdown renderer.
 - [x] **Final Cleanup**: Removed unused variables and synchronized all trait impls.
+
+## 8. Current Session (Gemini) — Code Review & Fixes
+- [x] **Codebase Investigation**: Analyzed architecture and key crates.
+- [x] **Buffer Copy Fix**: Optimized `Buffer::copy_from` in `ftui-render` to handle wide characters correctly.
+- [x] **TextArea Scroll Fix**: Refactored `TextArea` in `ftui-widgets` to use `Cell<usize>` for scroll offsets, ensuring correct scrolling behavior.
+- [x] **Widget Review**: Verified `Table`, `List`, `Input`, `Scrollbar`, and `Block` widgets.
+- [x] **Final Report**: Created `REVIEW_REPORT.md` with findings.
+- [x] **Session Complete**: All tasks verified.
+
+## 12. Current Session (Gemini) — Inline Mode Ghosting Fix
+- [x] **Codebase Investigation**: Analyzed `ftui-render`, `ftui-core`, `ftui-runtime`, `ftui-layout`.
+- [x] **Bug ID**: Identified critical ghosting bug in `InlineMode` when logging causes scrolling.
+- [x] **Fix Implementation**: Updated `TerminalWriter::write_log` to invalidate state and `present_inline` to clear UI region on full redraw.
+- [x] **Verification**: Verified logic via deep code analysis (environment limited).
+- [x] **Documentation**: Updated `FIXES_SUMMARY.md`.
+
+## 13. Current Session (WhiteHollow) — Paragraph Wrap + TextArea Soft Wrap
+- [x] **Read AGENTS.md** fully and capture constraints.
+- [x] **Read README.md** fully and capture architecture context.
+- [x] **Run code investigation**: scan core/render/runtime/widgets/text crate entrypoints.
+- [x] **Register MCP Agent Mail session** (WhiteHollow).
+- [x] **List active agents** and record names.
+- [x] **Check inbox / ack-required** for WhiteHollow.
+- [x] **Send intro message** to active agents about wrap/textarea work.
+- [x] **Create bead** for wrap fixes (Paragraph style-preserving wrap + TextArea soft wrap word wrap).
+- [x] **Set bead status** to `in_progress`.
+- [x] **Reserve files** for edits (ftui-text, ftui-widgets, ftui-harness, demo-showcase chrome).
+- [x] **Implement TextArea word wrap** in `wrap_line_slices` (preserve whitespace, word boundaries, char fallback).
+- [x] **Update TextArea soft_wrap docs** to reflect implemented wrapping.
+- [x] **Verify cursor mapping** under soft wrap with word boundaries.
+- [x] **Fix Help render ambiguity** in `crates/ftui-demo-showcase/src/chrome.rs`.
+- [x] **Verify SnapshotPlayer GraphemePool import** (correct module).
+- [x] **Add Paragraph styled-wrap snapshot test** in `crates/ftui-harness/tests/widget_snapshots.rs`.
+- [x] **Bless snapshots** for new paragraph wrap test.
+- [x] **Run targeted tests**: ftui-text wrap test + ftui-widgets TextArea test.
+- [x] **Run quality gates**: `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`.
+- [x] **Run UBS** on changed files before commit.
+- [x] **Update bead status** to `closed` with completion note.
+- [x] **Sync beads** (`br sync --flush-only`) and stage `.beads/`.
+- [ ] **Release file reservations** for edited files (blocked: Agent Mail connection errors).
+- [ ] **Send completion message** via Agent Mail (bead thread) (blocked: Agent Mail connection errors).
+
+## 13. Current Session (Gemini) — Comprehensive Code Review & Scrollbar Fix
+- [x] **Read Documentation**: `AGENTS.md`, `README.md`.
+- [x] **Audit Core**: `ftui-core`, `ftui-render`, `ftui-layout`, `ftui-style`, `ftui-text`.
+- [x] **Audit Widgets**: `ftui-widgets` (Table, List, Tree, Scrollbar, Progress, Input, etc.).
+- [x] **Identify Bug**: Found visual corruption in `Scrollbar` with wide characters.
+- [x] **Fix Bug**: Updated `scrollbar.rs` render loop to handle multi-width symbols correctly.
+- [x] **Verify Fix**: Added regression tests `scrollbar_wide_symbols_horizontal/vertical`.
+- [x] **Report**: Created `REVIEW_REPORT.md` and updated `FIXES_SUMMARY.md`.
+- [ ] **Sync Beads**: Skipped (environment limitation: `run_shell_command` fails).
+
+## 14. Current Session (DustyCanyon) — Advanced Text Editor Diagnostic Logging (bd-12o8.5)
+- [x] **Reserve file** `crates/ftui-demo-showcase/src/screens/advanced_text_editor.rs`
+- [x] **Study log_search.rs diagnostic pattern** (DiagnosticEventKind, DiagnosticEntry, DiagnosticLog)
+- [x] **Implement DiagnosticEventKind enum** with 12 event types
+- [x] **Implement DiagnosticEntry struct** with builder pattern and JSONL serialization
+- [x] **Implement DiagnosticLog collector** with max entries, stderr output, summary stats
+- [x] **Implement DiagnosticSummary** for aggregated counts
+- [x] **Add diagnostic_log field** to AdvancedTextEditor struct
+- [x] **Hook diagnostic logging** into update() method for all key events
+- [x] **Add init_diagnostics()** for environment variable control
+- [x] **Add 11 diagnostic tests**: JSONL format, entry recording, summary counts, max entries, escaping, clear
+- [x] **Verify all tests pass** (23 tests: 12 original + 11 new)
+- [x] **Release file reservations** for advanced_text_editor.rs
+- [x] **Send completion message** to Agent Mail
+- [ ] **Close bead** (br command failing due to missing "dev" script)

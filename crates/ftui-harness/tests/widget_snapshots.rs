@@ -4,17 +4,20 @@
 //!
 //! Run `BLESS=1 cargo test --package ftui-harness` to create/update snapshots.
 
+use ftui_core::event::{Event, KeyCode, KeyEvent, KeyEventKind, Modifiers};
 use ftui_core::geometry::{Rect, Sides};
 use ftui_harness::{assert_snapshot, assert_snapshot_ansi};
 use ftui_render::buffer::Buffer;
 use ftui_render::cell::Cell;
 use ftui_render::frame::{Frame, HitId, HitRegion};
 use ftui_render::grapheme_pool::GraphemePool;
-use ftui_text::Text;
+use ftui_style::Style;
+use ftui_text::{Span, Text, WrapMode};
 use ftui_widgets::block::{Alignment, Block};
 use ftui_widgets::borders::BorderType;
 use ftui_widgets::borders::Borders;
 use ftui_widgets::columns::Columns;
+use ftui_widgets::command_palette::CommandPalette;
 use ftui_widgets::inspector::{InspectorMode, InspectorOverlay, InspectorState, WidgetInfo};
 use ftui_widgets::list::{List, ListItem, ListState};
 use ftui_widgets::modal::{BackdropConfig, Modal, ModalPosition, ModalSizeConstraints};
@@ -92,6 +95,20 @@ fn snapshot_paragraph_in_block() {
     let mut frame = Frame::new(15, 5, &mut pool);
     para.render(area, &mut frame);
     assert_snapshot!("paragraph_in_block", &frame.buffer);
+}
+
+#[test]
+fn snapshot_paragraph_wrapped_styles() {
+    let text = Text::from_spans([
+        Span::styled("Hello ", Style::new().bold()),
+        Span::styled("world", Style::new().italic()),
+    ]);
+    let para = Paragraph::new(text).wrap(WrapMode::Word);
+    let area = Rect::new(0, 0, 6, 2);
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(6, 2, &mut pool);
+    para.render(area, &mut frame);
+    assert_snapshot_ansi!("paragraph_wrapped_styles", &frame.buffer);
 }
 
 // ============================================================================
@@ -582,4 +599,98 @@ fn log_inspector_perf(
             case, cols, rows, max_depth, duration_us, budget_us, result
         );
     }
+}
+
+// ============================================================================
+// Command Palette
+// ============================================================================
+
+#[test]
+fn snapshot_palette_empty() {
+    let mut palette = CommandPalette::new();
+    palette.open();
+
+    let area = Rect::new(0, 0, 60, 10);
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(60, 10, &mut pool);
+
+    // Fill background to see overlay clearly
+    for y in 0..10u16 {
+        for x in 0..60u16 {
+            frame.buffer.set(x, y, Cell::from_char('.'));
+        }
+    }
+
+    palette.render(area, &mut frame);
+    assert_snapshot!("palette_empty", &frame.buffer);
+}
+
+#[test]
+fn snapshot_palette_results() {
+    let mut palette = CommandPalette::new();
+    palette.register("Open File", Some("Open a file"), &[]);
+    palette.register("Save File", Some("Save current file"), &[]);
+    palette.open();
+
+    // Simulate typing "file"
+    for ch in "file".chars() {
+        let k = Event::Key(KeyEvent {
+            code: KeyCode::Char(ch),
+            modifiers: Modifiers::empty(),
+            kind: KeyEventKind::Press,
+        });
+        palette.handle_event(&k);
+    }
+
+    let area = Rect::new(0, 0, 60, 10);
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(60, 10, &mut pool);
+    palette.render(area, &mut frame);
+    assert_snapshot!("palette_results", &frame.buffer);
+}
+
+#[test]
+fn snapshot_palette_long_list() {
+    let mut palette = CommandPalette::new();
+    for i in 0..20 {
+        palette.register(format!("Action {:02}", i), None, &[]);
+    }
+    palette.open();
+
+    // Select item 5 to show scrolling/selection
+    for _ in 0..5 {
+        let down = Event::Key(KeyEvent {
+            code: KeyCode::Down,
+            modifiers: Modifiers::empty(),
+            kind: KeyEventKind::Press,
+        });
+        palette.handle_event(&down);
+    }
+
+    let area = Rect::new(0, 0, 40, 10); // Narrower/shorter to force scroll
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(40, 10, &mut pool);
+    palette.render(area, &mut frame);
+    assert_snapshot!("palette_long_list", &frame.buffer);
+}
+
+#[test]
+fn snapshot_palette_no_results() {
+    let mut palette = CommandPalette::new();
+    palette.register("Alpha", None, &[]);
+    palette.open();
+
+    // Type "z" (no match)
+    let z = Event::Key(KeyEvent {
+        code: KeyCode::Char('z'),
+        modifiers: Modifiers::empty(),
+        kind: KeyEventKind::Press,
+    });
+    palette.handle_event(&z);
+
+    let area = Rect::new(0, 0, 60, 10);
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(60, 10, &mut pool);
+    palette.render(area, &mut frame);
+    assert_snapshot!("palette_no_results", &frame.buffer);
 }

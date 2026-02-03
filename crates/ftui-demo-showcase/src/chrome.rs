@@ -488,7 +488,7 @@ pub fn render_help_overlay(
         content_width.saturating_sub(2),
         global_entries.min(inner.height.saturating_sub(current_y - content_y)),
     );
-    global_help.render(global_area, frame);
+    Widget::render(&global_help, global_area, frame);
     current_y += global_entries + 1;
 
     // Render screen-specific bindings if available
@@ -517,7 +517,7 @@ pub fn render_help_overlay(
             content_width.saturating_sub(2),
             remaining_height.min(screen_bindings.len() as u16),
         );
-        screen_help.render(screen_area, frame);
+        Widget::render(&screen_help, screen_area, frame);
     }
 
     // Footer hint at bottom
@@ -563,6 +563,8 @@ pub fn accent_for(id: ScreenId) -> theme::ColorToken {
         ScreenId::VirtualizedSearch => theme::screen_accent::PERFORMANCE,
         ScreenId::AsyncTasks => theme::screen_accent::PERFORMANCE,
         ScreenId::ThemeStudio => theme::screen_accent::VISUAL_EFFECTS,
+        ScreenId::TerminalCapabilities => theme::screen_accent::PERFORMANCE,
+        ScreenId::SnapshotPlayer => theme::screen_accent::PERFORMANCE,
     }
 }
 

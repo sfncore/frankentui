@@ -10,6 +10,7 @@
 
 use ftui_core::event::{Event, KeyCode, KeyEvent, KeyEventKind, Modifiers};
 use ftui_core::geometry::Rect;
+use ftui_core::terminal_capabilities::TerminalProfile;
 use ftui_demo_showcase::app::{AppModel, ScreenId};
 use ftui_demo_showcase::screens::Screen;
 use ftui_harness::assert_snapshot;
@@ -20,6 +21,11 @@ use ftui_runtime::Model;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+#[allow(dead_code)]
+fn with_terminal_env<F: FnOnce()>(f: F) {
+    f();
+}
 
 fn press(code: KeyCode) -> Event {
     Event::Key(KeyEvent {
@@ -35,6 +41,30 @@ fn ctrl_press(code: KeyCode) -> Event {
         modifiers: Modifiers::CTRL,
         kind: KeyEventKind::Press,
     })
+}
+
+fn terminal_caps_env() -> ftui_demo_showcase::screens::terminal_capabilities::EnvSnapshot {
+    ftui_demo_showcase::screens::terminal_capabilities::EnvSnapshot::from_values(
+        "xterm-256color",
+        "ftui-test",
+        "truecolor",
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+    )
+}
+
+fn terminal_caps_screen()
+-> ftui_demo_showcase::screens::terminal_capabilities::TerminalCapabilitiesScreen {
+    let mut screen =
+        ftui_demo_showcase::screens::terminal_capabilities::TerminalCapabilitiesScreen::with_profile(
+            TerminalProfile::Modern,
+        );
+    screen.set_env_override(terminal_caps_env());
+    screen
 }
 
 // ============================================================================
@@ -1320,4 +1350,255 @@ fn theme_studio_page_down_tokens_120x40() {
     let area = Rect::new(0, 0, 120, 40);
     screen.view(&mut frame, area);
     assert_snapshot!("theme_studio_page_down_tokens_120x40", &frame.buffer);
+}
+
+// ============================================================================
+// Snapshot Player — Time-travel debugging (bd-3sa7.1)
+// ============================================================================
+
+#[test]
+fn snapshot_player_initial_80x24() {
+    let screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(80, 24, &mut pool);
+    let area = Rect::new(0, 0, 80, 24);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_initial_80x24", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_initial_120x40() {
+    let screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_initial_120x40", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_tiny_40x10() {
+    let screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(40, 10, &mut pool);
+    let area = Rect::new(0, 0, 40, 10);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_tiny_40x10", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_wide_200x50() {
+    let screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(200, 50, &mut pool);
+    let area = Rect::new(0, 0, 200, 50);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_wide_200x50", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_step_forward_120x40() {
+    let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    // Step forward several frames
+    for _ in 0..5 {
+        screen.update(&press(KeyCode::Right));
+    }
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_step_forward_120x40", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_end_key_120x40() {
+    let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    // Jump to last frame
+    screen.update(&press(KeyCode::End));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_end_key_120x40", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_home_key_120x40() {
+    let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    // Go to end then back to start
+    screen.update(&press(KeyCode::End));
+    screen.update(&press(KeyCode::Home));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_home_key_120x40", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_playing_120x40() {
+    let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    // Start playback
+    screen.update(&press(KeyCode::Char(' ')));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_playing_120x40", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_with_marker_120x40() {
+    let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    // Step forward and add a marker
+    for _ in 0..10 {
+        screen.update(&press(KeyCode::Right));
+    }
+    screen.update(&press(KeyCode::Char('m'))); // Toggle marker
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_with_marker_120x40", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_after_tick_playback_120x40() {
+    let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    // Start playback and advance with ticks
+    screen.update(&press(KeyCode::Char(' ')));
+    for t in 1..=10 {
+        screen.tick(t * 2); // tick on even numbers advances frame
+    }
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_after_tick_playback_120x40", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_vim_navigation_120x40() {
+    let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    // Use vim-style h/l navigation
+    for _ in 0..5 {
+        screen.update(&press(KeyCode::Char('l')));
+    }
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_vim_navigation_120x40", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_middle_frame_80x24() {
+    let mut screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    // Navigate to middle of timeline
+    for _ in 0..25 {
+        screen.update(&press(KeyCode::Right));
+    }
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(80, 24, &mut pool);
+    let area = Rect::new(0, 0, 80, 24);
+    screen.view(&mut frame, area);
+    assert_snapshot!("snapshot_player_middle_frame_80x24", &frame.buffer);
+}
+
+#[test]
+fn snapshot_player_zero_area() {
+    let screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(1, 1, &mut pool);
+    let area = Rect::new(0, 0, 0, 0);
+    screen.view(&mut frame, area);
+    // No panic = success
+}
+
+#[test]
+fn snapshot_player_title() {
+    let screen = ftui_demo_showcase::screens::snapshot_player::SnapshotPlayer::new();
+    assert_eq!(screen.title(), "Snapshot Player");
+    assert_eq!(screen.tab_label(), "Snapshots");
+}
+
+// ============================================================================
+// Terminal Capability Explorer (bd-2sog)
+// ============================================================================
+
+#[test]
+fn terminal_capabilities_initial_80x24() {
+    let screen = terminal_caps_screen();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(80, 24, &mut pool);
+    let area = Rect::new(0, 0, 80, 24);
+    screen.view(&mut frame, area);
+    assert_snapshot!("terminal_capabilities_initial_80x24", &frame.buffer);
+}
+
+#[test]
+fn terminal_capabilities_initial_120x40() {
+    let screen = terminal_caps_screen();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("terminal_capabilities_initial_120x40", &frame.buffer);
+}
+
+#[test]
+fn terminal_capabilities_evidence_120x40() {
+    let mut screen = terminal_caps_screen();
+    screen.update(&press(KeyCode::Tab));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("terminal_capabilities_evidence_120x40", &frame.buffer);
+}
+
+#[test]
+fn terminal_capabilities_simulation_120x40() {
+    let mut screen = terminal_caps_screen();
+    screen.update(&press(KeyCode::Tab));
+    screen.update(&press(KeyCode::Tab));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("terminal_capabilities_simulation_120x40", &frame.buffer);
+}
+
+#[test]
+fn terminal_capabilities_simulation_profile_120x40() {
+    let mut screen = terminal_caps_screen();
+    screen.update(&press(KeyCode::Tab));
+    screen.update(&press(KeyCode::Tab));
+    screen.update(&press(KeyCode::Char('p')));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!(
+        "terminal_capabilities_simulation_profile_120x40",
+        &frame.buffer
+    );
+}
+
+#[test]
+fn terminal_capabilities_zero_area() {
+    let screen = terminal_caps_screen();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(1, 1, &mut pool);
+    let area = Rect::new(0, 0, 0, 0);
+    screen.view(&mut frame, area);
+    // No panic = success
+}
+
+#[test]
+fn terminal_capabilities_title() {
+    let screen =
+        ftui_demo_showcase::screens::terminal_capabilities::TerminalCapabilitiesScreen::new();
+    assert_eq!(screen.title(), "Terminal Capabilities");
+    assert_eq!(screen.tab_label(), "Caps");
 }

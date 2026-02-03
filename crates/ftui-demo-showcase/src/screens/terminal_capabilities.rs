@@ -1,0 +1,1713 @@
+#![forbid(unsafe_code)]
+
+//! Terminal Capability Explorer screen.
+//!
+//! Visualizes terminal capability detection, safety policies, and evidence
+//! ledgers from `ftui-core`. Provides a simple simulation mode to preview
+//! predefined terminal profiles.
+//!
+//! ## Diagnostic Logging
+//!
+//! Set `FTUI_TERMCAPS_DIAGNOSTICS=true` to enable JSONL diagnostic output to stderr.
+//! Events logged include view mode changes, profile cycling, capability selection,
+//! and evidence ledger access.
+//!
+//! For deterministic timestamps in tests, set `FTUI_TERMCAPS_DETERMINISTIC=true`.
+
+use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+use ftui_core::capability_override::{has_active_overrides, override_depth};
+#[cfg(feature = "caps-probe")]
+use ftui_core::caps_probe::{CapabilityProber, EvidenceSource, ProbeableCapability};
+use ftui_core::event::{Event, KeyCode, KeyEvent, KeyEventKind};
+use ftui_core::geometry::Rect;
+use ftui_core::terminal_capabilities::{TerminalCapabilities, TerminalProfile};
+use ftui_layout::{Constraint, Flex};
+use ftui_render::frame::Frame;
+use ftui_runtime::Cmd;
+use ftui_style::{Style, StyleFlags};
+use ftui_text::Text;
+use ftui_widgets::Widget;
+use ftui_widgets::block::{Alignment, Block};
+use ftui_widgets::borders::{BorderType, Borders};
+use ftui_widgets::paragraph::Paragraph;
+use ftui_widgets::table::{Row, Table};
+
+use super::{HelpEntry, Screen};
+use crate::theme;
+
+#[cfg(not(feature = "caps-probe"))]
+mod caps_probe_stub {
+    use ftui_core::terminal_capabilities::TerminalCapabilities;
+    use std::time::Duration;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum EvidenceSource {
+        Environment,
+        Da1Response,
+        Da2Response,
+        DecrpmResponse,
+        OscResponse,
+        Timeout,
+        Prior,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum ProbeableCapability {
+        TrueColor,
+        SynchronizedOutput,
+        Hyperlinks,
+        KittyKeyboard,
+        FocusEvents,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct EvidenceEntry {
+        pub source: EvidenceSource,
+        pub log_odds: f64,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct EvidenceLedger {
+        pub capability: ProbeableCapability,
+        entries: Vec<EvidenceEntry>,
+        probability: f64,
+        log_odds: f64,
+    }
+
+    impl EvidenceLedger {
+        pub fn probability(&self) -> f64 {
+            self.probability
+        }
+
+        pub fn is_supported(&self) -> bool {
+            self.probability >= 0.5
+        }
+
+        pub fn log_odds(&self) -> f64 {
+            self.log_odds
+        }
+
+        pub fn entries(&self) -> &[EvidenceEntry] {
+            &self.entries
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct CapabilityProber;
+
+    impl CapabilityProber {
+        pub fn new(_timeout: Duration) -> Self {
+            Self
+        }
+
+        pub fn build_ledgers(&self, _caps: &TerminalCapabilities) -> Vec<EvidenceLedger> {
+            Vec::new()
+        }
+    }
+}
+
+#[cfg(not(feature = "caps-probe"))]
+use caps_probe_stub::{CapabilityProber, EvidenceSource, ProbeableCapability};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    Matrix,
+    Evidence,
+    Simulation,
+}
+
+impl ViewMode {
+    fn next(self) -> Self {
+        match self {
+            Self::Matrix => Self::Evidence,
+            Self::Evidence => Self::Simulation,
+            Self::Simulation => Self::Matrix,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Matrix => "Matrix",
+            Self::Evidence => "Evidence",
+            Self::Simulation => "Simulation",
+        }
+    }
+}
+
+// ============================================================================
+// Diagnostic Logging Infrastructure
+// ============================================================================
+
+/// Counter for generating unique diagnostic entry IDs.
+static DIAGNOSTIC_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Reset the diagnostic sequence counter (for testing).
+pub fn reset_diagnostic_seq() {
+    DIAGNOSTIC_SEQ.store(0, Ordering::Relaxed);
+}
+
+/// Types of diagnostic events emitted by the Terminal Capabilities screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticEventKind {
+    /// View mode changed (Tab pressed).
+    ViewModeChanged,
+    /// Capability selection moved (Up/Down).
+    SelectionChanged,
+    /// Profile was cycled (P key).
+    ProfileCycled,
+    /// Profile was reset to detected (R key).
+    ProfileReset,
+    /// Capability row was inspected (selection landed on it).
+    CapabilityInspected,
+    /// Evidence ledger was accessed (Evidence view shown).
+    EvidenceLedgerAccessed,
+    /// Simulation mode activated.
+    SimulationActivated,
+    /// Environment snapshot was read.
+    EnvironmentRead,
+}
+
+impl DiagnosticEventKind {
+    /// Returns a stable string label for JSONL output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ViewModeChanged => "view_mode_changed",
+            Self::SelectionChanged => "selection_changed",
+            Self::ProfileCycled => "profile_cycled",
+            Self::ProfileReset => "profile_reset",
+            Self::CapabilityInspected => "capability_inspected",
+            Self::EvidenceLedgerAccessed => "evidence_ledger_accessed",
+            Self::SimulationActivated => "simulation_activated",
+            Self::EnvironmentRead => "environment_read",
+        }
+    }
+}
+
+/// A single diagnostic log entry.
+#[derive(Debug, Clone)]
+pub struct DiagnosticEntry {
+    /// Unique sequence ID for this entry.
+    pub seq: u64,
+    /// Event kind.
+    pub kind: DiagnosticEventKind,
+    /// Unix timestamp in milliseconds (or deterministic counter in test mode).
+    pub timestamp_ms: u64,
+    /// Optional key-value details.
+    details: Vec<(String, String)>,
+}
+
+impl DiagnosticEntry {
+    /// Create a new diagnostic entry with auto-assigned sequence ID.
+    pub fn new(kind: DiagnosticEventKind) -> Self {
+        let seq = DIAGNOSTIC_SEQ.fetch_add(1, Ordering::Relaxed);
+        let timestamp_ms = if std::env::var("FTUI_TERMCAPS_DETERMINISTIC").is_ok() {
+            seq // Use sequence as deterministic timestamp
+        } else {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+        };
+        Self {
+            seq,
+            kind,
+            timestamp_ms,
+            details: Vec::new(),
+        }
+    }
+
+    /// Add a detail key-value pair (builder pattern).
+    pub fn with_detail(mut self, key: &str, value: &str) -> Self {
+        self.details.push((key.to_string(), value.to_string()));
+        self
+    }
+
+    /// Add view mode detail.
+    pub fn with_view_mode(self, mode: ViewMode) -> Self {
+        self.with_detail("view_mode", mode.label())
+    }
+
+    /// Add selected capability detail.
+    pub fn with_capability(self, name: &str) -> Self {
+        self.with_detail("capability", name)
+    }
+
+    /// Add profile detail.
+    pub fn with_profile(self, profile: &str) -> Self {
+        self.with_detail("profile", profile)
+    }
+
+    /// Add selection index detail.
+    pub fn with_selection(self, index: usize) -> Self {
+        self.with_detail("selection", &index.to_string())
+    }
+
+    /// Escape a string value for JSONL output.
+    fn escape_json(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        for c in s.chars() {
+            match c {
+                '"' => result.push_str("\\\""),
+                '\\' => result.push_str("\\\\"),
+                '\n' => result.push_str("\\n"),
+                '\r' => result.push_str("\\r"),
+                '\t' => result.push_str("\\t"),
+                c if c.is_control() => {
+                    result.push_str(&format!("\\u{:04x}", c as u32));
+                }
+                c => result.push(c),
+            }
+        }
+        result
+    }
+
+    /// Serialize to JSONL format.
+    pub fn to_jsonl(&self) -> String {
+        let mut parts = vec![
+            format!("\"seq\":{}", self.seq),
+            format!("\"ts\":{}", self.timestamp_ms),
+            format!("\"kind\":\"{}\"", self.kind.as_str()),
+        ];
+        for (key, value) in &self.details {
+            parts.push(format!(
+                "\"{}\":\"{}\"",
+                Self::escape_json(key),
+                Self::escape_json(value)
+            ));
+        }
+        format!("{{{}}}", parts.join(","))
+    }
+}
+
+/// Summary of diagnostic events for reporting.
+#[derive(Debug, Clone, Default)]
+pub struct DiagnosticSummary {
+    pub view_mode_changed_count: usize,
+    pub selection_changed_count: usize,
+    pub profile_cycled_count: usize,
+    pub profile_reset_count: usize,
+    pub capability_inspected_count: usize,
+    pub evidence_ledger_accessed_count: usize,
+    pub simulation_activated_count: usize,
+    pub environment_read_count: usize,
+}
+
+impl DiagnosticSummary {
+    /// Total number of events.
+    pub fn total(&self) -> usize {
+        self.view_mode_changed_count
+            + self.selection_changed_count
+            + self.profile_cycled_count
+            + self.profile_reset_count
+            + self.capability_inspected_count
+            + self.evidence_ledger_accessed_count
+            + self.simulation_activated_count
+            + self.environment_read_count
+    }
+
+    /// Serialize to JSONL format.
+    pub fn to_jsonl(&self) -> String {
+        format!(
+            "{{\"summary\":true,\"total\":{},\"view_mode_changed\":{},\"selection_changed\":{},\"profile_cycled\":{},\"profile_reset\":{},\"capability_inspected\":{},\"evidence_ledger_accessed\":{},\"simulation_activated\":{},\"environment_read\":{}}}",
+            self.total(),
+            self.view_mode_changed_count,
+            self.selection_changed_count,
+            self.profile_cycled_count,
+            self.profile_reset_count,
+            self.capability_inspected_count,
+            self.evidence_ledger_accessed_count,
+            self.simulation_activated_count,
+            self.environment_read_count
+        )
+    }
+}
+
+/// Collector for diagnostic entries.
+#[derive(Debug)]
+pub struct DiagnosticLog {
+    entries: Vec<DiagnosticEntry>,
+    max_entries: usize,
+    write_to_stderr: bool,
+    start_time: Instant,
+}
+
+impl DiagnosticLog {
+    /// Create a new diagnostic log.
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            max_entries: 10_000,
+            write_to_stderr: false,
+            start_time: Instant::now(),
+        }
+    }
+
+    /// Enable writing entries to stderr as JSONL.
+    pub fn with_stderr(mut self) -> Self {
+        self.write_to_stderr = true;
+        self
+    }
+
+    /// Set maximum number of entries to retain.
+    pub fn with_max_entries(mut self, max: usize) -> Self {
+        self.max_entries = max;
+        self
+    }
+
+    /// Record a diagnostic entry.
+    pub fn record(&mut self, entry: DiagnosticEntry) {
+        if self.write_to_stderr {
+            let _ = writeln!(std::io::stderr(), "{}", entry.to_jsonl());
+        }
+        self.entries.push(entry);
+        if self.entries.len() > self.max_entries {
+            self.entries.remove(0);
+        }
+    }
+
+    /// Get all recorded entries.
+    pub fn entries(&self) -> &[DiagnosticEntry] {
+        &self.entries
+    }
+
+    /// Get entries of a specific kind.
+    pub fn entries_of_kind(&self, kind: DiagnosticEventKind) -> Vec<&DiagnosticEntry> {
+        self.entries.iter().filter(|e| e.kind == kind).collect()
+    }
+
+    /// Export all entries as JSONL.
+    pub fn to_jsonl(&self) -> String {
+        self.entries
+            .iter()
+            .map(DiagnosticEntry::to_jsonl)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Compute summary statistics.
+    pub fn summary(&self) -> DiagnosticSummary {
+        let mut summary = DiagnosticSummary::default();
+        for entry in &self.entries {
+            match entry.kind {
+                DiagnosticEventKind::ViewModeChanged => summary.view_mode_changed_count += 1,
+                DiagnosticEventKind::SelectionChanged => summary.selection_changed_count += 1,
+                DiagnosticEventKind::ProfileCycled => summary.profile_cycled_count += 1,
+                DiagnosticEventKind::ProfileReset => summary.profile_reset_count += 1,
+                DiagnosticEventKind::CapabilityInspected => summary.capability_inspected_count += 1,
+                DiagnosticEventKind::EvidenceLedgerAccessed => {
+                    summary.evidence_ledger_accessed_count += 1
+                }
+                DiagnosticEventKind::SimulationActivated => summary.simulation_activated_count += 1,
+                DiagnosticEventKind::EnvironmentRead => summary.environment_read_count += 1,
+            }
+        }
+        summary
+    }
+
+    /// Clear all entries.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// Elapsed time since log creation.
+    pub fn elapsed(&self) -> Duration {
+        self.start_time.elapsed()
+    }
+}
+
+impl Default for DiagnosticLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// End Diagnostic Logging Infrastructure
+// ============================================================================
+
+#[derive(Debug, Clone)]
+struct CapabilityRow {
+    name: &'static str,
+    detected: bool,
+    effective: bool,
+    fallback: String,
+    reason: String,
+    probeable: Option<ProbeableCapability>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnvSnapshot {
+    term: String,
+    term_program: String,
+    colorterm: String,
+    no_color: bool,
+    tmux: bool,
+    screen: bool,
+    zellij: bool,
+    kitty: bool,
+    wt_session: bool,
+}
+
+impl EnvSnapshot {
+    pub fn read() -> Self {
+        Self {
+            term: std::env::var("TERM").unwrap_or_default(),
+            term_program: std::env::var("TERM_PROGRAM").unwrap_or_default(),
+            colorterm: std::env::var("COLORTERM").unwrap_or_default(),
+            no_color: std::env::var("NO_COLOR").is_ok(),
+            tmux: std::env::var("TMUX").is_ok(),
+            screen: std::env::var("STY").is_ok(),
+            zellij: std::env::var("ZELLIJ").is_ok(),
+            kitty: std::env::var("KITTY_WINDOW_ID").is_ok(),
+            wt_session: std::env::var("WT_SESSION").is_ok(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_values(
+        term: &str,
+        term_program: &str,
+        colorterm: &str,
+        no_color: bool,
+        tmux: bool,
+        screen: bool,
+        zellij: bool,
+        kitty: bool,
+        wt_session: bool,
+    ) -> Self {
+        Self {
+            term: term.to_string(),
+            term_program: term_program.to_string(),
+            colorterm: colorterm.to_string(),
+            no_color,
+            tmux,
+            screen,
+            zellij,
+            kitty,
+            wt_session,
+        }
+    }
+
+    fn format_value(value: &str) -> String {
+        if value.is_empty() {
+            "(unset)".to_string()
+        } else {
+            value.to_string()
+        }
+    }
+}
+
+pub struct TerminalCapabilitiesScreen {
+    view: ViewMode,
+    selected: usize,
+    profile_override: Option<TerminalProfile>,
+    prober: CapabilityProber,
+    env_override: Option<EnvSnapshot>,
+    diagnostic_log: DiagnosticLog,
+}
+
+impl Default for TerminalCapabilitiesScreen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TerminalCapabilitiesScreen {
+    pub fn new() -> Self {
+        let diagnostic_log = if std::env::var("FTUI_TERMCAPS_DIAGNOSTICS").is_ok() {
+            DiagnosticLog::new().with_stderr()
+        } else {
+            DiagnosticLog::new()
+        };
+        Self {
+            view: ViewMode::Matrix,
+            selected: 0,
+            profile_override: None,
+            prober: CapabilityProber::new(Duration::from_millis(200)),
+            env_override: None,
+            diagnostic_log,
+        }
+    }
+
+    /// Get a reference to the diagnostic log.
+    pub fn diagnostic_log(&self) -> &DiagnosticLog {
+        &self.diagnostic_log
+    }
+
+    /// Get a mutable reference to the diagnostic log.
+    pub fn diagnostic_log_mut(&mut self) -> &mut DiagnosticLog {
+        &mut self.diagnostic_log
+    }
+
+    pub fn with_profile(profile: TerminalProfile) -> Self {
+        let mut screen = Self::new();
+        screen.set_profile_override(profile);
+        screen
+    }
+
+    pub fn set_profile_override(&mut self, profile: TerminalProfile) {
+        if profile == TerminalProfile::Detected {
+            self.profile_override = None;
+        } else {
+            self.profile_override = Some(profile);
+        }
+    }
+
+    pub fn set_env_override(&mut self, env: EnvSnapshot) {
+        self.env_override = Some(env);
+    }
+
+    fn active_capabilities(&self) -> TerminalCapabilities {
+        match self.profile_override {
+            Some(profile) => TerminalCapabilities::from_profile(profile),
+            None => TerminalCapabilities::with_overrides(),
+        }
+    }
+
+    fn profile_label(profile: TerminalProfile) -> &'static str {
+        if profile == TerminalProfile::Detected {
+            "detected"
+        } else {
+            profile.as_str()
+        }
+    }
+
+    fn status_text(enabled: bool) -> Text {
+        if enabled {
+            Text::styled("yes", theme::success())
+        } else {
+            Text::styled("no", theme::error_style())
+        }
+    }
+
+    fn fallback_text(enabled: bool, fallback: &str) -> String {
+        if enabled {
+            "enabled".to_string()
+        } else {
+            fallback.to_string()
+        }
+    }
+
+    fn reason_for(
+        caps: &TerminalCapabilities,
+        detected: bool,
+        effective: bool,
+        mux_sensitive: bool,
+    ) -> String {
+        if detected && effective {
+            "Detected via env heuristics".to_string()
+        } else if mux_sensitive && caps.in_any_mux() {
+            "Disabled by mux safety policy".to_string()
+        } else if detected && !effective {
+            "Policy disabled (safety)".to_string()
+        } else {
+            "Conservative default (insufficient evidence)".to_string()
+        }
+    }
+
+    fn build_rows(&self, caps: &TerminalCapabilities) -> Vec<CapabilityRow> {
+        vec![
+            CapabilityRow {
+                name: "True color (24-bit)",
+                detected: caps.true_color,
+                effective: caps.true_color,
+                fallback: Self::fallback_text(
+                    caps.true_color,
+                    if caps.colors_256 { "256-color" } else { "mono" },
+                ),
+                reason: Self::reason_for(caps, caps.true_color, caps.true_color, false),
+                probeable: Some(ProbeableCapability::TrueColor),
+            },
+            CapabilityRow {
+                name: "256-color palette",
+                detected: caps.colors_256,
+                effective: caps.colors_256,
+                fallback: Self::fallback_text(caps.colors_256, "mono"),
+                reason: Self::reason_for(caps, caps.colors_256, caps.colors_256, false),
+                probeable: None,
+            },
+            CapabilityRow {
+                name: "Synchronized output",
+                detected: caps.sync_output,
+                effective: caps.use_sync_output(),
+                fallback: Self::fallback_text(caps.use_sync_output(), "unsynced repaint"),
+                reason: Self::reason_for(caps, caps.sync_output, caps.use_sync_output(), true),
+                probeable: Some(ProbeableCapability::SynchronizedOutput),
+            },
+            CapabilityRow {
+                name: "Scroll region (DECSTBM)",
+                detected: caps.scroll_region,
+                effective: caps.use_scroll_region(),
+                fallback: Self::fallback_text(caps.use_scroll_region(), "full repaint"),
+                reason: Self::reason_for(caps, caps.scroll_region, caps.use_scroll_region(), true),
+                probeable: None,
+            },
+            CapabilityRow {
+                name: "OSC 8 hyperlinks",
+                detected: caps.osc8_hyperlinks,
+                effective: caps.use_hyperlinks(),
+                fallback: Self::fallback_text(caps.use_hyperlinks(), "plain text"),
+                reason: Self::reason_for(caps, caps.osc8_hyperlinks, caps.use_hyperlinks(), true),
+                probeable: Some(ProbeableCapability::Hyperlinks),
+            },
+            CapabilityRow {
+                name: "Kitty keyboard protocol",
+                detected: caps.kitty_keyboard,
+                effective: caps.kitty_keyboard,
+                fallback: Self::fallback_text(caps.kitty_keyboard, "legacy keys"),
+                reason: Self::reason_for(caps, caps.kitty_keyboard, caps.kitty_keyboard, false),
+                probeable: Some(ProbeableCapability::KittyKeyboard),
+            },
+            CapabilityRow {
+                name: "Focus events",
+                detected: caps.focus_events,
+                effective: caps.focus_events,
+                fallback: Self::fallback_text(caps.focus_events, "no focus events"),
+                reason: Self::reason_for(caps, caps.focus_events, caps.focus_events, false),
+                probeable: Some(ProbeableCapability::FocusEvents),
+            },
+            CapabilityRow {
+                name: "Bracketed paste",
+                detected: caps.bracketed_paste,
+                effective: caps.bracketed_paste,
+                fallback: Self::fallback_text(caps.bracketed_paste, "raw paste"),
+                reason: Self::reason_for(caps, caps.bracketed_paste, caps.bracketed_paste, false),
+                probeable: None,
+            },
+            CapabilityRow {
+                name: "SGR mouse",
+                detected: caps.mouse_sgr,
+                effective: caps.mouse_sgr,
+                fallback: Self::fallback_text(caps.mouse_sgr, "mouse disabled"),
+                reason: Self::reason_for(caps, caps.mouse_sgr, caps.mouse_sgr, false),
+                probeable: None,
+            },
+            CapabilityRow {
+                name: "OSC 52 clipboard",
+                detected: caps.osc52_clipboard,
+                effective: caps.use_clipboard(),
+                fallback: Self::fallback_text(caps.use_clipboard(), "clipboard disabled"),
+                reason: Self::reason_for(caps, caps.osc52_clipboard, caps.use_clipboard(), true),
+                probeable: None,
+            },
+        ]
+    }
+
+    fn selected_row<'a>(&self, rows: &'a [CapabilityRow]) -> Option<&'a CapabilityRow> {
+        rows.get(self.selected)
+    }
+
+    fn move_selection(&mut self, delta: isize, row_count: usize) {
+        if row_count == 0 {
+            self.selected = 0;
+            return;
+        }
+        let current = self.selected as isize;
+        let mut next = current + delta;
+        if next < 0 {
+            next = row_count as isize - 1;
+        } else if next >= row_count as isize {
+            next = 0;
+        }
+        self.selected = next as usize;
+    }
+
+    fn cycle_profile(&mut self) {
+        let profiles = Self::profile_order();
+        let current = self.profile_override.unwrap_or(TerminalProfile::Detected);
+        let idx = profiles.iter().position(|&p| p == current).unwrap_or(0);
+        let next = profiles[(idx + 1) % profiles.len()];
+        self.profile_override = if next == TerminalProfile::Detected {
+            None
+        } else {
+            Some(next)
+        };
+    }
+
+    fn reset_profile(&mut self) {
+        self.profile_override = None;
+    }
+
+    fn profile_order() -> &'static [TerminalProfile] {
+        &[
+            TerminalProfile::Detected,
+            TerminalProfile::Modern,
+            TerminalProfile::Xterm256Color,
+            TerminalProfile::Xterm,
+            TerminalProfile::Vt100,
+            TerminalProfile::Dumb,
+            TerminalProfile::Tmux,
+            TerminalProfile::Screen,
+            TerminalProfile::Zellij,
+            TerminalProfile::Kitty,
+            TerminalProfile::WindowsConsole,
+            TerminalProfile::LinuxConsole,
+        ]
+    }
+
+    fn render_summary(&self, frame: &mut Frame, area: Rect, caps: &TerminalCapabilities) {
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Terminal Capability Explorer ")
+            .title_alignment(Alignment::Center)
+            .style(Style::new().fg(theme::screen_accent::ADVANCED));
+        let inner = block.inner(area);
+        block.render(area, frame);
+
+        if inner.is_empty() {
+            return;
+        }
+
+        let profile = self.profile_override.unwrap_or(caps.profile());
+        let profile_label = Self::profile_label(profile);
+        let mux_state = if caps.in_any_mux() {
+            let mut muxes = Vec::new();
+            if caps.in_tmux {
+                muxes.push("tmux");
+            }
+            if caps.in_screen {
+                muxes.push("screen");
+            }
+            if caps.in_zellij {
+                muxes.push("zellij");
+            }
+            if muxes.is_empty() {
+                "yes".to_string()
+            } else {
+                format!("yes ({})", muxes.join(", "))
+            }
+        } else {
+            "no".to_string()
+        };
+
+        let overrides = if has_active_overrides() {
+            format!("overrides: {} active", override_depth())
+        } else {
+            "overrides: none".to_string()
+        };
+
+        let lines = [
+            format!(
+                "Profile: {} | View: {} | Color depth: {}",
+                profile_label,
+                self.view.label(),
+                caps.color_depth()
+            ),
+            format!(
+                "Mux: {} | Sync output: {}",
+                mux_state,
+                yes_no(caps.use_sync_output())
+            ),
+            format!(
+                "Hyperlinks: {} | Clipboard: {} | {}",
+                yes_no(caps.use_hyperlinks()),
+                yes_no(caps.use_clipboard()),
+                overrides
+            ),
+        ];
+
+        for (idx, line) in lines.iter().enumerate() {
+            if idx as u16 >= inner.height {
+                break;
+            }
+            let row = Rect::new(inner.x, inner.y + idx as u16, inner.width, 1);
+            Paragraph::new(line.as_str())
+                .style(Style::new().fg(theme::fg::SECONDARY))
+                .render(row, frame);
+        }
+    }
+
+    fn render_matrix_panel(&self, frame: &mut Frame, area: Rect, rows: &[CapabilityRow]) {
+        if area.is_empty() {
+            return;
+        }
+
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Capability Matrix ")
+            .style(theme::content_border());
+        let inner = block.inner(area);
+        block.render(area, frame);
+
+        if inner.is_empty() {
+            return;
+        }
+
+        let header = Row::new(["Capability", "Detected", "Effective", "Fallback"])
+            .style(Style::new().fg(theme::fg::PRIMARY).attrs(StyleFlags::BOLD));
+
+        let highlight = Style::new()
+            .bg(theme::alpha::HIGHLIGHT)
+            .fg(theme::fg::PRIMARY)
+            .attrs(StyleFlags::BOLD);
+
+        let table_rows: Vec<Row> = rows
+            .iter()
+            .enumerate()
+            .map(|(idx, row)| {
+                let row_style = if idx == self.selected {
+                    highlight
+                } else {
+                    Style::new().fg(theme::fg::SECONDARY)
+                };
+                Row::new([
+                    Text::raw(row.name),
+                    Self::status_text(row.detected),
+                    Self::status_text(row.effective),
+                    Text::raw(row.fallback.as_str()),
+                ])
+                .style(row_style)
+            })
+            .collect();
+
+        let widths = [
+            Constraint::Min(20),
+            Constraint::Fixed(9),
+            Constraint::Fixed(9),
+            Constraint::Min(16),
+        ];
+
+        Widget::render(
+            &Table::new(table_rows, widths)
+                .header(header)
+                .style(Style::new().fg(theme::fg::SECONDARY)),
+            inner,
+            frame,
+        );
+    }
+
+    fn render_details_panel(&self, frame: &mut Frame, area: Rect, row: &CapabilityRow) {
+        if area.is_empty() {
+            return;
+        }
+
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Details ")
+            .style(theme::content_border());
+        let inner = block.inner(area);
+        block.render(area, frame);
+
+        if inner.is_empty() {
+            return;
+        }
+
+        let lines = [
+            format!("Capability: {}", row.name),
+            format!("Detected: {}", yes_no(row.detected)),
+            format!("Effective: {}", yes_no(row.effective)),
+            format!("Fallback: {}", row.fallback),
+            format!("Reason: {}", row.reason),
+        ];
+
+        for (idx, line) in lines.iter().enumerate() {
+            if idx as u16 >= inner.height {
+                break;
+            }
+            let row_area = Rect::new(inner.x, inner.y + idx as u16, inner.width, 1);
+            Paragraph::new(line.as_str())
+                .style(Style::new().fg(theme::fg::MUTED))
+                .render(row_area, frame);
+        }
+    }
+
+    fn render_evidence_panel(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        caps: &TerminalCapabilities,
+        row: &CapabilityRow,
+    ) {
+        if area.is_empty() {
+            return;
+        }
+
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Evidence Ledger ")
+            .style(theme::content_border());
+        let inner = block.inner(area);
+        block.render(area, frame);
+
+        if inner.is_empty() {
+            return;
+        }
+
+        let mut lines: Vec<String> = Vec::new();
+        if let Some(cap) = row.probeable {
+            if let Some(ledger) = self
+                .prober
+                .build_ledgers(caps)
+                .into_iter()
+                .find(|l| l.capability == cap)
+            {
+                let percent: f64 = (ledger.probability() * 100.0).round();
+                let decision = if ledger.is_supported() {
+                    "likely supported"
+                } else {
+                    "unlikely supported"
+                };
+                lines.push(format!("Capability: {} ({})", row.name, decision));
+                lines.push(format!(
+                    "Confidence: {}% | log-odds {:.2}",
+                    percent,
+                    ledger.log_odds()
+                ));
+                lines.push("Evidence:".to_string());
+                for entry in ledger.entries() {
+                    lines.push(format!(
+                        "  {:<14} {:+.2}",
+                        evidence_label(entry.source),
+                        entry.log_odds
+                    ));
+                }
+            } else {
+                lines.push("No evidence ledger available.".to_string());
+            }
+        } else {
+            lines.push(format!("Capability: {}", row.name));
+            lines.push("Not probeable (env heuristics only).".to_string());
+        }
+
+        for (idx, line) in lines.iter().enumerate() {
+            if idx as u16 >= inner.height {
+                break;
+            }
+            let row_area = Rect::new(inner.x, inner.y + idx as u16, inner.width, 1);
+            Paragraph::new(line.as_str())
+                .style(Style::new().fg(theme::fg::SECONDARY))
+                .render(row_area, frame);
+        }
+    }
+
+    fn render_simulation_panel(&self, frame: &mut Frame, area: Rect, caps: &TerminalCapabilities) {
+        if area.is_empty() {
+            return;
+        }
+
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Profile Simulation ")
+            .style(theme::content_border());
+        let inner = block.inner(area);
+        block.render(area, frame);
+
+        if inner.is_empty() {
+            return;
+        }
+
+        let profiles = Self::profile_order();
+        let active = self.profile_override.unwrap_or(TerminalProfile::Detected);
+        let mut row_idx = 0u16;
+
+        for profile in profiles {
+            if row_idx >= inner.height {
+                break;
+            }
+            let label = Self::profile_label(*profile);
+            let prefix = if *profile == active { "> " } else { "  " };
+            let line = format!("{prefix}{label}");
+            let style = if *profile == active {
+                Style::new().fg(theme::fg::PRIMARY).attrs(StyleFlags::BOLD)
+            } else {
+                Style::new().fg(theme::fg::MUTED)
+            };
+            let row_area = Rect::new(inner.x, inner.y + row_idx, inner.width, 1);
+            Paragraph::new(line).style(style).render(row_area, frame);
+            row_idx = row_idx.saturating_add(1);
+        }
+
+        if row_idx < inner.height {
+            let hint_area = Rect::new(inner.x, inner.y + row_idx, inner.width, 1);
+            Paragraph::new("P: cycle profiles | R: reset to detected")
+                .style(Style::new().fg(theme::fg::MUTED))
+                .render(hint_area, frame);
+        }
+
+        if inner.height > 2 {
+            let info_area = Rect::new(inner.x, inner.bottom().saturating_sub(2), inner.width, 1);
+            Paragraph::new(format!(
+                "Preview: color={} sync={} mux={}",
+                caps.color_depth(),
+                yes_no(caps.use_sync_output()),
+                yes_no(caps.in_any_mux())
+            ))
+            .style(Style::new().fg(theme::fg::SECONDARY))
+            .render(info_area, frame);
+        }
+    }
+
+    fn render_environment_panel(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        env: &EnvSnapshot,
+        caps: &TerminalCapabilities,
+    ) {
+        if area.is_empty() {
+            return;
+        }
+
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Environment ")
+            .style(theme::content_border());
+        let inner = block.inner(area);
+        block.render(area, frame);
+
+        if inner.is_empty() {
+            return;
+        }
+
+        let lines = [
+            format!("TERM={}", EnvSnapshot::format_value(&env.term)),
+            format!(
+                "TERM_PROGRAM={}",
+                EnvSnapshot::format_value(&env.term_program)
+            ),
+            format!("COLORTERM={}", EnvSnapshot::format_value(&env.colorterm)),
+            format!("NO_COLOR={}", yes_no(env.no_color)),
+            format!(
+                "MUX: tmux={} screen={} zellij={}",
+                yes_no(env.tmux),
+                yes_no(env.screen),
+                yes_no(env.zellij)
+            ),
+            format!(
+                "KITTY_WINDOW_ID={} WT_SESSION={}",
+                yes_no(env.kitty),
+                yes_no(env.wt_session)
+            ),
+            format!(
+                "Policy: use_sync_output={} use_scroll_region={}",
+                yes_no(caps.use_sync_output()),
+                yes_no(caps.use_scroll_region())
+            ),
+            format!(
+                "Policy: use_hyperlinks={} use_clipboard={}",
+                yes_no(caps.use_hyperlinks()),
+                yes_no(caps.use_clipboard())
+            ),
+            format!(
+                "Passthrough wrap: {}",
+                yes_no(caps.needs_passthrough_wrap())
+            ),
+        ];
+
+        for (idx, line) in lines.iter().enumerate() {
+            if idx as u16 >= inner.height {
+                break;
+            }
+            let row_area = Rect::new(inner.x, inner.y + idx as u16, inner.width, 1);
+            Paragraph::new(line.as_str())
+                .style(Style::new().fg(theme::fg::MUTED))
+                .render(row_area, frame);
+        }
+    }
+}
+
+impl Screen for TerminalCapabilitiesScreen {
+    type Message = Event;
+
+    fn update(&mut self, event: &Event) -> Cmd<Self::Message> {
+        if let Event::Key(KeyEvent {
+            code,
+            kind: KeyEventKind::Press,
+            ..
+        }) = event
+        {
+            let caps = self.active_capabilities();
+            let rows = self.build_rows(&caps);
+            let row_count = rows.len();
+            let old_view = self.view;
+            let old_selected = self.selected;
+            let old_profile = self.profile_override;
+
+            match code {
+                KeyCode::Tab => {
+                    self.view = self.view.next();
+                    // Log view mode change
+                    let entry = DiagnosticEntry::new(DiagnosticEventKind::ViewModeChanged)
+                        .with_view_mode(self.view)
+                        .with_detail("from", old_view.label());
+                    self.diagnostic_log.record(entry);
+
+                    // Log additional events based on new view mode
+                    match self.view {
+                        ViewMode::Evidence => {
+                            if let Some(row) = rows.get(self.selected) {
+                                let entry = DiagnosticEntry::new(
+                                    DiagnosticEventKind::EvidenceLedgerAccessed,
+                                )
+                                .with_capability(row.name);
+                                self.diagnostic_log.record(entry);
+                            }
+                        }
+                        ViewMode::Simulation => {
+                            let profile_label = self
+                                .profile_override
+                                .map(Self::profile_label)
+                                .unwrap_or("detected");
+                            let entry =
+                                DiagnosticEntry::new(DiagnosticEventKind::SimulationActivated)
+                                    .with_profile(profile_label);
+                            self.diagnostic_log.record(entry);
+                        }
+                        ViewMode::Matrix => {}
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.move_selection(-1, row_count);
+                    if self.selected != old_selected {
+                        let entry = DiagnosticEntry::new(DiagnosticEventKind::SelectionChanged)
+                            .with_selection(self.selected)
+                            .with_detail("from", &old_selected.to_string());
+                        self.diagnostic_log.record(entry);
+
+                        // Log capability inspection
+                        if let Some(row) = rows.get(self.selected) {
+                            let entry =
+                                DiagnosticEntry::new(DiagnosticEventKind::CapabilityInspected)
+                                    .with_capability(row.name)
+                                    .with_detail("detected", &row.detected.to_string())
+                                    .with_detail("effective", &row.effective.to_string());
+                            self.diagnostic_log.record(entry);
+                        }
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.move_selection(1, row_count);
+                    if self.selected != old_selected {
+                        let entry = DiagnosticEntry::new(DiagnosticEventKind::SelectionChanged)
+                            .with_selection(self.selected)
+                            .with_detail("from", &old_selected.to_string());
+                        self.diagnostic_log.record(entry);
+
+                        // Log capability inspection
+                        if let Some(row) = rows.get(self.selected) {
+                            let entry =
+                                DiagnosticEntry::new(DiagnosticEventKind::CapabilityInspected)
+                                    .with_capability(row.name)
+                                    .with_detail("detected", &row.detected.to_string())
+                                    .with_detail("effective", &row.effective.to_string());
+                            self.diagnostic_log.record(entry);
+                        }
+                    }
+                }
+                KeyCode::Char('p') | KeyCode::Char('P') => {
+                    self.cycle_profile();
+                    let new_profile_label = self
+                        .profile_override
+                        .map(Self::profile_label)
+                        .unwrap_or("detected");
+                    let old_profile_label =
+                        old_profile.map(Self::profile_label).unwrap_or("detected");
+                    let entry = DiagnosticEntry::new(DiagnosticEventKind::ProfileCycled)
+                        .with_profile(new_profile_label)
+                        .with_detail("from", old_profile_label);
+                    self.diagnostic_log.record(entry);
+                }
+                KeyCode::Char('r') | KeyCode::Char('R') => {
+                    self.reset_profile();
+                    if old_profile.is_some() {
+                        let old_profile_label =
+                            old_profile.map(Self::profile_label).unwrap_or("detected");
+                        let entry = DiagnosticEntry::new(DiagnosticEventKind::ProfileReset)
+                            .with_detail("from", old_profile_label);
+                        self.diagnostic_log.record(entry);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Cmd::None
+    }
+
+    fn view(&self, frame: &mut Frame, area: Rect) {
+        if area.is_empty() {
+            return;
+        }
+
+        let caps = self.active_capabilities();
+        let env = self.env_override.clone().unwrap_or_else(EnvSnapshot::read);
+        let rows = self.build_rows(&caps);
+
+        let layout = Flex::vertical()
+            .constraints([Constraint::Fixed(5), Constraint::Fill])
+            .split(area);
+
+        self.render_summary(frame, layout[0], &caps);
+
+        let body = layout[1];
+        if body.is_empty() {
+            return;
+        }
+
+        let columns = Flex::horizontal()
+            .constraints([Constraint::Percentage(58.0), Constraint::Percentage(42.0)])
+            .split(body);
+
+        let left = columns[0];
+        let right = columns[1];
+
+        self.render_matrix_panel(frame, left, &rows);
+
+        let right_chunks = Flex::vertical()
+            .constraints([Constraint::Percentage(60.0), Constraint::Percentage(40.0)])
+            .split(right);
+
+        if let Some(selected_row) = self.selected_row(&rows) {
+            match self.view {
+                ViewMode::Matrix => self.render_details_panel(frame, right_chunks[0], selected_row),
+                ViewMode::Evidence => {
+                    self.render_evidence_panel(frame, right_chunks[0], &caps, selected_row)
+                }
+                ViewMode::Simulation => self.render_simulation_panel(frame, right_chunks[0], &caps),
+            }
+        }
+
+        self.render_environment_panel(frame, right_chunks[1], &env, &caps);
+    }
+
+    fn keybindings(&self) -> Vec<HelpEntry> {
+        vec![
+            HelpEntry {
+                key: "Tab",
+                action: "Cycle view (matrix/evidence/simulation)",
+            },
+            HelpEntry {
+                key: "↑/↓",
+                action: "Select capability",
+            },
+            HelpEntry {
+                key: "P",
+                action: "Cycle simulated profile",
+            },
+            HelpEntry {
+                key: "R",
+                action: "Reset to detected profile",
+            },
+        ]
+    }
+
+    fn title(&self) -> &'static str {
+        "Terminal Capabilities"
+    }
+
+    fn tab_label(&self) -> &'static str {
+        "Caps"
+    }
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
+fn evidence_label(source: EvidenceSource) -> &'static str {
+    match source {
+        EvidenceSource::Environment => "environment",
+        EvidenceSource::Da1Response => "da1",
+        EvidenceSource::Da2Response => "da2",
+        EvidenceSource::DecrpmResponse => "decrpm",
+        EvidenceSource::OscResponse => "osc",
+        EvidenceSource::Timeout => "timeout",
+        EvidenceSource::Prior => "prior",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ftui_render::frame::Frame;
+    use ftui_render::grapheme_pool::GraphemePool;
+    use proptest::prelude::*;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn jsonl_timestamp() -> String {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("T{n:06}")
+    }
+
+    fn log_jsonl(step: &str, fields: &[(&str, String)]) {
+        let mut parts = Vec::with_capacity(fields.len() + 2);
+        parts.push(format!("\"ts\":\"{}\"", jsonl_timestamp()));
+        parts.push(format!("\"step\":\"{}\"", step));
+        parts.extend(fields.iter().map(|(k, v)| format!("\"{}\":\"{}\"", k, v)));
+        eprintln!("{{{}}}", parts.join(","));
+    }
+
+    fn checksum_frame(frame: &Frame) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        let width = frame.buffer.width();
+        let height = frame.buffer.height();
+        for y in 0..height {
+            for x in 0..width {
+                if let Some(cell) = frame.buffer.get(x, y) {
+                    cell.content.hash(&mut hasher);
+                    cell.fg.hash(&mut hasher);
+                    cell.bg.hash(&mut hasher);
+                    cell.attrs.hash(&mut hasher);
+                }
+            }
+        }
+        hasher.finish()
+    }
+
+    #[test]
+    fn diagnostic_entry_jsonl_format() {
+        reset_diagnostic_seq();
+        let entry = DiagnosticEntry::new(DiagnosticEventKind::ViewModeChanged)
+            .with_view_mode(ViewMode::Evidence)
+            .with_detail("from", "Matrix");
+
+        let jsonl = entry.to_jsonl();
+        assert!(jsonl.contains("\"kind\":\"view_mode_changed\""));
+        assert!(jsonl.contains("\"view_mode\":\"Evidence\""));
+        assert!(jsonl.contains("\"from\":\"Matrix\""));
+        assert!(jsonl.contains("\"seq\":"));
+        assert!(jsonl.contains("\"ts\":"));
+    }
+
+    #[test]
+    fn diagnostic_entry_escapes_special_chars() {
+        reset_diagnostic_seq();
+        let entry = DiagnosticEntry::new(DiagnosticEventKind::CapabilityInspected)
+            .with_detail("name", "test\"value\nwith\ttabs");
+
+        let jsonl = entry.to_jsonl();
+        assert!(jsonl.contains("\\\""));
+        assert!(jsonl.contains("\\n"));
+        assert!(jsonl.contains("\\t"));
+    }
+
+    #[test]
+    fn diagnostic_log_records_entries() {
+        let mut log = DiagnosticLog::new();
+        assert!(log.entries().is_empty());
+
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ViewModeChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SelectionChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ProfileCycled));
+
+        assert_eq!(log.entries().len(), 3);
+        assert_eq!(log.entries()[0].kind, DiagnosticEventKind::ViewModeChanged);
+        assert_eq!(log.entries()[1].kind, DiagnosticEventKind::SelectionChanged);
+        assert_eq!(log.entries()[2].kind, DiagnosticEventKind::ProfileCycled);
+    }
+
+    #[test]
+    fn diagnostic_log_max_entries() {
+        let mut log = DiagnosticLog::new().with_max_entries(3);
+
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ViewModeChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SelectionChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ProfileCycled));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ProfileReset));
+
+        assert_eq!(log.entries().len(), 3);
+        // First entry should have been removed
+        assert_eq!(log.entries()[0].kind, DiagnosticEventKind::SelectionChanged);
+    }
+
+    #[test]
+    fn diagnostic_log_clear() {
+        let mut log = DiagnosticLog::new();
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ViewModeChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SelectionChanged));
+        assert_eq!(log.entries().len(), 2);
+
+        log.clear();
+        assert!(log.entries().is_empty());
+    }
+
+    #[test]
+    fn diagnostic_summary_counts() {
+        let mut log = DiagnosticLog::new();
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ViewModeChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ViewModeChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SelectionChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ProfileCycled));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ProfileReset));
+        log.record(DiagnosticEntry::new(
+            DiagnosticEventKind::CapabilityInspected,
+        ));
+        log.record(DiagnosticEntry::new(
+            DiagnosticEventKind::EvidenceLedgerAccessed,
+        ));
+        log.record(DiagnosticEntry::new(
+            DiagnosticEventKind::SimulationActivated,
+        ));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::EnvironmentRead));
+
+        let summary = log.summary();
+        assert_eq!(summary.view_mode_changed_count, 2);
+        assert_eq!(summary.selection_changed_count, 1);
+        assert_eq!(summary.profile_cycled_count, 1);
+        assert_eq!(summary.profile_reset_count, 1);
+        assert_eq!(summary.capability_inspected_count, 1);
+        assert_eq!(summary.evidence_ledger_accessed_count, 1);
+        assert_eq!(summary.simulation_activated_count, 1);
+        assert_eq!(summary.environment_read_count, 1);
+        assert_eq!(summary.total(), 9);
+    }
+
+    #[test]
+    fn diagnostic_summary_jsonl_format() {
+        let mut log = DiagnosticLog::new();
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ViewModeChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SelectionChanged));
+
+        let summary = log.summary();
+        let jsonl = summary.to_jsonl();
+        assert!(jsonl.starts_with('{'));
+        assert!(jsonl.ends_with('}'));
+        assert!(jsonl.contains("\"summary\":true"));
+        assert!(jsonl.contains("\"total\":2"));
+        assert!(jsonl.contains("\"view_mode_changed\":1"));
+        assert!(jsonl.contains("\"selection_changed\":1"));
+    }
+
+    #[test]
+    fn diagnostic_log_to_jsonl() {
+        reset_diagnostic_seq();
+        let mut log = DiagnosticLog::new();
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ViewModeChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SelectionChanged));
+
+        let jsonl = log.to_jsonl();
+        let lines: Vec<&str> = jsonl.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("\"kind\":\"view_mode_changed\""));
+        assert!(lines[1].contains("\"kind\":\"selection_changed\""));
+    }
+
+    #[test]
+    fn diagnostic_entries_of_kind() {
+        let mut log = DiagnosticLog::new();
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ViewModeChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::SelectionChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ViewModeChanged));
+        log.record(DiagnosticEntry::new(DiagnosticEventKind::ProfileCycled));
+
+        let view_changes = log.entries_of_kind(DiagnosticEventKind::ViewModeChanged);
+        assert_eq!(view_changes.len(), 2);
+
+        let profile_changes = log.entries_of_kind(DiagnosticEventKind::ProfileCycled);
+        assert_eq!(profile_changes.len(), 1);
+
+        let resets = log.entries_of_kind(DiagnosticEventKind::ProfileReset);
+        assert!(resets.is_empty());
+    }
+
+    #[test]
+    fn screen_logs_view_mode_changes() {
+        reset_diagnostic_seq();
+        let mut screen = TerminalCapabilitiesScreen::new();
+
+        // Simulate Tab key press
+        let event = Event::Key(KeyEvent {
+            code: KeyCode::Tab,
+            kind: KeyEventKind::Press,
+            modifiers: ftui_core::event::Modifiers::NONE,
+        });
+        screen.update(&event);
+
+        let entries = screen.diagnostic_log().entries();
+        assert!(!entries.is_empty());
+
+        let view_changes = screen
+            .diagnostic_log()
+            .entries_of_kind(DiagnosticEventKind::ViewModeChanged);
+        assert_eq!(view_changes.len(), 1);
+        assert_eq!(screen.view, ViewMode::Evidence);
+    }
+
+    #[test]
+    fn screen_logs_selection_changes() {
+        reset_diagnostic_seq();
+        let mut screen = TerminalCapabilitiesScreen::new();
+
+        // Simulate Down key press
+        let event = Event::Key(KeyEvent {
+            code: KeyCode::Down,
+            kind: KeyEventKind::Press,
+            modifiers: ftui_core::event::Modifiers::NONE,
+        });
+        screen.update(&event);
+
+        let selection_changes = screen
+            .diagnostic_log()
+            .entries_of_kind(DiagnosticEventKind::SelectionChanged);
+        assert_eq!(selection_changes.len(), 1);
+
+        let capability_inspections = screen
+            .diagnostic_log()
+            .entries_of_kind(DiagnosticEventKind::CapabilityInspected);
+        assert_eq!(capability_inspections.len(), 1);
+    }
+
+    #[test]
+    fn screen_logs_profile_cycle() {
+        reset_diagnostic_seq();
+        let mut screen = TerminalCapabilitiesScreen::new();
+
+        // Simulate P key press
+        let event = Event::Key(KeyEvent {
+            code: KeyCode::Char('p'),
+            kind: KeyEventKind::Press,
+            modifiers: ftui_core::event::Modifiers::NONE,
+        });
+        screen.update(&event);
+
+        let profile_cycles = screen
+            .diagnostic_log()
+            .entries_of_kind(DiagnosticEventKind::ProfileCycled);
+        assert_eq!(profile_cycles.len(), 1);
+    }
+
+    #[test]
+    fn render_modes_are_deterministic_with_env_override() {
+        let mut screen = TerminalCapabilitiesScreen::with_profile(TerminalProfile::Modern);
+        screen.set_env_override(EnvSnapshot::from_values(
+            "xterm-256color",
+            "ftui-test",
+            "truecolor",
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        ));
+
+        for view in [ViewMode::Matrix, ViewMode::Evidence, ViewMode::Simulation] {
+            screen.view = view;
+            let area = Rect::new(0, 0, 120, 40);
+            let checksum_first = {
+                let mut pool = GraphemePool::new();
+                let mut frame = Frame::new(120, 40, &mut pool);
+                screen.view(&mut frame, area);
+                checksum_frame(&frame)
+            };
+
+            let checksum_second = {
+                let mut pool = GraphemePool::new();
+                let mut frame = Frame::new(120, 40, &mut pool);
+                screen.view(&mut frame, area);
+                checksum_frame(&frame)
+            };
+
+            log_jsonl(
+                "render",
+                &[
+                    ("case", "terminal_caps_render_deterministic".to_string()),
+                    ("view", view.label().to_string()),
+                    ("checksum", format!("{checksum_first:016x}")),
+                ],
+            );
+
+            assert_eq!(
+                checksum_first,
+                checksum_second,
+                "render should be deterministic for view {}",
+                view.label()
+            );
+            assert!(checksum_first != 0, "checksum should be non-zero");
+        }
+    }
+
+    #[test]
+    fn profile_cycle_wraps_and_reset_clears_override() {
+        let mut screen = TerminalCapabilitiesScreen::new();
+        let order = TerminalCapabilitiesScreen::profile_order();
+        assert!(!order.is_empty());
+
+        for _ in 0..order.len() {
+            screen.cycle_profile();
+        }
+
+        // After cycling through all profiles, override should be None (Detected).
+        assert!(screen.profile_override.is_none());
+
+        screen.cycle_profile();
+        assert!(screen.profile_override.is_some());
+
+        screen.reset_profile();
+        assert!(screen.profile_override.is_none());
+
+        log_jsonl(
+            "profile_cycle",
+            &[
+                ("case", "terminal_caps_profile_cycle".to_string()),
+                ("profiles", order.len().to_string()),
+            ],
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn prop_selection_wraps_within_bounds(row_count in 1usize..30, start in 0usize..200) {
+            let mut screen = TerminalCapabilitiesScreen::new();
+            let start = start % row_count;
+
+            screen.selected = start;
+            screen.move_selection(1, row_count);
+            prop_assert!(screen.selected < row_count);
+            if start + 1 == row_count {
+                prop_assert_eq!(screen.selected, 0);
+            }
+
+            screen.selected = start;
+            screen.move_selection(-1, row_count);
+            prop_assert!(screen.selected < row_count);
+            if start == 0 {
+                prop_assert_eq!(screen.selected, row_count - 1);
+            }
+        }
+    }
+
+    #[test]
+    fn event_kind_as_str() {
+        assert_eq!(
+            DiagnosticEventKind::ViewModeChanged.as_str(),
+            "view_mode_changed"
+        );
+        assert_eq!(
+            DiagnosticEventKind::SelectionChanged.as_str(),
+            "selection_changed"
+        );
+        assert_eq!(
+            DiagnosticEventKind::ProfileCycled.as_str(),
+            "profile_cycled"
+        );
+        assert_eq!(DiagnosticEventKind::ProfileReset.as_str(), "profile_reset");
+        assert_eq!(
+            DiagnosticEventKind::CapabilityInspected.as_str(),
+            "capability_inspected"
+        );
+        assert_eq!(
+            DiagnosticEventKind::EvidenceLedgerAccessed.as_str(),
+            "evidence_ledger_accessed"
+        );
+        assert_eq!(
+            DiagnosticEventKind::SimulationActivated.as_str(),
+            "simulation_activated"
+        );
+        assert_eq!(
+            DiagnosticEventKind::EnvironmentRead.as_str(),
+            "environment_read"
+        );
+    }
+}

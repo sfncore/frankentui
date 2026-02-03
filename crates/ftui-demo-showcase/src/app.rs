@@ -134,6 +134,8 @@ pub enum ScreenId {
     FileBrowser,
     /// Diagnostics, timers, and spinners.
     AdvancedFeatures,
+    /// Terminal capability explorer and diagnostics (bd-2sog).
+    TerminalCapabilities,
     /// Input macro recorder and scenario runner.
     MacroRecorder,
     /// Virtualized list and stress testing.
@@ -164,6 +166,8 @@ pub enum ScreenId {
     AsyncTasks,
     /// Theme studio / live palette editor (bd-vu0o).
     ThemeStudio,
+    /// Snapshot/Time Travel Player (bd-3sa7).
+    SnapshotPlayer,
 }
 
 impl ScreenId {
@@ -179,6 +183,7 @@ impl ScreenId {
         Self::FileBrowser,
         Self::AdvancedFeatures,
         Self::Performance,
+        Self::TerminalCapabilities,
         Self::MacroRecorder,
         Self::MarkdownRichText,
         Self::VisualEffects,
@@ -193,6 +198,7 @@ impl ScreenId {
         Self::VirtualizedSearch,
         Self::AsyncTasks,
         Self::ThemeStudio,
+        Self::SnapshotPlayer,
     ];
 
     /// 0-based index in the ALL array.
@@ -224,6 +230,7 @@ impl ScreenId {
             Self::DataViz => "Data Viz",
             Self::FileBrowser => "File Browser",
             Self::AdvancedFeatures => "Advanced",
+            Self::TerminalCapabilities => "Terminal Capabilities",
             Self::MacroRecorder => "Macro Recorder",
             Self::Performance => "Performance",
             Self::MarkdownRichText => "Markdown",
@@ -239,6 +246,7 @@ impl ScreenId {
             Self::VirtualizedSearch => "Virtualized Search",
             Self::AsyncTasks => "Async Tasks",
             Self::ThemeStudio => "Theme Studio",
+            Self::SnapshotPlayer => "Snapshot Player",
         }
     }
 
@@ -254,6 +262,7 @@ impl ScreenId {
             Self::DataViz => "DataViz",
             Self::FileBrowser => "Files",
             Self::AdvancedFeatures => "Adv",
+            Self::TerminalCapabilities => "Caps",
             Self::MacroRecorder => "Macro",
             Self::Performance => "Perf",
             Self::MarkdownRichText => "MD",
@@ -269,6 +278,7 @@ impl ScreenId {
             Self::VirtualizedSearch => "VirtSearch",
             Self::AsyncTasks => "Tasks",
             Self::ThemeStudio => "Themes",
+            Self::SnapshotPlayer => "Snapshot",
         }
     }
 
@@ -284,6 +294,7 @@ impl ScreenId {
             Self::DataViz => "DataViz",
             Self::FileBrowser => "FileBrowser",
             Self::AdvancedFeatures => "AdvancedFeatures",
+            Self::TerminalCapabilities => "TerminalCapabilities",
             Self::MacroRecorder => "MacroRecorder",
             Self::Performance => "Performance",
             Self::MarkdownRichText => "MarkdownRichText",
@@ -299,6 +310,7 @@ impl ScreenId {
             Self::VirtualizedSearch => "VirtualizedSearch",
             Self::AsyncTasks => "AsyncTasks",
             Self::ThemeStudio => "ThemeStudio",
+            Self::SnapshotPlayer => "SnapshotPlayer",
         }
     }
 
@@ -338,6 +350,8 @@ pub struct ScreenStates {
     pub file_browser: screens::file_browser::FileBrowser,
     /// Advanced features screen state.
     pub advanced_features: screens::advanced_features::AdvancedFeatures,
+    /// Terminal capability explorer screen state (bd-2sog).
+    pub terminal_capabilities: screens::terminal_capabilities::TerminalCapabilitiesScreen,
     /// Macro recorder screen state.
     pub macro_recorder: screens::macro_recorder::MacroRecorderScreen,
     /// Performance stress test screen state.
@@ -368,9 +382,11 @@ pub struct ScreenStates {
     pub async_tasks: screens::async_tasks::AsyncTaskManager,
     /// Theme studio screen state (bd-vu0o).
     pub theme_studio: screens::theme_studio::ThemeStudioDemo,
+    /// Snapshot/Time Travel Player screen state (bd-3sa7).
+    pub snapshot_player: screens::snapshot_player::SnapshotPlayer,
     /// Tracks whether each screen has errored during rendering.
     /// Indexed by `ScreenId::index()`.
-    screen_errors: [Option<String>; 24],
+    screen_errors: [Option<String>; 26],
 }
 
 impl ScreenStates {
@@ -404,6 +420,9 @@ impl ScreenStates {
             }
             ScreenId::AdvancedFeatures => {
                 self.advanced_features.update(event);
+            }
+            ScreenId::TerminalCapabilities => {
+                self.terminal_capabilities.update(event);
             }
             ScreenId::MacroRecorder => {
                 self.macro_recorder.update(event);
@@ -450,6 +469,9 @@ impl ScreenStates {
             ScreenId::ThemeStudio => {
                 self.theme_studio.update(event);
             }
+            ScreenId::SnapshotPlayer => {
+                self.snapshot_player.update(event);
+            }
         }
     }
 
@@ -465,6 +487,7 @@ impl ScreenStates {
         self.data_viz.tick(tick_count);
         self.file_browser.tick(tick_count);
         self.advanced_features.tick(tick_count);
+        self.terminal_capabilities.tick(tick_count);
         self.macro_recorder.tick(tick_count);
         self.performance.tick(tick_count);
         self.markdown_rich_text.tick(tick_count);
@@ -480,6 +503,7 @@ impl ScreenStates {
         self.virtualized_search.tick(tick_count);
         self.async_tasks.tick(tick_count);
         self.theme_studio.tick(tick_count);
+        self.snapshot_player.tick(tick_count);
     }
 
     fn apply_theme(&mut self) {
@@ -518,6 +542,7 @@ impl ScreenStates {
                 ScreenId::DataViz => self.data_viz.view(frame, area),
                 ScreenId::FileBrowser => self.file_browser.view(frame, area),
                 ScreenId::AdvancedFeatures => self.advanced_features.view(frame, area),
+                ScreenId::TerminalCapabilities => self.terminal_capabilities.view(frame, area),
                 ScreenId::MacroRecorder => self.macro_recorder.view(frame, area),
                 ScreenId::Performance => self.performance.view(frame, area),
                 ScreenId::MarkdownRichText => self.markdown_rich_text.view(frame, area),
@@ -533,6 +558,7 @@ impl ScreenStates {
                 ScreenId::VirtualizedSearch => self.virtualized_search.view(frame, area),
                 ScreenId::AsyncTasks => self.async_tasks.view(frame, area),
                 ScreenId::ThemeStudio => self.theme_studio.view(frame, area),
+                ScreenId::SnapshotPlayer => self.snapshot_player.view(frame, area),
             }
         }));
 
@@ -1251,6 +1277,7 @@ impl AppModel {
             ScreenId::DataViz => self.screens.data_viz.keybindings(),
             ScreenId::FileBrowser => self.screens.file_browser.keybindings(),
             ScreenId::AdvancedFeatures => self.screens.advanced_features.keybindings(),
+            ScreenId::TerminalCapabilities => self.screens.terminal_capabilities.keybindings(),
             ScreenId::MacroRecorder => self.screens.macro_recorder.keybindings(),
             ScreenId::Performance => self.screens.performance.keybindings(),
             ScreenId::MarkdownRichText => self.screens.markdown_rich_text.keybindings(),
@@ -1266,6 +1293,7 @@ impl AppModel {
             ScreenId::VirtualizedSearch => self.screens.virtualized_search.keybindings(),
             ScreenId::AsyncTasks => self.screens.async_tasks.keybindings(),
             ScreenId::ThemeStudio => self.screens.theme_studio.keybindings(),
+            ScreenId::SnapshotPlayer => self.screens.snapshot_player.keybindings(),
         };
         // Convert screens::HelpEntry to chrome::HelpEntry (same struct, different module).
         entries
@@ -1750,7 +1778,7 @@ mod tests {
         assert_eq!(app.current_screen, ScreenId::Dashboard);
 
         app.update(AppMsg::PrevScreen);
-        assert_eq!(app.current_screen, ScreenId::ThemeStudio);
+        assert_eq!(app.current_screen, ScreenId::SnapshotPlayer);
     }
 
     #[test]
@@ -1828,7 +1856,7 @@ mod tests {
     fn screen_next_prev_wraps() {
         assert_eq!(ScreenId::Dashboard.next(), ScreenId::Shakespeare);
         assert_eq!(ScreenId::VisualEffects.next(), ScreenId::ResponsiveDemo);
-        assert_eq!(ScreenId::Dashboard.prev(), ScreenId::ThemeStudio);
+        assert_eq!(ScreenId::Dashboard.prev(), ScreenId::SnapshotPlayer);
         assert_eq!(ScreenId::Shakespeare.prev(), ScreenId::Dashboard);
     }
 
@@ -2007,7 +2035,7 @@ mod tests {
     /// Verify all screens have the expected count.
     #[test]
     fn all_screens_count() {
-        assert_eq!(ScreenId::ALL.len(), 24);
+        assert_eq!(ScreenId::ALL.len(), 26);
     }
 
     // -----------------------------------------------------------------------
@@ -2097,13 +2125,16 @@ mod tests {
 
     #[test]
     fn palette_cycle_theme_via_action() {
-        // Reset to known state to avoid race conditions with parallel tests
-        theme::set_theme(theme::ThemeId::CyberpunkAurora);
+        // Create app - this sets base_theme to CyberpunkAurora internally
         let mut app = AppModel::new();
-        let before = theme::current_theme_name();
+        let before = app.base_theme;
+        assert_eq!(before, theme::ThemeId::CyberpunkAurora);
+
         app.execute_palette_action(PaletteAction::Execute("cmd:cycle_theme".into()));
-        let after = theme::current_theme_name();
-        assert_ne!(before, after);
+
+        // Verify base_theme cycled to Darcula (the next non-accessibility theme)
+        assert_eq!(app.base_theme, theme::ThemeId::Darcula);
+        assert_ne!(before, app.base_theme);
     }
 
     #[test]

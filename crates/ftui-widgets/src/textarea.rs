@@ -44,6 +44,9 @@ pub struct TextArea {
     /// Line number style.
     line_number_style: Style,
     /// Soft-wrap long lines.
+    ///
+    /// Visual wrapping preserves whitespace and breaks on word boundaries with
+    /// a grapheme fallback for long segments.
     soft_wrap: bool,
     /// Maximum height in lines (0 = unlimited / fill area).
     max_height: usize,
@@ -51,6 +54,9 @@ pub struct TextArea {
     scroll_top: std::cell::Cell<usize>,
     /// Horizontal scroll offset (visual columns).
     scroll_left: std::cell::Cell<usize>,
+    /// Last viewport height for page movement and visibility checks.
+    #[allow(dead_code)]
+    last_viewport_height: std::cell::Cell<usize>,
 }
 
 impl Default for TextArea {
@@ -66,6 +72,14 @@ pub struct TextAreaState {
     pub last_viewport_height: u16,
     /// Viewport width from last render.
     pub last_viewport_width: u16,
+}
+
+#[derive(Debug, Clone)]
+struct WrappedSlice {
+    text: String,
+    start_byte: usize,
+    start_col: usize,
+    width: usize,
 }
 
 impl TextArea {
@@ -86,6 +100,7 @@ impl TextArea {
             max_height: 0,
             scroll_top: std::cell::Cell::new(usize::MAX), // sentinel: will be set on first render
             scroll_left: std::cell::Cell::new(0),
+            last_viewport_height: std::cell::Cell::new(0),
         }
     }
 
@@ -180,19 +195,19 @@ impl TextArea {
                 true
             }
             KeyCode::PageUp => {
-                // Requires state for viewport height, but we can approximate or ignore
-                // To support PageUp properly, handle_event might need state?
-                // Or we move logical cursor up by a fixed amount?
-                // For now, simple approximation: move 20 lines
-                for _ in 0..20 {
-                    self.move_up();
+                let page = self.last_viewport_height.get().max(1);
+                for _ in 0..page {
+                    self.editor.move_up();
                 }
+                self.ensure_cursor_visible();
                 true
             }
             KeyCode::PageDown => {
-                for _ in 0..20 {
-                    self.move_down();
+                let page = self.last_viewport_height.get().max(1);
+                for _ in 0..page {
+                    self.editor.move_down();
                 }
+                self.ensure_cursor_visible();
                 true
             }
             KeyCode::Char('a') if ctrl => {
@@ -548,16 +563,136 @@ impl TextArea {
         digits + 2 // digit width + space + separator
     }
 
+    fn wrap_line_slices(line_text: &str, max_width: usize) -> Vec<WrappedSlice> {
+        if line_text.is_empty() {
+            return vec![WrappedSlice {
+                text: String::new(),
+                start_byte: 0,
+                start_col: 0,
+                width: 0,
+            }];
+        }
+
+        let mut slices = Vec::new();
+        let mut current_text = String::new();
+        let mut current_width = 0;
+        let mut slice_start_byte = 0;
+        let mut slice_start_col = 0;
+        let mut byte_cursor = 0;
+        let mut col_cursor = 0;
+
+        let push_current = |slices: &mut Vec<WrappedSlice>,
+                            text: &mut String,
+                            width: &mut usize,
+                            start_byte: &mut usize,
+                            start_col: &mut usize,
+                            byte_cursor: usize,
+                            col_cursor: usize| {
+            if text.is_empty() && *width == 0 {
+                return;
+            }
+            slices.push(WrappedSlice {
+                text: std::mem::take(text),
+                start_byte: *start_byte,
+                start_col: *start_col,
+                width: *width,
+            });
+            *start_byte = byte_cursor;
+            *start_col = col_cursor;
+            *width = 0;
+        };
+
+        for segment in line_text.split_word_bounds() {
+            let seg_len = segment.len();
+            let seg_width: usize = segment.graphemes(true).map(display_width).sum();
+
+            if max_width > 0 && current_width + seg_width > max_width {
+                push_current(
+                    &mut slices,
+                    &mut current_text,
+                    &mut current_width,
+                    &mut slice_start_byte,
+                    &mut slice_start_col,
+                    byte_cursor,
+                    col_cursor,
+                );
+            }
+
+            if max_width > 0 && seg_width > max_width {
+                for grapheme in segment.graphemes(true) {
+                    let g_width = display_width(grapheme);
+                    let g_len = grapheme.len();
+
+                    if max_width > 0 && current_width + g_width > max_width && current_width > 0 {
+                        push_current(
+                            &mut slices,
+                            &mut current_text,
+                            &mut current_width,
+                            &mut slice_start_byte,
+                            &mut slice_start_col,
+                            byte_cursor,
+                            col_cursor,
+                        );
+                    }
+
+                    current_text.push_str(grapheme);
+                    current_width += g_width;
+                    byte_cursor += g_len;
+                    col_cursor += g_width;
+                }
+                continue;
+            }
+
+            current_text.push_str(segment);
+            current_width += seg_width;
+            byte_cursor += seg_len;
+            col_cursor += seg_width;
+        }
+
+        if !current_text.is_empty() || current_width > 0 || slices.is_empty() {
+            slices.push(WrappedSlice {
+                text: current_text,
+                start_byte: slice_start_byte,
+                start_col: slice_start_col,
+                width: current_width,
+            });
+        }
+
+        slices
+    }
+
+    fn cursor_wrap_position(
+        line_text: &str,
+        max_width: usize,
+        cursor_col: usize,
+    ) -> (usize, usize) {
+        let slices = Self::wrap_line_slices(line_text, max_width);
+        if slices.is_empty() {
+            return (0, 0);
+        }
+
+        for (idx, slice) in slices.iter().enumerate() {
+            let end_col = slice.start_col.saturating_add(slice.width);
+            if cursor_col <= end_col || idx == slices.len().saturating_sub(1) {
+                let col_in_slice = cursor_col.saturating_sub(slice.start_col);
+                return (idx, col_in_slice.min(slice.width));
+            }
+        }
+
+        (0, 0)
+    }
+
     /// Ensure the cursor line and column are visible in the viewport.
     fn ensure_cursor_visible(&mut self) {
         let cursor = self.editor.cursor();
-        // Use a default viewport of 20 lines if we haven't rendered yet
-        let vp_height = if self.scroll_top.get() == usize::MAX {
+        let last_height = self.last_viewport_height.get();
+        // Use a default viewport of 20 lines if we haven't rendered yet (height is 0)
+        let vp_height = if last_height == 0 { 20 } else { last_height };
+
+        if self.scroll_top.get() == usize::MAX {
             self.scroll_top.set(0);
-            20usize
-        } else {
-            20usize // Will be overridden in render, but safe default
-        };
+        }
+
         self.ensure_cursor_visible_with_height(vp_height, cursor);
     }
 
@@ -587,6 +722,8 @@ impl Widget for TextArea {
         if area.width < 1 || area.height < 1 {
             return;
         }
+
+        self.last_viewport_height.set(area.height as usize);
 
         let deg = frame.buffer.degradation;
         if deg.apply_styling() {
@@ -659,7 +796,142 @@ impl Widget for TextArea {
             return;
         }
 
-        // Render visible lines
+        if self.soft_wrap {
+            self.scroll_left.set(0);
+
+            // Compute cursor virtual position (wrapped lines)
+            let mut cursor_virtual = 0;
+            for line_idx in 0..cursor.line {
+                let line_text = rope
+                    .line(line_idx)
+                    .unwrap_or(std::borrow::Cow::Borrowed(""));
+                let line_text = line_text.strip_suffix('\n').unwrap_or(&line_text);
+                cursor_virtual += Self::wrap_line_slices(line_text, text_area_w).len();
+            }
+
+            let cursor_line_text = rope
+                .line(cursor.line)
+                .unwrap_or(std::borrow::Cow::Borrowed(""));
+            let cursor_line_text = cursor_line_text
+                .strip_suffix('\n')
+                .unwrap_or(&cursor_line_text);
+            let (cursor_wrap_idx, cursor_col_in_wrap) =
+                Self::cursor_wrap_position(cursor_line_text, text_area_w, cursor.visual_col);
+            cursor_virtual = cursor_virtual.saturating_add(cursor_wrap_idx);
+
+            // Adjust scroll to keep cursor visible
+            let mut scroll_virtual = self.scroll_top.get();
+            if cursor_virtual < scroll_virtual {
+                scroll_virtual = cursor_virtual;
+            } else if cursor_virtual >= scroll_virtual + vp_height {
+                scroll_virtual = cursor_virtual.saturating_sub(vp_height - 1);
+            }
+            self.scroll_top.set(scroll_virtual);
+
+            // Render wrapped lines in virtual space
+            let mut virtual_index = 0usize;
+            for line_idx in 0..self.editor.line_count() {
+                if virtual_index >= scroll_virtual + vp_height {
+                    break;
+                }
+
+                let line_text = rope
+                    .line(line_idx)
+                    .unwrap_or(std::borrow::Cow::Borrowed(""));
+                let line_text = line_text.strip_suffix('\n').unwrap_or(&line_text);
+                let line_start_byte = nav.to_byte_index(nav.from_line_grapheme(line_idx, 0));
+                let slices = Self::wrap_line_slices(line_text, text_area_w);
+
+                for (slice_idx, slice) in slices.iter().enumerate() {
+                    if virtual_index < scroll_virtual {
+                        virtual_index += 1;
+                        continue;
+                    }
+
+                    let row = virtual_index.saturating_sub(scroll_virtual);
+                    if row >= vp_height {
+                        break;
+                    }
+
+                    let y = area.y.saturating_add(row as u16);
+
+                    // Line number gutter (only for first wrapped slice)
+                    if self.show_line_numbers && slice_idx == 0 {
+                        let style = if deg.apply_styling() {
+                            self.line_number_style
+                        } else {
+                            Style::default()
+                        };
+                        let num_str =
+                            format!("{:>width$} ", line_idx + 1, width = (gutter_w - 2) as usize);
+                        draw_text_span(frame, area.x, y, &num_str, style, text_area_x);
+                    }
+
+                    // Cursor line highlight (only for the active wrapped slice)
+                    if line_idx == cursor.line
+                        && slice_idx == cursor_wrap_idx
+                        && let Some(cl_style) = self.cursor_line_style
+                        && deg.apply_styling()
+                    {
+                        for cx in text_area_x..area.right() {
+                            if let Some(cell) = frame.buffer.get_mut(cx, y) {
+                                apply_style(cell, cl_style);
+                            }
+                        }
+                    }
+
+                    // Render graphemes inside the wrapped slice
+                    let mut visual_x: usize = 0;
+                    let mut grapheme_byte_offset = line_start_byte + slice.start_byte;
+
+                    for g in slice.text.graphemes(true) {
+                        let g_width = display_width(g);
+                        let g_byte_len = g.len();
+
+                        if visual_x >= text_area_w {
+                            break;
+                        }
+
+                        let px = text_area_x + visual_x as u16;
+
+                        // Determine style (selection highlight)
+                        let mut g_style = self.style;
+                        if let Some((sel_start, sel_end)) = sel_range
+                            && grapheme_byte_offset >= sel_start
+                            && grapheme_byte_offset < sel_end
+                            && deg.apply_styling()
+                        {
+                            g_style = g_style.merge(&self.selection_style);
+                        }
+
+                        if g_width > 0 {
+                            draw_text_span(frame, px, y, g, g_style, area.right());
+                        }
+
+                        visual_x += g_width;
+                        grapheme_byte_offset += g_byte_len;
+                    }
+
+                    virtual_index += 1;
+                }
+            }
+
+            // Set cursor position if focused
+            if self.focused && cursor_virtual >= scroll_virtual {
+                let row = cursor_virtual.saturating_sub(scroll_virtual);
+                if row < vp_height {
+                    let cursor_screen_x = text_area_x.saturating_add(cursor_col_in_wrap as u16);
+                    let cursor_screen_y = area.y.saturating_add(row as u16);
+                    if cursor_screen_x < area.right() && cursor_screen_y < area.bottom() {
+                        frame.set_cursor(Some((cursor_screen_x, cursor_screen_y)));
+                    }
+                }
+            }
+
+            return;
+        }
+
+        // Render visible lines (no soft wrap)
         for row in 0..vp_height {
             let line_idx = scroll_top + row;
             let y = area.y.saturating_add(row as u16);
@@ -1094,6 +1366,23 @@ mod tests {
     fn soft_wrap_builder() {
         let ta = TextArea::new().with_soft_wrap(true);
         assert!(ta.soft_wrap);
+    }
+
+    #[test]
+    fn soft_wrap_renders_wrapped_lines() {
+        use crate::Widget;
+        use ftui_render::grapheme_pool::GraphemePool;
+
+        let ta = TextArea::new().with_soft_wrap(true).with_text("abcdef");
+        let area = Rect::new(0, 0, 3, 2);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(3, 2, &mut pool);
+        Widget::render(&ta, area, &mut frame);
+
+        assert_eq!(frame.buffer.get(0, 0).unwrap().content.as_char(), Some('a'));
+        assert_eq!(frame.buffer.get(2, 0).unwrap().content.as_char(), Some('c'));
+        assert_eq!(frame.buffer.get(0, 1).unwrap().content.as_char(), Some('d'));
+        assert_eq!(frame.buffer.get(2, 1).unwrap().content.as_char(), Some('f'));
     }
 
     #[test]
