@@ -2659,10 +2659,14 @@ mod tests {
 
     fn buffer_checksum(frame: &Frame) -> u64 {
         let mut hasher = DefaultHasher::new();
+        let mut scratch = String::new();
         for y in 0..frame.buffer.height() {
             for x in 0..frame.buffer.width() {
                 if let Some(cell) = frame.buffer.get(x, y) {
-                    cell.hash(&mut hasher);
+                    scratch.clear();
+                    use std::fmt::Write;
+                    let _ = write!(&mut scratch, "{cell:?}");
+                    scratch.hash(&mut hasher);
                 }
             }
         }

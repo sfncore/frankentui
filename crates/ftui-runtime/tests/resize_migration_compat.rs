@@ -135,8 +135,11 @@ fn burst_regime_transition() {
 }
 
 /// Cooldown: burst mode persists for cooldown_frames after rate drops.
-/// The cooldown only decrements during tick_at when a pending resize exists,
-/// so we send slow events (with pending state) to trigger the transition.
+///
+/// The cooldown decrement in `tick_at` (lines 692-700) is only reached when
+/// the tick does NOT trigger an apply (neither hard deadline nor delay check).
+/// This test carefully orchestrates timing so that ticks land BEFORE the
+/// burst_delay_ms expires, allowing the cooldown code to run.
 #[test]
 fn burst_cooldown_hysteresis() {
     let cfg = CoalescerConfig {
@@ -146,35 +149,56 @@ fn burst_cooldown_hysteresis() {
         rate_window_size: 4,
         steady_delay_ms: 10,
         burst_delay_ms: 50,
-        hard_deadline_ms: 200,
+        hard_deadline_ms: 5000, // High enough to never trigger in this test
         enable_logging: false,
     };
     let base = Instant::now();
     let mut coalescer = ResizeCoalescer::new(cfg, (80, 24)).with_last_render(base);
 
-    // Enter burst with rapid events
+    // Phase 1: Enter burst with rapid events (30ms apart → ~33 events/sec)
     for i in 0..8u64 {
         let t = base + Duration::from_millis(30 * i);
         coalescer.handle_resize_at(80 + (i as u16), 24, t);
     }
-
-    // Should be in burst
     assert_eq!(coalescer.regime(), Regime::Burst);
 
-    // Send slow events with large gaps to let rate drop below burst_exit_rate.
-    // Each handle_resize_at calls update_regime; ticks decrement cooldown.
-    let mut t = base + Duration::from_millis(500);
-    for i in 0..20u64 {
-        t += Duration::from_secs(1); // Very slow: 1 event/sec << burst_exit_rate
+    // Phase 2: Apply pending resize to update last_render.
+    // Tick 70ms after last event (> burst_delay_ms=50) to trigger apply.
+    let t_apply = base + Duration::from_millis(280);
+    let action = coalescer.tick_at(t_apply);
+    assert!(
+        matches!(action, CoalesceAction::ApplyResize { .. }),
+        "Should apply pending after burst delay"
+    );
+
+    // Phase 3: Push slow events (1s apart) to drain the rate window of rapid
+    // events. Each tick at +60ms triggers apply (60 > burst_delay_ms=50),
+    // keeping last_render fresh but NOT reaching cooldown code.
+    let mut t = t_apply;
+    for i in 0..5u64 {
+        t += Duration::from_secs(1);
         coalescer.handle_resize_at(100 + (i as u16), 30, t);
-        coalescer.tick_at(t + Duration::from_millis(60));
+        coalescer.tick_at(t + Duration::from_millis(60)); // triggers apply
+    }
+    // Rate window now contains only slow events → rate ≈ 1.3 < burst_exit_rate
+    // Still in Burst because cooldown hasn't been decremented via tick_at.
+    assert_eq!(coalescer.regime(), Regime::Burst);
+
+    // Phase 4: Send one event, then tick 3 times WITHIN burst_delay_ms so the
+    // delay check does NOT trigger apply. Each tick reaches the cooldown
+    // decrement code: cooldown 3→2→1→0, then regime transitions to Steady.
+    t += Duration::from_secs(1);
+    coalescer.handle_resize_at(120, 35, t);
+
+    for tick_idx in 1..=3u32 {
+        let t_tick = t + Duration::from_millis(tick_idx as u64 * 5); // 5ms, 10ms, 15ms
+        coalescer.tick_at(t_tick);
     }
 
-    // After many slow events + ticks, should return to Steady
     assert_eq!(
         coalescer.regime(),
         Regime::Steady,
-        "Should return to Steady after slow events drain cooldown"
+        "Should return to Steady after cooldown frames drain"
     );
 }
 
