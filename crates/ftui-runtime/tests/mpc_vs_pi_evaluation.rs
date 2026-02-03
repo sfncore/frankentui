@@ -167,7 +167,8 @@ impl MpcController {
     /// for clarity and extensibility.
     fn step(&mut self, measurement: f64) -> f64 {
         // Update disturbance estimate (low-pass filter of prediction error)
-        let predicted = self.alpha * measurement + (1.0 - self.alpha) * self.prev_u * self.target;
+        let predicted =
+            self.alpha * measurement + (1.0 - self.alpha) * self.target * (1.0 - self.prev_u);
         let pred_error = measurement - predicted;
         self.disturbance =
             self.dist_filter * pred_error + (1.0 - self.dist_filter) * self.disturbance;
@@ -626,23 +627,37 @@ fn scenario3_oscillating_load() {
             compute_times.push(elapsed);
         }
 
-        let metrics = compute_metrics(&measurements, &controls, target, &compute_times);
+        // For oscillating load, compute tracking RMSE over all measurements directly
+        // (the settling-based window in compute_metrics would be empty since the
+        // controller never "settles" under continuous oscillation).
+        let tracking_rmse = {
+            let mse = measurements
+                .iter()
+                .map(|&m| (m - target).powi(2))
+                .sum::<f64>()
+                / measurements.len() as f64;
+            mse.sqrt()
+        };
+        let smoothness = if controls.len() < 2 {
+            0.0
+        } else {
+            let total_du: f64 = controls.windows(2).map(|w| (w[1] - w[0]).abs()).sum();
+            total_du / (controls.len() - 1) as f64
+        };
+        let iae: f64 = measurements.iter().map(|&m| (m - target).abs()).sum();
+        let mean_compute = compute_times.iter().sum::<u64>() as f64 / compute_times.len() as f64;
 
         eprintln!(
-            "{{\"test\":\"oscillating_load\",\"controller\":\"{}\",\"ss_rmse\":{:.4},\"smoothness\":{:.4},\"iae\":{:.2},\"compute_ns\":{:.0}}}",
-            name,
-            metrics.steady_state_rmse,
-            metrics.control_smoothness,
-            metrics.iae,
-            metrics.compute_time_ns
+            "{{\"test\":\"oscillating_load\",\"controller\":\"{}\",\"tracking_rmse\":{:.4},\"smoothness\":{:.4},\"iae\":{:.2},\"compute_ns\":{:.0}}}",
+            name, tracking_rmse, smoothness, iae, mean_compute
         );
 
-        // Under oscillation, RMSE will be higher but should be bounded
+        // Under oscillation, tracking RMSE will be higher but should be bounded
         assert!(
-            metrics.steady_state_rmse < 15.0,
+            tracking_rmse < 15.0,
             "{} RMSE too high under oscillation: {:.2}",
             name,
-            metrics.steady_state_rmse
+            tracking_rmse
         );
     }
 }
