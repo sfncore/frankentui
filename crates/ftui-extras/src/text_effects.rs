@@ -6564,6 +6564,206 @@ mod tests {
         assert_eq!(result.g(), base.g(), "Single char green unchanged");
         assert_eq!(result.b(), base.b(), "Single char blue unchanged");
     }
+
+    // =========================================================================
+    // Scanline / CRT Effect Tests (bd-3r87)
+    // =========================================================================
+
+    #[test]
+    fn test_scanline_dims_every_nth() {
+        // Every 2nd row should be dimmed, others full brightness
+        let base = PackedRgba::rgb(200, 200, 200);
+        let text = StyledText::new("AAAA\nBBBB\nCCCC\nDDDD")
+            .base_color(base)
+            .effect(TextEffect::Scanline {
+                intensity: 0.5,
+                line_gap: 2,
+                scroll: false,
+                scroll_speed: 0.0,
+                flicker: 0.0,
+            })
+            .time(0.0);
+
+        // Row 0 (even) - should be dimmed
+        let row0 = text.char_color_2d(0, 0, 4, 4);
+        // Row 1 (odd) - should be full brightness
+        let row1 = text.char_color_2d(1, 0, 4, 4);
+
+        // Row 0 should be darker than row 1
+        assert!(
+            row0.r() < row1.r(),
+            "Scanline row should be dimmer: {} vs {}",
+            row0.r(),
+            row1.r()
+        );
+    }
+
+    #[test]
+    fn test_scanline_intensity_applied() {
+        // Higher intensity = darker scanlines
+        let base = PackedRgba::rgb(200, 200, 200);
+
+        // Low intensity
+        let text_low = StyledText::new("AAA\nBBB")
+            .base_color(base)
+            .effect(TextEffect::Scanline {
+                intensity: 0.2,
+                line_gap: 2,
+                scroll: false,
+                scroll_speed: 0.0,
+                flicker: 0.0,
+            })
+            .time(0.0);
+
+        // High intensity
+        let text_high = StyledText::new("AAA\nBBB")
+            .base_color(base)
+            .effect(TextEffect::Scanline {
+                intensity: 0.8,
+                line_gap: 2,
+                scroll: false,
+                scroll_speed: 0.0,
+                flicker: 0.0,
+            })
+            .time(0.0);
+
+        let low_color = text_low.char_color_2d(0, 0, 3, 2);
+        let high_color = text_high.char_color_2d(0, 0, 3, 2);
+
+        // Higher intensity should result in darker scanline
+        assert!(
+            high_color.r() < low_color.r(),
+            "Higher intensity should be darker: {} vs {}",
+            high_color.r(),
+            low_color.r()
+        );
+    }
+
+    #[test]
+    fn test_scanline_scroll_moves_pattern() {
+        // Scrolling should shift which rows are dimmed
+        let base = PackedRgba::rgb(200, 200, 200);
+
+        // At time 0, row 0 is a scanline
+        let text_t0 = StyledText::new("AA\nBB\nCC\nDD")
+            .base_color(base)
+            .effect(TextEffect::Scanline {
+                intensity: 0.5,
+                line_gap: 2,
+                scroll: true,
+                scroll_speed: 1.0, // 1 row per second
+                flicker: 0.0,
+            })
+            .time(0.0);
+
+        // At time 1.0, pattern should shift by 1 row
+        let text_t1 = StyledText::new("AA\nBB\nCC\nDD")
+            .base_color(base)
+            .effect(TextEffect::Scanline {
+                intensity: 0.5,
+                line_gap: 2,
+                scroll: true,
+                scroll_speed: 1.0,
+                flicker: 0.0,
+            })
+            .time(1.0);
+
+        // At t=0, row 0 is scanline (dimmed)
+        // At t=1, row 0+1=1 effective, so row 1 is now scanline
+        let row0_t0 = text_t0.char_color_2d(0, 0, 2, 4);
+        let row0_t1 = text_t1.char_color_2d(0, 0, 2, 4);
+
+        // Row 0 at t=0 should be dimmed, at t=1 should be bright
+        assert!(
+            row0_t0.r() < row0_t1.r(),
+            "Scroll should shift pattern: t0={} vs t1={}",
+            row0_t0.r(),
+            row0_t1.r()
+        );
+    }
+
+    #[test]
+    fn test_scanline_flicker_varies() {
+        // Flicker should cause variation between characters
+        let base = PackedRgba::rgb(200, 200, 200);
+        let text = StyledText::new("ABCDEFGH")
+            .base_color(base)
+            .effect(TextEffect::Scanline {
+                intensity: 0.0,
+                line_gap: 0, // No dimming from line gap
+                scroll: false,
+                scroll_speed: 0.0,
+                flicker: 0.8, // High flicker
+            })
+            .time(1.5);
+
+        // Sample colors at different positions
+        let colors: Vec<PackedRgba> = (0..8)
+            .map(|i| text.char_color(i, 8))
+            .collect();
+
+        // With high flicker, we expect some variation
+        // Not all chars should be exactly the same brightness
+        let all_same = colors.windows(2).all(|w| w[0].r() == w[1].r());
+        assert!(
+            !all_same,
+            "Flicker should cause brightness variation between chars"
+        );
+    }
+
+    #[test]
+    fn test_scanline_gap_1_dims_all() {
+        // line_gap=1 means every row is a scanline (all dimmed)
+        let base = PackedRgba::rgb(200, 200, 200);
+        let text = StyledText::new("AA\nBB\nCC")
+            .base_color(base)
+            .effect(TextEffect::Scanline {
+                intensity: 0.5,
+                line_gap: 1,
+                scroll: false,
+                scroll_speed: 0.0,
+                flicker: 0.0,
+            })
+            .time(0.0);
+
+        // All rows should be dimmed
+        for row in 0..3 {
+            let color = text.char_color_2d(row, 0, 2, 3);
+            assert!(
+                color.r() < base.r(),
+                "Row {} should be dimmed with gap=1",
+                row
+            );
+        }
+    }
+
+    #[test]
+    fn test_scanline_gap_2_alternates() {
+        // line_gap=2: rows 0, 2, 4... are scanlines
+        let base = PackedRgba::rgb(200, 200, 200);
+        let text = StyledText::new("AA\nBB\nCC\nDD")
+            .base_color(base)
+            .effect(TextEffect::Scanline {
+                intensity: 0.5,
+                line_gap: 2,
+                scroll: false,
+                scroll_speed: 0.0,
+                flicker: 0.0,
+            })
+            .time(0.0);
+
+        // Even rows (0, 2) should be dimmed
+        let row0 = text.char_color_2d(0, 0, 2, 4);
+        let row2 = text.char_color_2d(2, 0, 2, 4);
+        assert!(row0.r() < base.r(), "Row 0 should be dimmed");
+        assert!(row2.r() < base.r(), "Row 2 should be dimmed");
+
+        // Odd rows (1, 3) should be full brightness
+        let row1 = text.char_color_2d(1, 0, 2, 4);
+        let row3 = text.char_color_2d(3, 0, 2, 4);
+        assert_eq!(row1.r(), base.r(), "Row 1 should be full brightness");
+        assert_eq!(row3.r(), base.r(), "Row 3 should be full brightness");
+    }
 }
 
 // =============================================================================

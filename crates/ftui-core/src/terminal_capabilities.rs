@@ -1050,6 +1050,7 @@ impl TerminalCapabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn basic_is_minimal() {
@@ -1705,23 +1706,24 @@ mod tests {
 
     #[test]
     fn profile_enum_from_str() {
+        use std::str::FromStr;
         assert_eq!(
             TerminalProfile::from_str("modern"),
-            Some(TerminalProfile::Modern)
+            Ok(TerminalProfile::Modern)
         );
         assert_eq!(
             TerminalProfile::from_str("xterm-256color"),
-            Some(TerminalProfile::Xterm256Color)
+            Ok(TerminalProfile::Xterm256Color)
         );
         assert_eq!(
             TerminalProfile::from_str("xterm256color"),
-            Some(TerminalProfile::Xterm256Color)
+            Ok(TerminalProfile::Xterm256Color)
         );
         assert_eq!(
             TerminalProfile::from_str("DUMB"),
-            Some(TerminalProfile::Dumb)
+            Ok(TerminalProfile::Dumb)
         );
-        assert_eq!(TerminalProfile::from_str("unknown"), None);
+        assert!(TerminalProfile::from_str("unknown").is_err());
     }
 
     #[test]

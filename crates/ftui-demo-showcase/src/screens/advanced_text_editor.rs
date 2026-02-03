@@ -192,7 +192,6 @@ and proper Unicode handling throughout.
             self.current_match = None;
         } else {
             // Find the match closest to the cursor
-            let cursor = self.editor.cursor();
             let cursor_byte = self.cursor_to_byte_offset();
             let closest = self
                 .search_results

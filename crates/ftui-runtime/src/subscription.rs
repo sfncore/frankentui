@@ -197,16 +197,17 @@ impl<M: Send + 'static> SubscriptionManager<M> {
         messages
     }
 
+    /// Return the number of active subscriptions.
+    #[inline]
+    pub(crate) fn active_count(&self) -> usize {
+        self.active.len()
+    }
+
     /// Stop all running subscriptions.
     pub(crate) fn stop_all(&mut self) {
         for running in self.active.drain(..) {
             running.stop();
         }
-    }
-
-    /// Returns the number of active subscriptions.
-    pub(crate) fn active_count(&self) -> usize {
-        self.active.len()
     }
 }
 

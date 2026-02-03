@@ -222,6 +222,23 @@ impl<M> Cmd<M> {
         }
     }
 
+    /// Return a stable name for telemetry and tracing.
+    #[inline]
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Quit => "Quit",
+            Self::Batch(_) => "Batch",
+            Self::Sequence(_) => "Sequence",
+            Self::Msg(_) => "Msg",
+            Self::Tick(_) => "Tick",
+            Self::Log(_) => "Log",
+            Self::Task(_) => "Task",
+            Self::SaveState => "SaveState",
+            Self::RestoreState => "RestoreState",
+        }
+    }
+
     /// Create a tick command.
     #[inline]
     pub fn tick(duration: Duration) -> Self {
@@ -268,21 +285,6 @@ impl<M> Cmd<M> {
         }
     }
 
-    /// Return a human-readable type name for this command variant.
-    pub fn type_name(&self) -> &'static str {
-        match self {
-            Self::None => "None",
-            Self::Quit => "Quit",
-            Self::Batch(_) => "Batch",
-            Self::Sequence(_) => "Sequence",
-            Self::Msg(_) => "Msg",
-            Self::Tick(_) => "Tick",
-            Self::Log(_) => "Log",
-            Self::Task(_) => "Task",
-            Self::SaveState => "SaveState",
-            Self::RestoreState => "RestoreState",
-        }
-    }
 }
 
 /// Resize handling behavior for the runtime.

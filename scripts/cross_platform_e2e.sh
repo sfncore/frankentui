@@ -8,7 +8,18 @@ mkdir -p "$LOG_DIR"
 log_json() {
   local event="$1"
   local message="$2"
-  python3 - "$event" "$message" <<'PY' >> "$LOG_JSONL"
+  local python_bin="${PYTHON_BIN:-}"
+  if [[ -z "$python_bin" ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+      python_bin="python3"
+    elif command -v python >/dev/null 2>&1; then
+      python_bin="python"
+    else
+      echo "python or python3 is required for JSONL logging" >&2
+      return 1
+    fi
+  fi
+  "$python_bin" - "$event" "$message" <<'PY' >> "$LOG_JSONL"
 import json
 import sys
 import time

@@ -1,5 +1,4 @@
 use crate::block::Block;
-use crate::stateful::{StateKey, Stateful};
 use crate::{MeasurableWidget, SizeConstraints, StatefulWidget, Widget, set_style_area};
 use ftui_core::geometry::{Rect, Size};
 use ftui_layout::{Constraint, Flex};
@@ -182,11 +181,11 @@ pub struct TablePersistState {
     pub offset: usize,
 }
 
-impl Stateful for TableState {
+impl crate::stateful::Stateful for TableState {
     type State = TablePersistState;
 
-    fn state_key(&self) -> StateKey {
-        StateKey::new(
+    fn state_key(&self) -> crate::stateful::StateKey {
+        crate::stateful::StateKey::new(
             "Table",
             self.persistence_id
                 .as_deref()
@@ -737,6 +736,7 @@ mod tests {
         let mut state = TableState {
             offset: 0,
             selected: Some(99),
+            persistence_id: None,
         };
 
         StatefulWidget::render(&table, area, &mut frame, &mut state);
@@ -755,6 +755,7 @@ mod tests {
         let mut state = TableState {
             offset: 0,
             selected: Some(1),
+            persistence_id: None,
         };
 
         StatefulWidget::render(&table, area, &mut frame, &mut state);

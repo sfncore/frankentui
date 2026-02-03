@@ -30,6 +30,7 @@
 //! println!("Visible: {}..{}", range.start, range.end);
 //! ```
 
+use crate::stateful::{StateKey, Stateful};
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::time::Duration;
@@ -532,6 +533,8 @@ pub struct VirtualizedListState {
     follow_mode: bool,
     /// Scroll velocity for momentum.
     scroll_velocity: f32,
+    /// Optional persistence ID for state saving/restoration.
+    persistence_id: Option<String>,
 }
 
 impl Default for VirtualizedListState {
@@ -551,6 +554,7 @@ impl VirtualizedListState {
             overscan: 2,
             follow_mode: false,
             scroll_velocity: 0.0,
+            persistence_id: None,
         }
     }
 
@@ -566,6 +570,19 @@ impl VirtualizedListState {
     pub fn with_follow(mut self, follow: bool) -> Self {
         self.follow_mode = follow;
         self
+    }
+
+    /// Create with a persistence ID for state saving.
+    #[must_use]
+    pub fn with_persistence_id(mut self, id: impl Into<String>) -> Self {
+        self.persistence_id = Some(id.into());
+        self
+    }
+
+    /// Get the persistence ID, if set.
+    #[must_use]
+    pub fn persistence_id(&self) -> Option<&str> {
+        self.persistence_id.as_deref()
     }
 
     /// Get current scroll offset.
@@ -706,6 +723,55 @@ impl VirtualizedListState {
         } else {
             self.scroll_velocity = 0.0;
         }
+    }
+}
+
+// ============================================================================
+// Stateful Persistence Implementation for VirtualizedListState
+// ============================================================================
+
+/// Persistable state for a [`VirtualizedListState`].
+///
+/// Contains the user-facing scroll state that should survive sessions.
+/// Transient values like scroll_velocity and visible_count are not persisted.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(
+    feature = "state-persistence",
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub struct VirtualizedListPersistState {
+    /// Selected item index.
+    pub selected: Option<usize>,
+    /// Scroll offset (first visible item).
+    pub scroll_offset: usize,
+    /// Whether follow mode is enabled.
+    pub follow_mode: bool,
+}
+
+impl Stateful for VirtualizedListState {
+    type State = VirtualizedListPersistState;
+
+    fn state_key(&self) -> StateKey {
+        StateKey::new(
+            "VirtualizedList",
+            self.persistence_id.as_deref().unwrap_or("default"),
+        )
+    }
+
+    fn save_state(&self) -> VirtualizedListPersistState {
+        VirtualizedListPersistState {
+            selected: self.selected,
+            scroll_offset: self.scroll_offset,
+            follow_mode: self.follow_mode,
+        }
+    }
+
+    fn restore_state(&mut self, state: VirtualizedListPersistState) {
+        self.selected = state.selected;
+        self.scroll_offset = state.scroll_offset;
+        self.follow_mode = state.follow_mode;
+        // Reset transient values
+        self.scroll_velocity = 0.0;
     }
 }
 
