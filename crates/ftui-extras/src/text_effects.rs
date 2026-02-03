@@ -5007,8 +5007,8 @@ mod tests {
     /// Helper: Create a simple two-stop gradient for testing.
     fn test_gradient() -> ColorGradient {
         ColorGradient::new(vec![
-            (0.0, PackedRgba::rgb(255, 0, 0)),   // Red at start
-            (1.0, PackedRgba::rgb(0, 0, 255)),   // Blue at end
+            (0.0, PackedRgba::rgb(255, 0, 0)), // Red at start
+            (1.0, PackedRgba::rgb(0, 0, 255)), // Blue at end
         ])
     }
 
@@ -5022,8 +5022,16 @@ mod tests {
         let color = gradient.sample(t_y);
 
         // Should be red (start of gradient)
-        assert!(color.r() > 200, "Top row should be red, got r={}", color.r());
-        assert!(color.b() < 50, "Top row should have minimal blue, got b={}", color.b());
+        assert!(
+            color.r() > 200,
+            "Top row should be red, got r={}",
+            color.r()
+        );
+        assert!(
+            color.b() < 50,
+            "Top row should have minimal blue, got b={}",
+            color.b()
+        );
     }
 
     #[test]
@@ -5036,8 +5044,16 @@ mod tests {
         let color = gradient.sample(t_y);
 
         // Should be blue (end of gradient)
-        assert!(color.b() > 200, "Bottom row should be blue, got b={}", color.b());
-        assert!(color.r() < 50, "Bottom row should have minimal red, got r={}", color.r());
+        assert!(
+            color.b() > 200,
+            "Bottom row should be blue, got b={}",
+            color.b()
+        );
+        assert!(
+            color.r() < 50,
+            "Bottom row should have minimal red, got r={}",
+            color.r()
+        );
     }
 
     #[test]
@@ -5048,8 +5064,16 @@ mod tests {
         let color = gradient.sample(0.5);
 
         // Should be purple (mix of red and blue)
-        assert!(color.r() > 100 && color.r() < 180, "Middle should have some red, got r={}", color.r());
-        assert!(color.b() > 100 && color.b() < 180, "Middle should have some blue, got b={}", color.b());
+        assert!(
+            color.r() > 100 && color.r() < 180,
+            "Middle should have some red, got r={}",
+            color.r()
+        );
+        assert!(
+            color.b() > 100 && color.b() < 180,
+            "Middle should have some blue, got b={}",
+            color.b()
+        );
     }
 
     #[test]
@@ -5066,8 +5090,12 @@ mod tests {
         let projected2 = t_x * cos_a + 1.0 * sin_a;
 
         // Both should be approximately equal since sin(0)=0
-        assert!((projected1 - projected2).abs() < 0.001,
-            "At 0°, diagonal should be horizontal: {} vs {}", projected1, projected2);
+        assert!(
+            (projected1 - projected2).abs() < 0.001,
+            "At 0°, diagonal should be horizontal: {} vs {}",
+            projected1,
+            projected2
+        );
     }
 
     #[test]
@@ -5083,8 +5111,12 @@ mod tests {
         let projected2 = 1.0 * cos_a + t_y * sin_a;
 
         // Both should be approximately equal since cos(90°)≈0
-        assert!((projected1 - projected2).abs() < 0.01,
-            "At 90°, diagonal should be vertical: {} vs {}", projected1, projected2);
+        assert!(
+            (projected1 - projected2).abs() < 0.01,
+            "At 90°, diagonal should be vertical: {} vs {}",
+            projected1,
+            projected2
+        );
     }
 
     #[test]
@@ -5099,10 +5131,18 @@ mod tests {
         let sin_450 = angle_450.sin();
 
         // Trig functions naturally wrap, verify this
-        assert!((cos_90 - cos_450).abs() < 0.0001,
-            "cos(90°) should equal cos(450°): {} vs {}", cos_90, cos_450);
-        assert!((sin_90 - sin_450).abs() < 0.0001,
-            "sin(90°) should equal sin(450°): {} vs {}", sin_90, sin_450);
+        assert!(
+            (cos_90 - cos_450).abs() < 0.0001,
+            "cos(90°) should equal cos(450°): {} vs {}",
+            cos_90,
+            cos_450
+        );
+        assert!(
+            (sin_90 - sin_450).abs() < 0.0001,
+            "sin(90°) should equal sin(450°): {} vs {}",
+            sin_90,
+            sin_450
+        );
     }
 
     #[test]
@@ -5149,7 +5189,11 @@ mod tests {
         let color = gradient.sample(t);
 
         // Should be blue (end of gradient, distance=max)
-        assert!(color.b() > 200, "Corner should be blue, got b={}", color.b());
+        assert!(
+            color.b() > 200,
+            "Corner should be blue, got b={}",
+            color.b()
+        );
         assert!(t > 0.99, "Corner t should be ~1, got {}", t);
     }
 
@@ -5172,8 +5216,10 @@ mod tests {
         let dy_b_1: f64 = point_below.1 - center.1;
         let dist_below_1 = (dx_b_1 * dx_b_1 + dy_b_1 * dy_b_1).sqrt();
 
-        assert!((dist_right_1 - dist_below_1).abs() < 0.001,
-            "With aspect=1, right and below should be equidistant");
+        assert!(
+            (dist_right_1 - dist_below_1).abs() < 0.001,
+            "With aspect=1, right and below should be equidistant"
+        );
 
         // With aspect=2, horizontal distance is doubled
         let dx_r_2: f64 = (point_right.0 - center.0) * 2.0;
@@ -5185,8 +5231,12 @@ mod tests {
         let dist_below_2 = (dx_b_2 * dx_b_2 + dy_b_2 * dy_b_2).sqrt();
 
         // Right should now be farther than below
-        assert!(dist_right_2 > dist_below_2,
-            "With aspect=2, right should be farther: {} vs {}", dist_right_2, dist_below_2);
+        assert!(
+            dist_right_2 > dist_below_2,
+            "With aspect=2, right should be farther: {} vs {}",
+            dist_right_2,
+            dist_below_2
+        );
     }
 
     #[test]
@@ -5200,7 +5250,7 @@ mod tests {
 
         // With animation, sampling at t=0 with time offset 0.5
         // should give same result as sampling at t=0.5
-        let animated_t = (0.0 + 0.5).rem_euclid(1.0);
+        let animated_t = (0.0_f64 + 0.5).rem_euclid(1.0);
         let animated = gradient.sample(animated_t);
 
         assert_eq!(animated.r(), at_05.r());
@@ -5208,7 +5258,11 @@ mod tests {
         assert_eq!(animated.b(), at_05.b());
 
         // Verify original values are different
-        assert_ne!(at_0.r(), at_05.r(), "Gradient should have different colors at different t");
+        assert_ne!(
+            at_0.r(),
+            at_05.r(),
+            "Gradient should have different colors at different t"
+        );
     }
 
     // =========================================================================
@@ -10397,7 +10451,11 @@ mod particle_dissolve_tests {
 
         for (idx, ch) in "HELLO".chars().enumerate() {
             let displayed = text.char_at(idx, ch);
-            assert_eq!(displayed, ch, "At progress 0, char {} should be '{}'", idx, ch);
+            assert_eq!(
+                displayed, ch,
+                "At progress 0, char {} should be '{}'",
+                idx, ch
+            );
         }
     }
 
@@ -10416,7 +10474,10 @@ mod particle_dissolve_tests {
         let particle_chars = ['·', '∙', '•', '*'];
         for (idx, original) in "HELLO".chars().enumerate() {
             let displayed = text.char_at(idx, original);
-            assert!(particle_chars.contains(&displayed), "At progress 1, should be particle");
+            assert!(
+                particle_chars.contains(&displayed),
+                "At progress 1, should be particle"
+            );
         }
     }
 
@@ -10446,7 +10507,10 @@ mod particle_dissolve_tests {
         // progress 0 should be particles
         for (idx, original) in "HI".chars().enumerate() {
             let displayed = text_start.char_at(idx, original);
-            assert!(particle_chars.contains(&displayed), "Materialize progress 0 = particles");
+            assert!(
+                particle_chars.contains(&displayed),
+                "Materialize progress 0 = particles"
+            );
         }
         // progress 1 should be solid
         for (idx, ch) in "HI".chars().enumerate() {
@@ -10479,7 +10543,10 @@ mod particle_dissolve_tests {
 
         let offset_no_g = text_no_g.char_offset(0, 1);
         let offset_hi_g = text_hi_g.char_offset(0, 1);
-        assert!(offset_hi_g.dy >= offset_no_g.dy, "Higher gravity = higher dy");
+        assert!(
+            offset_hi_g.dy >= offset_no_g.dy,
+            "Higher gravity = higher dy"
+        );
     }
 
     #[test]
