@@ -1708,6 +1708,29 @@ mod tests {
         assert!(form.validate_all().is_empty());
     }
 
+    #[test]
+    fn required_flag_sets_indicator() {
+        let mut form = Form::new(vec![FormField::text("Name")]);
+        assert!(!form.is_required(0));
+        form.set_required(0, true);
+        assert!(form.is_required(0));
+    }
+
+    #[test]
+    fn disabled_field_ignores_text_input() {
+        let mut form = Form::new(vec![FormField::text("Name")]);
+        form.set_disabled(0, true);
+        let mut state = FormState::default();
+        state.init_tracking(&form);
+
+        let changed = state.handle_event(&mut form, &press(KeyCode::Char('a')));
+        assert!(!changed, "disabled field should ignore input");
+
+        if let Some(FormField::Text { value, .. }) = form.field(0) {
+            assert!(value.is_empty());
+        }
+    }
+
     // -- Navigation --
 
     #[test]

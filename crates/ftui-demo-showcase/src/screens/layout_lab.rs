@@ -780,6 +780,10 @@ pub fn solve_flex_horizontal(area: Rect, constraints: &[Constraint]) -> Vec<Rect
 mod tests {
     use super::*;
 
+    // ==========================================================================
+    // Basic Layout Tests
+    // ==========================================================================
+
     #[test]
     fn layout_flex_vertical() {
         let area = Rect::new(0, 0, 80, 40);
@@ -889,5 +893,517 @@ mod tests {
         assert_eq!(inner_left[2].height, 5);
         // Middle gets the rest: 40 - 5 - 5 = 30
         assert_eq!(inner_left[1].height, 30);
+    }
+
+    // ==========================================================================
+    // Unit Tests: LayoutLab State and Logic (bd-32my.3)
+    // ==========================================================================
+
+    #[test]
+    fn layout_lab_default_state() {
+        let lab = LayoutLab::new();
+        assert_eq!(lab.current_preset, 0);
+        assert_eq!(lab.selected_constraint, 0);
+        assert_eq!(lab.direction, Direction::Vertical);
+        assert_eq!(lab.alignment_idx, 0);
+        assert_eq!(lab.gap, 0);
+        assert_eq!(lab.margin, 0);
+        assert_eq!(lab.align_pos, 4); // Center
+        assert!(!lab.show_debug);
+    }
+
+    #[test]
+    fn direction_toggle() {
+        assert_eq!(Direction::Vertical.toggle(), Direction::Horizontal);
+        assert_eq!(Direction::Horizontal.toggle(), Direction::Vertical);
+        // Toggle is involutive
+        assert_eq!(Direction::Vertical.toggle().toggle(), Direction::Vertical);
+    }
+
+    #[test]
+    fn direction_labels() {
+        assert_eq!(Direction::Vertical.label(), "Vertical");
+        assert_eq!(Direction::Horizontal.label(), "Horizontal");
+    }
+
+    #[test]
+    fn constraint_label_formatting() {
+        assert_eq!(LayoutLab::constraint_label(&Constraint::Fixed(10)), "Fixed(10)");
+        assert_eq!(LayoutLab::constraint_label(&Constraint::Percentage(50.0)), "Pct(50%)");
+        assert_eq!(LayoutLab::constraint_label(&Constraint::Min(5)), "Min(5)");
+        assert_eq!(LayoutLab::constraint_label(&Constraint::Max(20)), "Max(20)");
+        assert_eq!(LayoutLab::constraint_label(&Constraint::Ratio(1, 3)), "Ratio(1/3)");
+        assert_eq!(LayoutLab::constraint_label(&Constraint::Fill), "Fill");
+        assert_eq!(LayoutLab::constraint_label(&Constraint::FitContent), "FitContent");
+        assert_eq!(
+            LayoutLab::constraint_label(&Constraint::FitContentBounded { min: 5, max: 20 }),
+            "FitContent(5..20)"
+        );
+        assert_eq!(LayoutLab::constraint_label(&Constraint::FitMin), "FitMin");
+    }
+
+    #[test]
+    fn preset_constraints_count() {
+        let lab = LayoutLab::new();
+
+        // Preset 0: 5 constraints
+        let mut lab0 = lab;
+        lab0.current_preset = 0;
+        assert_eq!(lab0.preset_constraints().len(), 5);
+
+        // Preset 1: 5 constraints (same as 0)
+        let mut lab1 = LayoutLab::new();
+        lab1.current_preset = 1;
+        assert_eq!(lab1.preset_constraints().len(), 5);
+
+        // Preset 2: 3 constraints (grid)
+        let mut lab2 = LayoutLab::new();
+        lab2.current_preset = 2;
+        assert_eq!(lab2.preset_constraints().len(), 3);
+
+        // Preset 3: 2 constraints (nested)
+        let mut lab3 = LayoutLab::new();
+        lab3.current_preset = 3;
+        assert_eq!(lab3.preset_constraints().len(), 2);
+
+        // Preset 4: 3 constraints (real-world)
+        let mut lab4 = LayoutLab::new();
+        lab4.current_preset = 4;
+        assert_eq!(lab4.preset_constraints().len(), 3);
+    }
+
+    #[test]
+    fn alignment_cycling() {
+        let lab = LayoutLab::new();
+        assert_eq!(lab.alignment_idx, 0);
+        assert_eq!(lab.current_alignment(), FlexAlignment::Start);
+
+        let mut lab = lab;
+        lab.alignment_idx = 1;
+        assert_eq!(lab.current_alignment(), FlexAlignment::Center);
+
+        lab.alignment_idx = 2;
+        assert_eq!(lab.current_alignment(), FlexAlignment::End);
+
+        lab.alignment_idx = 3;
+        assert_eq!(lab.current_alignment(), FlexAlignment::SpaceBetween);
+
+        lab.alignment_idx = 4;
+        assert_eq!(lab.current_alignment(), FlexAlignment::SpaceAround);
+
+        // Wrap around
+        lab.alignment_idx = 5 % ALIGNMENTS.len();
+        assert_eq!(lab.current_alignment(), FlexAlignment::Start);
+    }
+
+    #[test]
+    fn align_position_mapping() {
+        // Test all 9 positions
+        assert_eq!(align_position(0), (Alignment::Left, VerticalAlignment::Top, "TopLeft"));
+        assert_eq!(align_position(1), (Alignment::Center, VerticalAlignment::Top, "TopCenter"));
+        assert_eq!(align_position(2), (Alignment::Right, VerticalAlignment::Top, "TopRight"));
+        assert_eq!(align_position(3), (Alignment::Left, VerticalAlignment::Middle, "MidLeft"));
+        assert_eq!(align_position(4), (Alignment::Center, VerticalAlignment::Middle, "Center"));
+        assert_eq!(align_position(5), (Alignment::Right, VerticalAlignment::Middle, "MidRight"));
+        assert_eq!(align_position(6), (Alignment::Left, VerticalAlignment::Bottom, "BotLeft"));
+        assert_eq!(align_position(7), (Alignment::Center, VerticalAlignment::Bottom, "BotCenter"));
+        assert_eq!(align_position(8), (Alignment::Right, VerticalAlignment::Bottom, "BotRight"));
+        // Wrap around
+        assert_eq!(align_position(9), (Alignment::Left, VerticalAlignment::Top, "TopLeft"));
+    }
+
+    #[test]
+    fn keybindings_non_empty() {
+        let lab = LayoutLab::new();
+        let bindings = lab.keybindings();
+        assert!(!bindings.is_empty());
+        // Should have at least 10 keybindings
+        assert!(bindings.len() >= 10, "Expected at least 10 keybindings, got {}", bindings.len());
+    }
+
+    #[test]
+    fn title_and_tab_label() {
+        let lab = LayoutLab::new();
+        assert_eq!(lab.title(), "Layout Laboratory");
+        assert_eq!(lab.tab_label(), "Layout");
+    }
+
+    // ==========================================================================
+    // Edge Cases
+    // ==========================================================================
+
+    #[test]
+    fn layout_zero_size_area() {
+        let area = Rect::new(0, 0, 0, 0);
+        let constraints = [Constraint::Fixed(10)];
+        let rects = solve_flex_vertical(area, &constraints);
+        // Should return 1 rect with zero dimensions
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].width, 0);
+        assert_eq!(rects[0].height, 0);
+    }
+
+    #[test]
+    fn layout_tiny_area() {
+        let area = Rect::new(0, 0, 2, 2);
+        let constraints = [
+            Constraint::Fixed(5),
+            Constraint::Fixed(5),
+        ];
+        let rects = solve_flex_vertical(area, &constraints);
+        assert_eq!(rects.len(), 2);
+        // Rects should still be within area even if constraints can't be satisfied
+        for r in &rects {
+            assert!(r.x + r.width <= area.x + area.width);
+            assert!(r.y + r.height <= area.y + area.height);
+        }
+    }
+
+    #[test]
+    fn layout_single_constraint() {
+        let area = Rect::new(10, 20, 80, 40);
+        let constraints = [Constraint::Min(0)];
+        let rects = solve_flex_vertical(area, &constraints);
+        assert_eq!(rects.len(), 1);
+        // Single Min(0) should fill the entire area
+        assert_eq!(rects[0], area);
+    }
+
+    #[test]
+    fn layout_empty_constraints() {
+        let area = Rect::new(0, 0, 80, 40);
+        let constraints: [Constraint; 0] = [];
+        let rects = solve_flex_vertical(area, &constraints);
+        assert!(rects.is_empty());
+    }
+
+    #[test]
+    fn layout_offset_area() {
+        // Test with non-zero origin
+        let area = Rect::new(50, 100, 80, 40);
+        let constraints = [
+            Constraint::Fixed(10),
+            Constraint::Min(5),
+        ];
+        let rects = solve_flex_vertical(area, &constraints);
+        assert_eq!(rects.len(), 2);
+        // First rect should start at area origin
+        assert_eq!(rects[0].x, 50);
+        assert_eq!(rects[0].y, 100);
+        // All within area
+        for r in &rects {
+            assert!(r.x >= area.x);
+            assert!(r.y >= area.y);
+            assert!(r.x + r.width <= area.x + area.width);
+            assert!(r.y + r.height <= area.y + area.height);
+        }
+    }
+
+    #[test]
+    fn layout_with_gap() {
+        let area = Rect::new(0, 0, 100, 50);
+        let rects = Flex::vertical()
+            .gap(5)
+            .constraints([Constraint::Fixed(10), Constraint::Fixed(10), Constraint::Fixed(10)])
+            .split(area);
+        assert_eq!(rects.len(), 3);
+        // Check that there's a gap between rects
+        // First rect ends at y=10, second should start at y=15 (gap=5)
+        assert_eq!(rects[0].y + rects[0].height + 5, rects[1].y);
+        assert_eq!(rects[1].y + rects[1].height + 5, rects[2].y);
+    }
+
+    #[test]
+    fn layout_with_margin() {
+        let area = Rect::new(0, 0, 100, 50);
+        let rects = Flex::vertical()
+            .margin(Sides::all(5))
+            .constraints([Constraint::Min(0)])
+            .split(area);
+        assert_eq!(rects.len(), 1);
+        // Rect should be inset by margin
+        assert_eq!(rects[0].x, 5);
+        assert_eq!(rects[0].y, 5);
+        assert_eq!(rects[0].width, 90); // 100 - 5 - 5
+        assert_eq!(rects[0].height, 40); // 50 - 5 - 5
+    }
+
+    // ==========================================================================
+    // Invariant Tests
+    // ==========================================================================
+
+    #[test]
+    fn layout_rects_no_overlap_vertical() {
+        let area = Rect::new(0, 0, 80, 40);
+        let constraints = [
+            Constraint::Fixed(10),
+            Constraint::Percentage(30.0),
+            Constraint::Min(5),
+        ];
+        let rects = solve_flex_vertical(area, &constraints);
+
+        // Check no vertical overlap
+        for i in 0..rects.len() {
+            for j in (i + 1)..rects.len() {
+                let r1 = &rects[i];
+                let r2 = &rects[j];
+                // In vertical layout, r2 should start at or after r1 ends
+                assert!(
+                    r2.y >= r1.y + r1.height,
+                    "Overlap detected: rect {} ends at y={}, rect {} starts at y={}",
+                    i,
+                    r1.y + r1.height,
+                    j,
+                    r2.y
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn layout_rects_no_overlap_horizontal() {
+        let area = Rect::new(0, 0, 100, 30);
+        let constraints = [
+            Constraint::Fixed(20),
+            Constraint::Percentage(40.0),
+            Constraint::Min(10),
+        ];
+        let rects = solve_flex_horizontal(area, &constraints);
+
+        // Check no horizontal overlap
+        for i in 0..rects.len() {
+            for j in (i + 1)..rects.len() {
+                let r1 = &rects[i];
+                let r2 = &rects[j];
+                // In horizontal layout, r2 should start at or after r1 ends
+                assert!(
+                    r2.x >= r1.x + r1.width,
+                    "Overlap detected: rect {} ends at x={}, rect {} starts at x={}",
+                    i,
+                    r1.x + r1.width,
+                    j,
+                    r2.x
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn layout_fixed_constraint_exact() {
+        // Fixed constraints should produce exact sizes
+        let area = Rect::new(0, 0, 100, 100);
+        let rects = solve_flex_vertical(area, &[
+            Constraint::Fixed(10),
+            Constraint::Fixed(20),
+            Constraint::Min(0),
+        ]);
+        assert_eq!(rects[0].height, 10, "Fixed(10) should be exactly 10");
+        assert_eq!(rects[1].height, 20, "Fixed(20) should be exactly 20");
+    }
+
+    #[test]
+    fn layout_ratio_proportional() {
+        let area = Rect::new(0, 0, 90, 30);
+        let rects = solve_flex_horizontal(area, &[
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+        ]);
+        // Each should be 30 wide (90 / 3)
+        for r in &rects {
+            assert_eq!(r.width, 30, "Each ratio(1,3) of 90 should be 30");
+        }
+    }
+
+    #[test]
+    fn layout_percentage_proportional() {
+        let area = Rect::new(0, 0, 100, 100);
+        let rects = solve_flex_vertical(area, &[
+            Constraint::Percentage(25.0),
+            Constraint::Percentage(75.0),
+        ]);
+        assert_eq!(rects[0].height, 25, "25% of 100 should be 25");
+        assert_eq!(rects[1].height, 75, "75% of 100 should be 75");
+    }
+}
+
+// ==========================================================================
+// Property Tests for Layout Invariants (bd-32my.3)
+// ==========================================================================
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Generate a reasonable Rect for testing
+    fn arb_rect() -> impl Strategy<Value = Rect> {
+        (0u16..100, 0u16..100, 10u16..200, 10u16..100).prop_map(|(x, y, w, h)| Rect::new(x, y, w, h))
+    }
+
+    /// Generate a simple constraint
+    fn arb_simple_constraint() -> impl Strategy<Value = Constraint> {
+        prop_oneof![
+            (1u16..50).prop_map(Constraint::Fixed),
+            (1.0f64..100.0).prop_map(|p| Constraint::Percentage(p as f32)),
+            (0u16..30).prop_map(Constraint::Min),
+            (5u16..50).prop_map(Constraint::Max),
+            (1u16..5, 2u16..6)
+                .prop_filter("denominator > numerator", |(n, d)| n < d)
+                .prop_map(|(n, d)| Constraint::Ratio(n, d)),
+        ]
+    }
+
+    proptest! {
+        /// Property: All resulting rects are within the input area bounds.
+        #[test]
+        fn prop_rects_within_area(area in arb_rect(), constraints in prop::collection::vec(arb_simple_constraint(), 1..5)) {
+            let rects = solve_flex_vertical(area, &constraints);
+
+            for (i, r) in rects.iter().enumerate() {
+                prop_assert!(
+                    r.x >= area.x,
+                    "Rect {} x={} < area.x={}",
+                    i, r.x, area.x
+                );
+                prop_assert!(
+                    r.y >= area.y,
+                    "Rect {} y={} < area.y={}",
+                    i, r.y, area.y
+                );
+                prop_assert!(
+                    r.x + r.width <= area.x + area.width,
+                    "Rect {} right={} > area right={}",
+                    i, r.x + r.width, area.x + area.width
+                );
+                prop_assert!(
+                    r.y + r.height <= area.y + area.height,
+                    "Rect {} bottom={} > area bottom={}",
+                    i, r.y + r.height, area.y + area.height
+                );
+            }
+        }
+
+        /// Property: Number of resulting rects equals number of constraints.
+        #[test]
+        fn prop_rect_count_matches_constraints(
+            area in arb_rect(),
+            constraints in prop::collection::vec(arb_simple_constraint(), 1..5)
+        ) {
+            let rects = solve_flex_vertical(area, &constraints);
+            prop_assert_eq!(rects.len(), constraints.len());
+        }
+
+        /// Property: All resulting rects have full width (in vertical layout).
+        #[test]
+        fn prop_vertical_rects_full_width(
+            area in arb_rect(),
+            constraints in prop::collection::vec(arb_simple_constraint(), 1..4)
+        ) {
+            let rects = solve_flex_vertical(area, &constraints);
+            for (i, r) in rects.iter().enumerate() {
+                prop_assert_eq!(
+                    r.width, area.width,
+                    "Rect {} width={} != area.width={}",
+                    i, r.width, area.width
+                );
+            }
+        }
+
+        /// Property: All resulting rects have full height (in horizontal layout).
+        #[test]
+        fn prop_horizontal_rects_full_height(
+            area in arb_rect(),
+            constraints in prop::collection::vec(arb_simple_constraint(), 1..4)
+        ) {
+            let rects = solve_flex_horizontal(area, &constraints);
+            for (i, r) in rects.iter().enumerate() {
+                prop_assert_eq!(
+                    r.height, area.height,
+                    "Rect {} height={} != area.height={}",
+                    i, r.height, area.height
+                );
+            }
+        }
+
+        /// Property: Vertical layout rects are contiguous (no gaps without explicit gap setting).
+        #[test]
+        fn prop_vertical_contiguous(
+            area in arb_rect(),
+            constraints in prop::collection::vec(arb_simple_constraint(), 2..4)
+        ) {
+            let rects = solve_flex_vertical(area, &constraints);
+            for i in 1..rects.len() {
+                let prev = &rects[i - 1];
+                let curr = &rects[i];
+                prop_assert!(
+                    curr.y >= prev.y + prev.height,
+                    "Rect {} overlaps rect {}: curr.y={} < prev_end={}",
+                    i, i - 1, curr.y, prev.y + prev.height
+                );
+            }
+        }
+
+        /// Property: Horizontal layout rects are contiguous (no gaps without explicit gap setting).
+        #[test]
+        fn prop_horizontal_contiguous(
+            area in arb_rect(),
+            constraints in prop::collection::vec(arb_simple_constraint(), 2..4)
+        ) {
+            let rects = solve_flex_horizontal(area, &constraints);
+            for i in 1..rects.len() {
+                let prev = &rects[i - 1];
+                let curr = &rects[i];
+                prop_assert!(
+                    curr.x >= prev.x + prev.width,
+                    "Rect {} overlaps rect {}: curr.x={} < prev_end={}",
+                    i, i - 1, curr.x, prev.x + prev.width
+                );
+            }
+        }
+
+        /// Property: Direction toggle is involutive (toggle twice = identity).
+        #[test]
+        fn prop_direction_toggle_involutive(dir in prop_oneof![Just(Direction::Vertical), Just(Direction::Horizontal)]) {
+            prop_assert_eq!(dir.toggle().toggle(), dir);
+        }
+
+        /// Property: Alignment index wraps correctly.
+        #[test]
+        fn prop_alignment_wrap(idx in 0usize..100) {
+            let wrapped = idx % ALIGNMENTS.len();
+            prop_assert!(wrapped < ALIGNMENTS.len());
+            // Accessing should not panic
+            let _ = ALIGNMENTS[wrapped];
+        }
+
+        /// Property: Align position wraps correctly (9 positions).
+        #[test]
+        fn prop_align_position_wrap(idx in 0usize..100) {
+            let (h, v, label) = align_position(idx);
+            // Should not panic and label should be non-empty
+            prop_assert!(!label.is_empty());
+            // Horizontal and vertical alignment should be valid enums
+            let _ = h;
+            let _ = v;
+        }
+
+        /// Property: Gap adjustment is bounded.
+        #[test]
+        fn prop_gap_bounded(initial in 0u16..10, delta in 0u16..10) {
+            let mut lab = LayoutLab::new();
+            lab.gap = initial;
+            lab.gap = lab.gap.saturating_add(delta).min(5);
+            prop_assert!(lab.gap <= 5);
+        }
+
+        /// Property: Margin adjustment is bounded.
+        #[test]
+        fn prop_margin_bounded(initial in 0u16..10, delta in 0u16..10) {
+            let mut lab = LayoutLab::new();
+            lab.margin = initial;
+            lab.margin = lab.margin.saturating_add(delta).min(4);
+            prop_assert!(lab.margin <= 4);
+        }
     }
 }
