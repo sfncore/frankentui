@@ -149,8 +149,15 @@ else
     if [[ -x "$SCRIPT_DIR/test_locale_context.sh" ]]; then
         run_suite "locale_context" "$SCRIPT_DIR/test_locale_context.sh"
     fi
+    if [[ -x "$SCRIPT_DIR/test_virtualized_search.sh" ]]; then
+        run_suite "virtualized_search" "$SCRIPT_DIR/test_virtualized_search.sh"
+    fi
     if [[ -x "$SCRIPT_DIR/test_terminal_quirks.sh" ]]; then
         run_suite "terminal_quirks" "$SCRIPT_DIR/test_terminal_quirks.sh"
+    fi
+    # Drag-and-drop E2E tests (bd-1csc.6)
+    if [[ -x "$SCRIPT_DIR/test_drag_drop.sh" ]]; then
+        run_suite "drag_drop" "$SCRIPT_DIR/test_drag_drop.sh"
     fi
 fi
 
