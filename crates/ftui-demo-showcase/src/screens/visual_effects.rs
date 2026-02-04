@@ -3128,7 +3128,11 @@ impl DoomE1M1State {
         let sky_bottom = (120, 140, 180);
         let floor_top = (118, 86, 56);
         let floor_bottom = (62, 42, 28);
-        let fill_stride = if matches!(quality, FxQuality::Minimal) { 2 } else { 1 };
+        let fill_stride = if matches!(quality, FxQuality::Minimal) {
+            2
+        } else {
+            1
+        };
         for py in (0..=max_y).step_by(fill_stride) {
             let (r, g, b) = if py <= horizon {
                 let denom = horizon.max(1) as f64;
@@ -3826,7 +3830,11 @@ impl QuakeE1M1State {
         let sky_bottom = (88, 104, 136);
         let floor_top = (104, 86, 62);
         let floor_bottom = (50, 36, 26);
-        let fill_stride = if matches!(quality, FxQuality::Minimal) { 2 } else { 1 };
+        let fill_stride = if matches!(quality, FxQuality::Minimal) {
+            2
+        } else {
+            1
+        };
         for py in (0..=max_y).step_by(fill_stride) {
             let (r, g, b) = if py <= horizon {
                 let denom = horizon.max(1) as f64;
@@ -4986,8 +4994,7 @@ impl Screen for VisualEffectsScreen {
         // Reuse cached painter (grow-only) and render at sub-pixel resolution.
         {
             let area_cells = canvas_area.width as usize * canvas_area.height as usize;
-            let mut quality =
-                FxQuality::from_degradation_with_area(frame.degradation, area_cells);
+            let mut quality = FxQuality::from_degradation_with_area(frame.degradation, area_cells);
             if self.is_fps_effect() && matches!(quality, FxQuality::Off) {
                 quality = FxQuality::Minimal;
             }

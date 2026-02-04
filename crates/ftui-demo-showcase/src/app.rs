@@ -1700,7 +1700,11 @@ impl AppModel {
                     match *code {
                         KeyCode::Char(' ') => {
                             self.tour.toggle_pause();
-                            let action = if self.tour.is_paused() { "pause" } else { "resume" };
+                            let action = if self.tour.is_paused() {
+                                "pause"
+                            } else {
+                                "resume"
+                            };
                             self.emit_tour_jsonl(action, "ok", self.tour.current_step());
                             return Cmd::None;
                         }
@@ -1959,50 +1963,119 @@ impl AppModel {
                         }
                         // Tab cycling (Tab/BackTab, or Shift+H/Shift+L for Vim users)
                         (KeyCode::Tab, Modifiers::NONE) => {
-                            self.current_screen = self.current_screen.next();
+                            let target = self.display_screen().next();
+                            if target == ScreenId::GuidedTour {
+                                self.start_tour(0, self.tour.speed());
+                                return Cmd::None;
+                            }
+                            if self.tour.is_active() {
+                                self.stop_tour(false, "tab_next");
+                            }
+                            self.current_screen = target;
                             return Cmd::None;
                         }
                         (KeyCode::BackTab, _) => {
-                            self.current_screen = self.current_screen.prev();
+                            let target = self.display_screen().prev();
+                            if target == ScreenId::GuidedTour {
+                                self.start_tour(0, self.tour.speed());
+                                return Cmd::None;
+                            }
+                            if self.tour.is_active() {
+                                self.stop_tour(false, "tab_prev");
+                            }
+                            self.current_screen = target;
                             return Cmd::None;
                         }
                         (KeyCode::Char('L'), Modifiers::SHIFT) => {
-                            self.current_screen = self.current_screen.next();
+                            let target = self.display_screen().next();
+                            if target == ScreenId::GuidedTour {
+                                self.start_tour(0, self.tour.speed());
+                                return Cmd::None;
+                            }
+                            if self.tour.is_active() {
+                                self.stop_tour(false, "shift_l");
+                            }
+                            self.current_screen = target;
                             return Cmd::None;
                         }
                         (KeyCode::Char('H'), Modifiers::SHIFT) => {
-                            self.current_screen = self.current_screen.prev();
+                            let target = self.display_screen().prev();
+                            if target == ScreenId::GuidedTour {
+                                self.start_tour(0, self.tour.speed());
+                                return Cmd::None;
+                            }
+                            if self.tour.is_active() {
+                                self.stop_tour(false, "shift_h");
+                            }
+                            self.current_screen = target;
                             return Cmd::None;
                         }
                         // Category navigation (Shift+Left/Right)
                         (KeyCode::Left, m) if m.contains(Modifiers::SHIFT) => {
-                            let current_category = screens::screen_category(self.current_screen);
+                            let current_category = screens::screen_category(self.display_screen());
                             let prev_category = screens::prev_category(current_category);
                             if let Some(next_screen) = screens::first_in_category(prev_category) {
+                                if next_screen == ScreenId::GuidedTour {
+                                    self.start_tour(0, self.tour.speed());
+                                    return Cmd::None;
+                                }
+                                if self.tour.is_active() {
+                                    self.stop_tour(false, "category_prev");
+                                }
                                 self.current_screen = next_screen;
                             }
                             return Cmd::None;
                         }
                         (KeyCode::Right, m) if m.contains(Modifiers::SHIFT) => {
-                            let current_category = screens::screen_category(self.current_screen);
+                            let current_category = screens::screen_category(self.display_screen());
                             let next_category = screens::next_category(current_category);
                             if let Some(next_screen) = screens::first_in_category(next_category) {
+                                if next_screen == ScreenId::GuidedTour {
+                                    self.start_tour(0, self.tour.speed());
+                                    return Cmd::None;
+                                }
+                                if self.tour.is_active() {
+                                    self.stop_tour(false, "category_next");
+                                }
                                 self.current_screen = next_screen;
                             }
                             return Cmd::None;
                         }
                         // Screen navigation within current category (Left/Right)
                         (KeyCode::Left, Modifiers::NONE) => {
-                            self.current_screen = screens::prev_in_category(self.current_screen);
+                            let target = screens::prev_in_category(self.display_screen());
+                            if target == ScreenId::GuidedTour {
+                                self.start_tour(0, self.tour.speed());
+                                return Cmd::None;
+                            }
+                            if self.tour.is_active() {
+                                self.stop_tour(false, "nav_prev");
+                            }
+                            self.current_screen = target;
                             return Cmd::None;
                         }
                         (KeyCode::Right, Modifiers::NONE) => {
-                            self.current_screen = screens::next_in_category(self.current_screen);
+                            let target = screens::next_in_category(self.display_screen());
+                            if target == ScreenId::GuidedTour {
+                                self.start_tour(0, self.tour.speed());
+                                return Cmd::None;
+                            }
+                            if self.tour.is_active() {
+                                self.stop_tour(false, "nav_next");
+                            }
+                            self.current_screen = target;
                             return Cmd::None;
                         }
                         // Number keys for direct screen access
                         (KeyCode::Char(ch @ '0'..='9'), Modifiers::NONE) => {
                             if let Some(id) = ScreenId::from_number_key(ch) {
+                                if id == ScreenId::GuidedTour {
+                                    self.start_tour(0, self.tour.speed());
+                                    return Cmd::None;
+                                }
+                                if self.tour.is_active() {
+                                    self.stop_tour(false, "number_key");
+                                }
                                 self.current_screen = id;
                                 return Cmd::None;
                             }
@@ -2012,14 +2085,14 @@ impl AppModel {
                 }
 
                 // Handle 'R' key to retry errored screens
-                if self.screens.has_error(self.current_screen)
+                if self.screens.has_error(self.display_screen())
                     && let Event::Key(KeyEvent {
                         code: KeyCode::Char('r' | 'R'),
                         kind: KeyEventKind::Press,
                         ..
                     }) = &event
                 {
-                    self.screens.clear_error(self.current_screen);
+                    self.screens.clear_error(self.display_screen());
                     return Cmd::None;
                 }
                 self.screens.update(self.display_screen(), &event);
@@ -2293,7 +2366,7 @@ impl AppModel {
             self.stop_tour(false, "mouse_tab");
         }
 
-        let from = self.current_screen.title();
+        let from = self.display_screen().title();
         self.current_screen = target;
         self.screens.action_timeline.record_command_event(
             self.tick_count,
@@ -2342,7 +2415,7 @@ impl AppModel {
     fn execute_palette_action(&mut self, action: PaletteAction) -> Cmd<AppMsg> {
         match action {
             PaletteAction::Dismiss => {
-                let log_screen = self.current_screen;
+                let log_screen = self.display_screen();
                 let log_category = screens::screen_category(log_screen);
                 emit_palette_jsonl(
                     "dismiss",
@@ -2360,8 +2433,8 @@ impl AppModel {
                         (sid, screens::screen_category(sid), "screen")
                     } else {
                         (
-                            self.current_screen,
-                            screens::screen_category(self.current_screen),
+                            self.display_screen(),
+                            screens::screen_category(self.display_screen()),
                             "command",
                         )
                     };
@@ -2381,7 +2454,7 @@ impl AppModel {
                     if self.tour.is_active() {
                         self.stop_tour(false, "palette");
                     }
-                    let from = self.current_screen.title();
+                    let from = self.display_screen().title();
                     self.current_screen = sid;
                     self.screens.action_timeline.record_command_event(
                         self.tick_count,
