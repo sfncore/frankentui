@@ -32,6 +32,8 @@ Common variables:
 - `E2E_HARNESS_BIN` — path to `ftui-harness` binary (skip build)
 - `LOG_LEVEL=DEBUG` — verbose suite logging
 - `E2E_ONLY_CASE` — run a single case in scripts that support filtering
+- `E2E_DETERMINISTIC=1` — emit deterministic timestamps/run IDs in JSONL logs
+- `E2E_SEED=<n>` — fixed seed for deterministic runs (propagated to harnesses)
 
 PTY runner controls (from `tests/e2e/lib/pty.sh`):
 
@@ -88,6 +90,23 @@ Each run produces:
 - `results/*.json` — per-test JSON entries
 - `results/summary.json` — aggregated pass/fail counts
 - `*.pty` — raw PTY captures (binary)
+
+## Deterministic Coverage Matrix
+
+The authoritative mode/size matrix and per-script cell mapping live in:
+`docs/testing/e2e-gap-analysis.md`.
+
+Target cells are alt/inline across 80x24, 120x40, and 200x50. Use
+`FTUI_HARNESS_SCREEN_MODE` and `PTY_COLS/PTY_ROWS` to pin a test to a cell.
+
+## JSONL Event Logging
+
+The target JSONL schema for step/input/frame/hash/timing/environment events is
+defined in `docs/testing/e2e-summary-schema.md`. Scripts may emit only a subset
+today; new E2E work should log events that conform to that schema.
+
+When `E2E_DETERMINISTIC=1` is set, JSONL timestamps and run IDs become stable,
+and step logs include `hash_key` in the format `mode-<cols>x<rows>-seed<seed>`.
 
 On failures, the suite prints:
 

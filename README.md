@@ -26,8 +26,8 @@ Minimal, high‑performance terminal UI kernel focused on correctness, determini
 curl -fsSL https://codeload.github.com/Dicklesworthstone/frankentui/tar.gz/main | tar -xz
 cd frankentui-main
 
-# Run the reference harness app
-cargo run -p ftui-harness
+# Run the demo showcase (primary way to see what FrankenTUI can do)
+cargo run -p ftui-demo-showcase
 ```
 
 **Or clone with git:**
@@ -35,7 +35,7 @@ cargo run -p ftui-harness
 ```bash
 git clone https://github.com/Dicklesworthstone/frankentui.git
 cd frankentui
-cargo run -p ftui-harness
+cargo run -p ftui-demo-showcase
 ```
 
 ---
@@ -61,12 +61,12 @@ cargo run -p ftui-harness
 ## Quick Example
 
 ```bash
-# Reference app (inline mode, log streaming)
-FTUI_HARNESS_SCREEN_MODE=inline FTUI_HARNESS_UI_HEIGHT=12 cargo run -p ftui-harness
+# Demo showcase (primary)
+cargo run -p ftui-demo-showcase
 
-# Try other harness views
-FTUI_HARNESS_VIEW=layout-grid cargo run -p ftui-harness
-FTUI_HARNESS_VIEW=widget-table cargo run -p ftui-harness
+# Pick a specific demo view
+FTUI_HARNESS_VIEW=dashboard cargo run -p ftui-demo-showcase
+FTUI_HARNESS_VIEW=visual_effects cargo run -p ftui-demo-showcase
 ```
 
 ---
@@ -224,9 +224,9 @@ ftui = { path = "../frankentui/crates/ftui" }
    cd frankentui
    cargo build
    ```
-3. **Run the reference harness:**
+3. **Run the demo showcase (primary way to see the system):**
    ```bash
-   cargo run -p ftui-harness
+   cargo run -p ftui-demo-showcase
    ```
 
 ---
@@ -287,13 +287,13 @@ Example event line:
 
 ## Commands
 
-### Run the Harness
+### Run the Demo Showcase (Primary)
 
 ```bash
-cargo run -p ftui-harness
+cargo run -p ftui-demo-showcase
 ```
 
-### Run Harness Examples
+### Run Harness Examples (tests and reference behavior)
 
 ```bash
 cargo run -p ftui-harness --example minimal
@@ -482,6 +482,22 @@ Decision: argmin { E[Cost_full], E[Cost_dirty], E[Cost_redraw] }
 
 **Conservative mode:** Uses 95th percentile of p (not mean) when posterior variance is high—the system knows when it's uncertain.
 
+### Bayesian Capability Detection (Terminal Caps Probe)
+
+Terminal capability detection uses **log Bayes factors as evidence weights** to combine noisy signals (env vars, DA1/DA2, DECRPM):
+
+```
+log BF = ln(P(data | feature) / P(data | ¬feature))
+
+log-odds posterior:
+    logit P(feature | evidence) = logit P(feature) + Σ log BF_i
+
+probability:
+    P = 1 / (1 + exp(-logit))
+```
+
+**Result:** robust capability detection even when individual probes are flaky.
+
 ### Dirty-Span Interval Union (Sparse Diff Scans)
 
 For sparse updates, each row tracks **dirty spans** and the diff scans only the union of those spans:
@@ -561,6 +577,21 @@ Decision thresholds:
     p_burst < 0.3  →  Steady regime (responsive)
     otherwise      →  Transitional (interpolate delay)
 ```
+
+### Bayes-Factor Evidence Ledger (Resize Coalescer)
+
+Resize coalescing decisions are explained with a **log10 Bayes factor** ledger:
+
+```
+LBF = log10(P(evidence | apply_now) / P(evidence | coalesce))
+
+Interpretation:
+    LBF > 0  → apply now
+    LBF < 0  → coalesce
+    |LBF| > 1 strong, |LBF| > 2 decisive
+```
+
+**Result:** coalescing is transparent and audit‑friendly, not heuristic black magic.
 
 ### Value-of-Information (VOI) Sampling
 
@@ -996,7 +1027,10 @@ The visual effects screen is deterministic math, not “random shader noise.” 
 |----------|------------------|-------------------------------|--------------------|
 | **Bayes Factors** | Command palette scoring | $\frac{P(R\mid E)}{P(\neg R\mid E)}=\frac{P(R)}{P(\neg R)}\prod_i BF_i$ | Better ranking with fewer re‑sorts |
 | **Evidence Ledger** | Explanations for probabilistic decisions | $\log\frac{P(R\mid E)}{P(\neg R\mid E)}=\log\frac{P(R)}{P(\neg R)}+\sum_i\log BF_i$ | Debuggable, auditable scoring |
+| **Log‑BF Capability Probe** | Terminal caps detection | $\log BF=\log \frac{P(data\mid H)}{P(data\mid \neg H)}$ | Robust detection from noisy probes |
+| **Log10‑BF Coalescer** | Resize scheduler evidence ledger | $LBF=\log_{10}\frac{P(E\mid apply)}{P(E\mid coalesce)}$ | Explainable, stable resize decisions |
 | **Bayesian Hint Ranking** | Keybinding hint ordering | $V_i=E[U_i]+w_{voi}\sqrt{Var(U_i)}-\lambda C_i$ | Stable, utility‑aware hints |
+| **Conformal Rank Confidence** | Command palette stability | $p_i=\frac{1}{n}\sum_j \mathbf{1}[g_j\le g_i]$ (gap‑based p‑value) | Deterministic tie‑breaks + stable top‑k |
 | **Beta-Binomial** | Diff strategy selection | $p\sim\mathrm{Beta}(\alpha,\beta)$ with binomial updates | Avoids slow strategies as workload shifts |
 | **Interval Union** | Dirty-span diff scan | $S_y=\bigcup_k [x_{0k},x_{1k})$ | Scan proportional to changed segments |
 | **Summed-Area Table** | Tile-skip diff | $SAT(x,y)=A(x,y)+SAT(x-1,y)+SAT(x,y-1)-SAT(x-1,y-1)$ | Skip empty tiles on large screens |
@@ -1013,7 +1047,8 @@ The visual effects screen is deterministic math, not “random shader noise.” 
 | **MPC** | Control evaluation | $\min_{u_{t:t+H}}\sum\|y_{t+k}-y^*\|^2+\rho\|u_{t+k}\|^2$ | Confirms PI is sufficient |
 | **VOI Sampling** | Expensive measurements | $\mathrm{VOI}=\mathrm{Var}-\mathbb{E}[\mathrm{Var}\mid\text{sample}]$ | Lower overhead in steady state |
 | **Jain’s Fairness** | Input guard | $F=(\sum x_i)^2/(n\sum x_i^2)$ | Prevents UI render from starving input |
-| **Count‑Min Sketch** | Timeline aggregation | $\hat f(x)=\min_j C_{j,h_j(x)}$ | Fast approximate counts |
+| **Count‑Min Sketch** | Width cache + timeline aggregation | $\hat f(x)=\min_j C_{j,h_j(x)}$ | Fast approximate counts |
+| **W‑TinyLFU Admission** | Width cache admission | admit if $\hat f(x)\ge \hat f(y)$ (Doorkeeper → CMS) | Higher cache hit‑rate, fewer width recomputes |
 | **PAC‑Bayes** | Sketch calibration | $\bar e+\sqrt{\mathrm{KL}(q\|\|p)/(2n)}$ | Tighter error bounds |
 | **Smith’s Rule + Aging** | Queueing scheduler | $priority=\frac{w}{r}+a\cdot\text{wait}$ | Fair throughput under load |
 | **Cost Modeling** | Presenter decisions | $cost=c_{scan}N_{scan}+c_{emit}N_{emit}$ | Minimizes cursor bytes |

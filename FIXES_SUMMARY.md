@@ -9,8 +9,8 @@
     - Updated `text()` and `inline_code()` to apply the current link URL to generated `Span`s using the new `Span::link()` method.
     - Note: Verified `RenderState` updates correctly handle nested styles and link scopes.
 
-## 60. Final Codebase State
-All tasks are complete. The codebase has been extensively refactored for Unicode correctness, hardened for security/reliability, and enhanced with hyperlink support. No further issues detected in the sampled files.
+## 60. Status Update
+Coverage audit + deep review are still in progress (bd-2dui). Do not treat the codebase as "final" or "complete" until the llvm-cov summary, gap map, and review follow-ups are finished and signed off.
 
 ## 61. Presenter Cost Model Overflow
 **File:** `crates/ftui-render/src/presenter.rs`
@@ -286,3 +286,29 @@ All tasks are complete. The codebase has been extensively refactored for Unicode
     - Updated `SearchState` to cache the lowercased query.
     - Implemented `search_ascii_case_insensitive_ranges` allocation-free helper.
     - Updated `search_with_config` and `find_match_ranges` to use the cached lowercase query and the zero-allocation search helper.
+
+## 101. ChangeRateEstimator Decay Bug
+**File:** `crates/ftui-render/src/diff_strategy.rs`
+**Issue:** `ChangeRateEstimator` decayed posterior belief even on empty observations (idle periods), causing it to revert to high-entropy defaults (`Beta(1, 19)`). This would unnecessarily trigger the `uncertainty_guard` after idle time, forcing expensive conservative rendering strategies.
+**Fix:**
+    - Changed default `min_observation_cells` from 0 to 1.
+    - Updated `observe` to skip decay/update if `cells_scanned < min_observation_cells`, preserving the learned posterior during idle periods.
+
+## 102. Ratio Constraint Semantics
+**File:** `crates/ftui-layout/src/lib.rs`
+**Issue:** `Constraint::Ratio(n, d)` was implemented as a flexible weight (like `flex-grow`), contradicting its name and documentation which implied a fixed fractional allocation ("ratio of remaining space", often interpreted as total space in TUI contexts). This made it impossible to create fixed proportional layouts (e.g. 1/4 width column) without them expanding to fill all available space.
+**Fix:**
+    - Moved `Constraint::Ratio` handling to the first pass of the solver (fixed allocation phase).
+    - It now allocates `available_size * n / d`, aligning its behavior with `Constraint::Percentage` and standard expectations for grid/column layouts.
+
+## 103. Alt+Backspace Input Parsing
+**File:** `crates/ftui-core/src/input_parser.rs`
+**Issue:** The input parser's `process_escape` state reset to ground on `0x7F` (DEL), swallowing the byte instead of treating `ESC + DEL` as `Alt+Backspace`.
+**Fix:**
+    - Added a case for `0x7F` in `process_escape` to emit `Event::Key` with `KeyCode::Backspace` and `Modifiers::ALT`.
+
+## 104. Ctrl+W Input Handling
+**File:** `crates/ftui-widgets/src/input.rs`
+**Issue:** `TextInput` did not handle `Ctrl+W`, a standard Unix binding for "delete word back", causing it to be ignored.
+**Fix:**
+    - Added handling for `KeyCode::Char('w')` with `Modifiers::CTRL` in `handle_key` to trigger `delete_word_back()`.

@@ -1,5 +1,121 @@
 # Session TODO List
 
+## Current Session (RedSpring) — bd-2me70 Perf Budget + Deep Review + Architecture (2026-02-04)
+- [x] Re-read `AGENTS.md` + `README.md` end-to-end
+- [x] Load skills: `codebase-archaeology`, `extreme-software-optimization`, `agent-mail`, `ubs`
+- [x] Run `bv --robot-triage` + `br ready --json`
+- [x] Inspect bead: `br show bd-2me70 --json`
+- [x] Mark bead in progress: `br update bd-2me70 --status in_progress`
+- [x] Agent Mail bootstrap: `macro_start_session` (RedSpring)
+- [x] Attempt file reservation for `crates/ftui-widgets/src/command_palette/scorer.rs` (conflict w/ IvoryCompass/LilacDune)
+- [x] Send coordination message to IvoryCompass/LilacDune re: `bd-2me70` lock conflict
+- [x] Baseline (hyperfine): `cargo test -p ftui-widgets perf_corpus_5000_under_budget -- --nocapture` (mean ~206.5ms)
+- [x] Perf profile (direct test binary): `perf record -F 99 -g -o perf_palette_5000.data -- /data/tmp/cargo-target/debug/deps/ftui_widgets-... perf_corpus_5000_under_budget --nocapture`
+- [x] Perf report: hotspots in `BayesianScorer::word_start_match_ascii`, `score` (Vec drop), slice precondition checks
+- [x] Send perf hotspot summary to IvoryCompass/LilacDune
+- [x] Update bead `bd-2me70` notes with baseline + perf profile summary
+- [x] UBS scan on diff: `UBS_MAX_DIR_SIZE_MB=0 ubs --diff --only=rust`
+- [x] Code review: inspect runtime `program.rs`, `render_thread.rs`, `subscription.rs` (no critical issues found)
+- [x] Code review: inspect widgets `input.rs` insert_text cursor logic (looks correct)
+- [x] Code review: identify `visual_effects` FPS header mismatch (arrows move vs effect switch)
+- [x] Attempt file reservation for `visual_effects.rs` (conflict w/ RoseStone/BoldPeak/SilverCrane)
+- [x] Notify owners of `visual_effects.rs` about arrow-key mismatch + suggested fix
+- [ ] Wait for reservation release (command_palette scorer) or reassign bead if conflict persists
+- [ ] If lock granted: opportunity matrix (impact/confidence/effort) + single-lever optimization
+- [ ] If lock granted: implement perf change + isomorphism proof + golden checksum verify
+- [ ] If lock granted: re-run perf test + update bead notes + Agent Mail summary
+- [x] Complete architecture summary once explorer agent returns
+- [ ] Run required quality gates after any code edits (`cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`)
+- [ ] Re-run UBS after edits (diff or file-specific)
+
+## Current Session (LilacDune) — bd-2mhdh Perf Budget: diff baseline (2026-02-04)
+- [x] Re-read `AGENTS.md` + `README.md`
+- [x] Run `bv --robot-triage` + `br ready --json`
+- [x] Inspect bead scope: `br show bd-2mhdh --json`
+- [x] Mark bead in progress: `br update bd-2mhdh --status in_progress`
+- [x] Agent Mail bootstrap: `macro_start_session` (LilacDune)
+- [x] Reserve files: `crates/ftui-render/src/diff.rs`, `crates/ftui-render/tests/*.rs`
+- [x] Send Agent Mail start note to `DarkCreek` + `IvoryCompass` (thread `bd-2mhdh`)
+- [x] Baseline: `hyperfine --warmup 3 --runs 10 "cargo test -p ftui-render perf_block_scan_vs_scalar_baseline -- --nocapture"` (pre-change ≈ 355ms mean)
+- [x] Profile: `cargo flamegraph` → `flamegraph_diff_perf.svg` (symbols limited)
+- [x] Profile: `perf record -o perf_diff_dbg.data ...` + `perf report` (hotspots: `scan_row_changes_range`, `Cell::PartialEq`)
+- [x] Implement single-lever optimization: remove row equality pre-scan in `compute_changes`
+- [x] Add structured perf diagnostics (p50/p95/p99 + mean/variance) to `perf_block_scan_vs_scalar_baseline`
+- [x] Fix perf diagnostics mean calc (u64 → f64 cast)
+- [x] Run `cargo test -p ftui-render perf_block_scan_vs_scalar_baseline -- --nocapture` (JSONL emitted; p95 ~183µs)
+- [x] Verify golden outputs: `sha256sum -c golden_checksums.txt` (81 preexisting mismatches)
+- [x] Re-profile after change (perf record → confirm hotspot shift)
+- [x] Re-baseline after change (stable run; avoid cargo rebuild noise)
+- [x] Update bead `bd-2mhdh` notes with perf output + optimization summary
+- [x] Post Agent Mail progress update in thread `bd-2mhdh`
+- [x] Run quality gates if required by final patch set: `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`
+
+## Current Session (LilacDune) — bd-2me70 Perf Budget: command_palette scorer (2026-02-04)
+- [x] Run `bv --robot-triage` (top picks already in progress)
+- [x] Inspect bead: `br show bd-2me70 --json`
+- [x] Mark bead in progress: `br update bd-2me70 --status in_progress`
+- [x] Reserve files: `crates/ftui-widgets/src/command_palette/scorer.rs` + related
+- [x] Send Agent Mail start note (thread `bd-2me70`)
+- [x] Baseline: `hyperfine` on test binary (5000 corpus) ~54.8ms mean pre-change
+- [x] Profile: `perf record` on scorer perf test (perf_palette_5000.data)
+- [x] Opportunity matrix (impact 2, confidence 3, effort 1 → score 6.0; prealloc results)
+- [x] Implement single-lever optimization (preallocate results vectors)
+- [x] Verify golden outputs (`sha256sum -c golden_checksums.txt`) — 81 preexisting mismatches
+- [x] Add/extend JSONL perf diagnostics (p50/p95/p99 + variance) for scorer
+- [x] Re-run perf test (JSONL emitted; budgets pass)
+- [x] Update bead `bd-2me70` notes + Agent Mail summary
+- [x] Fix clippy errors in `crates/ftui-extras/src/markdown.rs` (unused mut, collapsible if, too many args)
+- [x] Fix category tabs type mismatch in `crates/ftui-demo-showcase/src/chrome.rs`
+- [x] Run quality gates: `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`
+
+## Current Session (LilacDune) — Deep Review / UBS Audit (2026-02-04)
+- [x] Run UBS full Rust scan: `UBS_MAX_DIR_SIZE_MB=0 ubs --only=rust,toml crates/`
+- [ ] Triage UBS critical panic/unreachable findings; classify test-only vs production
+- [ ] Fix high-risk production panic/unreachable usage (focus on runtime paths)
+- [ ] Re-run UBS on touched files once fixes land
+
+## Current Session (GreenDeer) — bd-2dui Coverage Audit + Code Review + Perf (2026-02-04)
+- [x] Re-read `AGENTS.md` + `README.md` end-to-end
+- [x] Run `bv --robot-triage` to confirm top-impact bead
+- [x] `br show bd-2dui --json` for scope + dependencies
+- [x] Mark bead in progress: `br update bd-2dui --status in_progress --actor codex`
+- [x] Agent Mail `macro_start_session` (GreenDeer) + list agents directory
+- [x] Send update to `RusticHeron` in thread `bd-2dui`
+- [x] UBS diff scan: `UBS_MAX_DIR_SIZE_MB=0 ubs --diff -v` (Critical: 0)
+- [x] Review changes: `ftui-core/src/input_parser.rs` (Alt+Backspace)
+- [x] Review changes: `ftui-runtime/src/program.rs` + `simulator.rs` (Batch/Sequence stop after quit; forced size)
+- [x] Review changes: `ftui-widgets/src/input.rs` (max length + combining grapheme handling)
+- [x] Review changes: `ftui-widgets/src/toast.rs` + `progress.rs` (display-width rendering)
+- [x] Review changes: `ftui-demo-showcase/src/screens/data_viz.rs` + `theme.rs` (display-width alignment)
+- [x] Review changes: `ftui-demo-showcase/src/screens/visual_effects.rs` (movement substeps + palette tweaks)
+- [x] Review changes: `ftui-demo-showcase/src/screens/theme_studio.rs` (formatting / width alignment)
+- [x] Review new test: `crates/ftui-render/tests/presenter_control_chars.rs`
+- [x] Review new test: `crates/ftui-runtime/tests/batch_quit.rs`
+- [x] Fix input paste cursor when combining marks merge mid-string + add test
+- [x] Fix FPS header vs input mismatch (arrow keys now move)
+- [x] Perf lever: cache `Painter` width/height for faster index math
+- [x] Fix release build: add `MockSubscription` implementation
+- [x] Fix release build: import `Cell` in `text_effects.rs`
+- [x] Fix coverage compile: remove `#[test]` from `run_drag_sequence` helper
+- [ ] Decide whether to stage new tests (`presenter_control_chars.rs`, `batch_quit.rs`)
+- [ ] Update bead `bd-2dui` notes with coverage + review findings
+- [ ] Post Agent Mail summary in thread `bd-2dui` (after tests/quality gates)
+- [ ] Coverage audit: run `cargo llvm-cov --workspace --summary-only`
+- [ ] Coverage audit: per-crate `cargo llvm-cov -p ftui-render/ftui-core/ftui-text/...`
+- [ ] Coverage audit: document high-risk gaps + no-mock fixture plan
+- [x] Coverage attempt: `cargo llvm-cov --workspace --summary-only --exclude ftui-demo-showcase --ignore-run-fail` (failed: `run_drag_sequence` test signature; fixed)
+- [x] Perf baseline: VFX harness (doom, 120 frames) mean ≈ 2.001s
+- [x] Perf profile: `perf record` (symbols resolved via debug+no-strip) → hotspots in `VisualEffectsScreen::view` + `Painter`
+- [x] Perf verify: new baseline after `Painter` cache change ≈ 1.995s
+- [ ] Perf re-profile after change (confirm hotspot shift)
+- [ ] Perf isomorphism proof for `Painter` cache change + checksum verify
+- [x] Run `cargo check --all-targets`
+- [ ] Run quality gates: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
+- [ ] Run targeted tests: `cargo test -p ftui-render --test presenter_control_chars`
+- [ ] Run targeted tests: `cargo test -p ftui-runtime --test batch_quit`
+- [ ] Run targeted tests: `cargo test -p ftui-widgets input` (new paste test)
+- [ ] Re-run UBS diff after any code changes
+
 ## Current Session (RedGate) — bd-1e3w Menu Semantics + Doom/Quake Visibility (2026-02-04)
 - [x] Re-read `AGENTS.md` + `README.md`
 - [x] Agent Mail `macro_start_session` + list agents + inbox check
@@ -18,18 +134,33 @@
 
 ## Current Session (DarkCreek) — bd-2dui Coverage Audit + Deep Review + Perf Loop (2026-02-04)
 - [x] Re-read `AGENTS.md` + `README.md` (fresh constraints + architecture)
-- [x] Run `bv --robot-triage` to confirm top-impact bead
+- [x] Run `bv --robot-triage` to confirm top-impact bead (2026-02-04 19:14)
+- [x] Check top pick `bd-2txo` (blocked by `bd-2dui`)
 - [x] `br show bd-2dui` to confirm scope + dependencies
 - [x] Mark bead in progress: `br update bd-2dui --status in_progress`
 - [x] Agent Mail `macro_start_session` + list agents
 - [x] Send Agent Mail start note in thread `bd-2dui`
-- [ ] Coverage audit: run `cargo llvm-cov --workspace --summary-only` (record totals)
+- [ ] Coverage audit: rerun `cargo llvm-cov --workspace --summary-only` (previous run hung in ftui-demo-showcase; process killed)
 - [ ] Coverage audit: per-crate `cargo llvm-cov -p ftui-render/ftui-core/ftui-text/...` (record gaps)
 - [ ] Coverage audit: identify high-risk uncovered paths (diff/presenter, terminal writer, text width/wrap, layout, widget search/scoring)
 - [ ] Coverage audit: map "no-mock" test gaps + propose fixtures
-- [ ] Deep review: staged diffs (render/text/runtime/widgets/extras/demo) for correctness + perf regressions
-- [ ] Deep review: unstaged diffs + untracked files (demo tests, theme studio, mermaid)
-- [ ] Fix any review findings (root cause + minimal change)
+- [x] Deep review: current diffs (render/text/runtime/widgets/demo) for correctness + perf regressions
+- [x] Deep review: docs accuracy (`FIXES_SUMMARY.md`, `REVIEW_REPORT_FINAL.md`)
+- [x] Deep review: untracked files (new tests)
+- [x] Fix harness duplication + sync CLI harness with checksum + stderr handling
+- [x] Fix perf HUD tick p95/p99 variable names
+- [x] Resolve clippy issues in VFX harness (collapsible ifs)
+- [x] Re-run quality gates: `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`
+- [x] Run targeted tests: `cargo test -p ftui-runtime batch_stops_after_quit`, `cargo test -p ftui-render presenter_sanitizes_control_characters`, `cargo test -p ftui-layout ratio_canonicalization`
+- [x] Re-run UBS on diff (`UBS_MAX_DIR_SIZE_MB=0 ubs --diff`)
+- [ ] Fix any remaining review findings (root cause + minimal change)
+- [x] Run UBS on diff (`UBS_MAX_DIR_SIZE_MB=0 ubs --diff`)
+- [x] Fix duplicate import in `crates/ftui-widgets/src/toast.rs`
+- [x] Fix ratio hashing divide-by-zero guard in `crates/ftui-layout/src/cache.rs`
+- [x] Replace `DefaultHasher` with deterministic FNV in VFX harness checksum
+- [x] Enable deterministic mode in VFX harness
+- [x] Use `forced_size` in VFX harness when fixed cols/rows are set
+- [ ] Stage new regression tests (layout cache ratio, presenter control chars, batch quit)
 - [ ] Extreme optimization loop: baseline + profile + single-lever change + re-profile + isomorphism proof
 - [ ] Re-run quality gates if code changed: `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`
 - [ ] Update bead `bd-2dui` with audit findings + next steps

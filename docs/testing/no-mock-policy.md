@@ -36,9 +36,7 @@ When testing a wrapper/decorator, a minimal trait implementation of the wrapped 
 
 Subscription implementations that send predetermined messages are **allowed** for testing the subscription infrastructure itself (lifecycle management, message delivery, stop signals).
 
-**Example:** `MockSubscription` in `ftui-runtime/src/subscription.rs:277` sends queued messages immediately. It tests the subscription runtime's ability to start, receive, and stop subscriptions.
-
-**Rename recommendation:** Rename `MockSubscription` to `TestSubscription` or `ImmediateSubscription` to clarify it's a test utility, not a behavior-hiding mock.
+**Example:** `ChannelSubscription` in `ftui-runtime/src/subscription.rs` (tests) forwards messages from a real `mpsc::Receiver` while honoring `StopSignal`. It exercises the actual subscription lifecycle and event flow.
 
 ### 5. Headless Rendering
 
@@ -68,7 +66,7 @@ Do NOT create trait objects or generics solely to swap real types for test doubl
 
 | Location | Name | Type | Status |
 |----------|------|------|--------|
-| `ftui-runtime/src/subscription.rs:277` | `MockSubscription` | Test subscription helper | **Allowed** (rename to `TestSubscription`) |
+| `ftui-runtime/src/subscription.rs` (tests) | `ChannelSubscription` | Event stream fixture | **Allowed** |
 | `ftui-core/src/inline_mode.rs:373` | `MockWriter` | Output capture | **Allowed** (rename to `CaptureWriter`) |
 | `ftui-widgets/src/debug_overlay.rs:444` | `StubWidget` | Minimal trait impl | **Allowed** (acceptable as-is) |
 | `ftui-widgets/src/panel.rs:403` | `panel_stub()` | Data builder | **Allowed** (rename to `test_panel()`) |
@@ -101,15 +99,14 @@ Do NOT create trait objects or generics solely to swap real types for test doubl
 
 - **Total mock/fake/stub occurrences found:** 5 distinct patterns
 - **Violations of no-mock policy:** 0
-- **Recommended renames:** 3 (cosmetic, for vocabulary clarity)
+- **Recommended renames:** 2 (cosmetic, for vocabulary clarity)
 - **Items to remove or replace:** 0
 
 ## Action Items
 
-1. **Rename `MockSubscription`** to `TestSubscription` in `ftui-runtime/src/subscription.rs` and update the re-export in `ftui-runtime/src/lib.rs`.
-2. **Rename `MockWriter`** to `CaptureWriter` in `ftui-core/src/inline_mode.rs` (test-only, no API impact).
-3. **Rename `panel_stub()`** to `test_panel()` in `ftui-widgets/src/panel.rs` (test-only, no API impact).
-4. **No mock removals needed.** All current test doubles are legitimate patterns under this policy.
+1. **Rename `MockWriter`** to `CaptureWriter` in `ftui-core/src/inline_mode.rs` (test-only, no API impact).
+2. **Rename `panel_stub()`** to `test_panel()` in `ftui-widgets/src/panel.rs` (test-only, no API impact).
+3. **No mock removals needed.** All current test doubles are legitimate patterns under this policy.
 
 ## When to Use PTY vs Headless
 

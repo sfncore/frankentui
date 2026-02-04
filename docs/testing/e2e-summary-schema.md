@@ -51,3 +51,56 @@ Each case has a bundle directory under `cases_dir` containing:
 - `capture.head.hex` (failed cases, first N bytes)
 - `capture.tail.txt` (failed cases, last N lines)
 - `failure_summary.txt` (failed cases)
+
+## E2E Event JSONL (Target Schema)
+
+The suite and related scripts should converge on a per-event JSONL log for
+deterministic E2E analysis. This is a schema contract; not every script emits
+every event yet.
+
+Default location: `<E2E_LOG_DIR>/e2e.jsonl` (scripts may override).
+One JSON object per line.
+
+### Common Fields (all events)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Event type (see below) |
+| `timestamp` | string | ISO-8601 timestamp |
+| `run_id` | string | Stable run id for correlation |
+| `suite` | string | Suite name (script or test group) |
+| `case` | string | Case name (test id or step id) |
+| `mode` | string | `alt` or `inline` when applicable |
+| `cols` | number | Terminal columns |
+| `rows` | number | Terminal rows |
+| `seed` | number | Determinism seed (if used) |
+| `caps_profile` | string | Terminal caps profile label |
+| `git_commit` | string | Git commit hash (if available) |
+| `git_dirty` | boolean | Working tree dirty flag (if available) |
+| `term` | string | `TERM` value |
+| `colorterm` | string | `COLORTERM` value |
+| `no_color` | string | `NO_COLOR` value |
+| `host` | string | Hostname |
+| `pid` | number | Process id (if applicable) |
+
+### Event Types
+
+| Type | Purpose | Key Fields |
+|------|---------|-----------|
+| `env` | Environment snapshot | `platform`, `arch`, `rust_version`, `cargo_version` |
+| `run_start` | Suite start | `command`, `log_dir`, `results_dir` |
+| `run_end` | Suite end | `status`, `duration_ms`, `failed_count` |
+| `step_start` | Step begin | `step`, `description` |
+| `step_end` | Step end | `step`, `status`, `duration_ms` |
+| `input` | Input injection | `input_type`, `encoding`, `bytes_b64`, `input_hash` |
+| `frame` | Render frame | `frame_idx`, `frame_hash`, `hash_algo`, `render_ms`, `present_ms` |
+| `pty_capture` | PTY metadata | `output_file`, `output_sha256`, `output_bytes` |
+| `assert` | Assertion result | `assertion`, `status`, `details` |
+| `artifact` | Artifact reference | `path`, `artifact_type`, `sha256` |
+| `error` | Error detail | `message`, `exit_code`, `stack` |
+
+### Hashing Requirements
+
+`frame_hash` and `input_hash` should be stable across runs with the same seed
+and terminal size. Use `sha256` unless a different algorithm is explicitly
+recorded in `hash_algo`.

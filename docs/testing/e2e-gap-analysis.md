@@ -2,39 +2,157 @@
 
 Bead: bd-2nu8.3
 
-## Current Inventory
+## Current Inventory (2026-02-04)
 
-### Test Scripts (6 suites, 31 test cases)
+### Harness PTY E2E Suites (tests/e2e/scripts, 46 suites + run_all)
 
-| Suite | File | Tests | Terminal Features |
-|-------|------|-------|-------------------|
-| inline | `test_inline.sh` | 7 | Inline rendering, log scroll, custom height, resize, cursor contract |
-| cleanup | `test_cleanup.sh` | 7 | Cursor restore, SIGTERM, mouse/paste/focus disable, alt-screen exit |
-| altscreen | `test_altscreen.sh` | 3 | DECSET 1049 enter/exit, content rendering, cursor restore |
-| input | `test_input.sh` | 5 | Typing, Enter, Ctrl+C, quit command, multi-keystrokes |
-| ansi | `test_ansi.sh` | 4 | SGR colors, SGR reset, CUP positioning, DEC 2026 sync output |
-| unicode | `test_unicode.sh` | 5 | ASCII, accented, CJK wide, emoji, mixed content |
+Default mode for `ftui-harness` is inline unless `FTUI_HARNESS_SCREEN_MODE=alt` is set.
+Default size is 80x24 unless `PTY_COLS/PTY_ROWS` override.
+
+Matrix cells used below:
+| Cell | Mode | Size |
+|------|------|------|
+| A1 | alt | 80x24 |
+| A2 | alt | 120x40 |
+| A3 | alt | 200x50 |
+| I1 | inline | 80x24 |
+| I2 | inline | 120x40 |
+| I3 | inline | 200x50 |
+
+Legend: `I2*` = 120x24 width-only, `I3*` = 200x60 near-size, `+small` = additional non-matrix sizes.
+
+| Script | Focus | Mode | Sizes | Cells |
+|--------|-------|------|-------|-------|
+| `test_a11y_modes.sh` | A11y mode toggles | inline (default) | 80x24, 120x40 | I1, I2 |
+| `test_action_timeline.sh` | Action timeline UI | inline (default) | 120x40 | I2 |
+| `test_altscreen.sh` | Alt-screen enter/exit | alt | 80x24 (default) | A1 |
+| `test_ansi.sh` | ANSI/SGR/CUP/sync | inline (default) | 80x24 (default) | I1 |
+| `test_async_tasks.sh` | Async tasks UI | inline (default) | 120x40 | I2 |
+| `test_cleanup.sh` | Cleanup sequences | alt | 80x24 (default) | A1 |
+| `test_command_palette.sh` | Command palette UI | inline (default) | 120x40 | I2 |
+| `test_drag_drop.sh` | Drag/drop | inline (default) | 80x24 (default) | I1 |
+| `test_embedded_terminal.sh` | Embedded terminal | inline (default) | 80x24, 80x10, 40x10 | I1 +small |
+| `test_flake_detector.sh` | Flake detector | inline (default) | 80x24 (default) | I1 |
+| `test_focus_events.sh` | Focus events | inline (default) | 80x24 (default) | I1 |
+| `test_form_validation.sh` | Form validation | inline (default) | 80x24 (default) | I1 |
+| `test_golden_resize.sh` | Golden resize snapshots | inline (default) | 80x24 (default) | I1 |
+| `test_inline.sh` | Inline mode core | inline (default) | 80x24 (default), 60x15 | I1 +small |
+| `test_input.sh` | Input events | inline (default) | 80x24 (default) | I1 |
+| `test_intrinsic_sizing.sh` | Intrinsic sizing | inline (default) | 80x24 (default) | I1 |
+| `test_keybinding.sh` | Keybinding handling | inline (default) | 80x24 (default) | I1 |
+| `test_kitty_keyboard.sh` | Kitty keyboard | inline (default) | 80x24 (default) | I1 |
+| `test_layout_composer_resize.sh` | Layout composer resize | inline (default) | 80x24, 120x40 | I1, I2 |
+| `test_locale_context.sh` | Locale context | inline (default) | 80x24 (default) | I1 |
+| `test_log_search.sh` | Log search | inline (default) | 120x40 | I2 |
+| `test_macro_scenarios.sh` | Macro scenarios | inline (default) | 80x24 (default) | I1 |
+| `test_migration_smoke.sh` | Migration smoke | inline | 80x24, 40x10, 200x60 | I1, I3* +small |
+| `test_modal_dialog.sh` | Modal dialog | inline (default) | 80x24 (default) | I1 |
+| `test_mouse_sgr.sh` | Mouse SGR input | inline (default) | 80x24 (default) | I1 |
+| `test_mux.sh` | Mux env (tmux/zellij) | inline | 80x24 | I1 |
+| `test_mux_compatibility.sh` | Mux compat (alt+inline) | alt + inline | 80x24 | A1, I1 |
+| `test_osc8.sh` | OSC 8 sequences | inline (default) | 80x24, 90x24 | I1 |
+| `test_osc8_hyperlinks.sh` | Hyperlink rendering | inline (default) | 80x24 (default) | I1 |
+| `test_paste.sh` | Bracketed paste | inline (default) | 80x24 (default) | I1 |
+| `test_reflow_telemetry.sh` | Reflow telemetry | inline (default) | 80x24 (default) | I1 |
+| `test_resize.sh` | Resize matrix | inline | 60x15, 80x24, 80x40, 120x24, 40x10, 200x60 | I1, I2*, I3* +small |
+| `test_resize_scroll_region.sh` | Scroll region | inline | 80x24 | I1 |
+| `test_resize_storm.sh` | Resize storm | inline (default) | 80x24 (default) | I1 |
+| `test_schedule_trace.sh` | Schedule trace | inline (default) | 80x24 (default) | I1 |
+| `test_snapshot_player.sh` | Snapshot player | inline (default) | 80x24, 120x40 | I1, I2 |
+| `test_sync_output.sh` | Sync output (DEC 2026) | alt | 80x24 | A1 |
+| `test_telemetry.sh` | Telemetry (inline) | inline | 120x40 | I2 |
+| `test_terminal_capabilities.sh` | Terminal capabilities | inline (default) | 80x24, 120x40 | I1, I2 |
+| `test_terminal_quirks.sh` | Terminal quirks | inline (default) | 80x24 (default) | I1 |
+| `test_text_editor.sh` | Text editor | inline (default) | 80x24 (default) | I1 |
+| `test_theme_studio.sh` | Theme studio | inline (default) | 120x40 | I2 |
+| `test_toast_system.sh` | Toast system | inline (default) | 80x24 (default) | I1 |
+| `test_ui_inspector.sh` | UI inspector | inline (default) | 80x24 (default) | I1 |
+| `test_unicode.sh` | Unicode rendering | inline (default) | 80x24 (default) | I1 |
+| `test_virtualized_search.sh` | Virtualized search | inline | 120x40 | I2 |
+
+### Demo/Script E2E Suites (scripts/* and scripts/e2e/*)
+
+Legend: Cells refer to the matrix above. Non-PTY scripts are marked `N/A`.
+
+| Script | Focus | Mode | Sizes | Cells |
+|--------|-------|------|-------|-------|
+| `scripts/a11y_transitions_e2e.sh` | A11y transitions + JSONL | non-PTY | N/A | N/A |
+| `scripts/command_palette_e2e.sh` | Command palette E2E | non-PTY | N/A | N/A |
+| `scripts/cross_platform_e2e.sh` | Cross-platform smoke | non-PTY | N/A | N/A |
+| `scripts/demo_showcase_e2e.sh` | Demo showcase full run | alt (default) + inline step | 80x24, 120x40, 40x10, 132x43, 200x24 | A1, A2, I1 +small |
+| `scripts/demo_text_effects_e2e.sh` | Text effects E2E | non-PTY | N/A | N/A |
+| `scripts/e2e_demo_tour.sh` | Guided tour JSONL | alt | 80x24 (default) | A1 |
+| `scripts/e2e_test.sh` | PTY suite wrapper | wrapper | N/A | N/A |
+| `scripts/hover_stabilizer_e2e.sh` | Hover stabilizer | non-PTY | N/A | N/A |
+| `scripts/perf_hud_demo.sh` | Performance HUD demo | interactive | 120x40 (optional) | I2 (manual) |
+| `scripts/widget_api_e2e.sh` | Widget API E2E | non-PTY | N/A | N/A |
+| `scripts/e2e/run_all.sh` | Scripted E2E aggregator | wrapper | N/A | N/A |
+| `scripts/e2e/capability_sim/run_capability_sim_e2e.sh` | Capability simulator | non-PTY | N/A | N/A |
+| `scripts/e2e/focus_management/run_focus_e2e.sh` | Focus management suite | non-PTY | N/A | N/A |
+| `scripts/e2e/focus_management/test_focus_nav.sh` | Focus nav | non-PTY | N/A | N/A |
+| `scripts/e2e/focus_management/test_focus_trap.sh` | Focus trap | non-PTY | N/A | N/A |
+| `scripts/e2e/focus_management/test_focus_persist.sh` | Focus persistence | non-PTY | N/A | N/A |
+| `scripts/e2e/focus_management/test_focus_a11y.sh` | Focus a11y | non-PTY | N/A | N/A |
+| `scripts/e2e/modal_dialog/run_modal_dialog_e2e.sh` | Modal dialog suite | non-PTY | N/A | N/A |
+| `scripts/e2e/state_persistence/test_state_persistence.sh` | State persistence | non-PTY | N/A | N/A |
+| `scripts/e2e/i18n/run_i18n_e2e.sh` | i18n suite | non-PTY | N/A | N/A |
 
 ### Supporting Infrastructure
 
 | Component | Path | Purpose |
 |-----------|------|---------|
 | Orchestrator | `tests/e2e/scripts/run_all.sh` | Builds harness, runs suites, aggregates results |
-| PTY capture | `tests/e2e/lib/pty.sh` | Python-based PTY spawn with output capture |
+| PTY capture | `tests/e2e/lib/pty.sh` | Python-based PTY spawn with output capture + JSONL metadata |
 | Logging | `tests/e2e/lib/logging.sh` | Result JSON recording, summary, JUnit XML |
 | Common | `tests/e2e/lib/common.sh` | Python resolver, command validation |
-| Fixture | `tests/e2e/fixtures/unicode_lines.txt` | 11-line Unicode test corpus |
+| Test lib | `scripts/e2e/lib/test_lib.sh` | Scripted E2E helper library |
+| Fixture | `tests/e2e/fixtures/unicode_lines.txt` | Unicode test corpus |
 | Widget API | `scripts/widget_api_e2e.sh` | Build, test, clippy, features, signatures, docs, snapshots |
 
-### Snapshot Tests (18 snapshots in ftui-harness)
+### Snapshot Tests (ftui-harness)
 
-Block (2), Paragraph (4), List (2), Scrollbar (3), Panel (4), Columns (2), Raw buffer (1).
+Block, Paragraph, List, Scrollbar, Panel, Columns, Raw buffer snapshots (see `crates/ftui-harness` tests).
 
 ### Harness Views Available
 
 Default, LayoutFlexRow, LayoutFlexCol, LayoutGrid, LayoutNested, WidgetBlock, WidgetParagraph, WidgetTable, WidgetList, WidgetInput.
 
 ---
+
+## Deterministic Coverage Matrix (v1)
+
+Target matrix for deterministic E2E coverage:
+| Cell | Mode | Size | Goal |
+|------|------|------|------|
+| A1 | alt | 80x24 | Baseline alt-screen correctness |
+| A2 | alt | 120x40 | Medium alt-screen regression guard |
+| A3 | alt | 200x50 | Large alt-screen regression guard |
+| I1 | inline | 80x24 | Baseline inline scrollback correctness |
+| I2 | inline | 120x40 | Medium inline regression guard |
+| I3 | inline | 200x50 | Large inline regression guard |
+
+### Matrix Coverage Summary (by cell)
+
+| Cell | Current Coverage | Gaps |
+|------|------------------|------|
+| A1 | `test_altscreen.sh`, `test_cleanup.sh`, `test_sync_output.sh`, `test_mux_compatibility.sh` (alt), `scripts/demo_showcase_e2e.sh` (default alt), `scripts/e2e_demo_tour.sh` | Missing doom/quake, perf HUD, text effects, terminal caps at A1 |
+| A2 | `scripts/demo_showcase_e2e.sh` (VFX 120x40) | No cleanup/input/resize/unicode at 120x40 alt |
+| A3 | None | Entire cell missing (need 200x50 alt runs) |
+| I1 | Broad harness coverage (`test_inline.sh`, `test_ansi.sh`, `test_input.sh`, `test_unicode.sh`, `test_mouse_sgr.sh`, `test_paste.sh`, `test_focus_events.sh`, `test_resize.sh`, `test_terminal_capabilities.sh`) | Missing guided tour, doom/quake, perf HUD, text effects in inline |
+| I2 | `test_action_timeline.sh`, `test_command_palette.sh`, `test_terminal_capabilities.sh`, `test_theme_studio.sh`, `test_snapshot_player.sh`, `test_virtualized_search.sh`, `test_telemetry.sh` | No inline story, doom/quake, perf HUD, guided tour at 120x40 |
+| I3 | `test_resize.sh` (200x60), `test_migration_smoke.sh` (200x60) | Missing true 200x50 coverage and most scenarios |
+
+### Missing Flows (bd-2txo scope)
+
+| Flow | Current Coverage | Missing Matrix Cells |
+|------|------------------|----------------------|
+| Guided tour | `scripts/e2e_demo_tour.sh` (alt default) | A2, A3, I1, I2, I3 |
+| Doom/Quake | None in PTY E2E | A1, A2, A3, I1, I2, I3 |
+| Dashboard | `scripts/demo_showcase_e2e.sh` cycles screens (alt default) | A2, A3, I2, I3 |
+| Performance HUD | `scripts/perf_hud_demo.sh` (manual) | A1, A2, A3, I1, I2, I3 |
+| Terminal capabilities | `test_terminal_capabilities.sh` (I1, I2) | A1, A2, A3, I3 |
+| Text effects | `scripts/demo_text_effects_e2e.sh` (non-PTY) | A1, A2, A3, I1, I2, I3 |
+| Inline mode story | `test_inline.sh` (I1) | I2, I3 |
 
 ## Gap Analysis
 
