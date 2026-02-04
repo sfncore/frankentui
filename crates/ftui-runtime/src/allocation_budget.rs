@@ -323,6 +323,8 @@ impl AllocationBudget {
         if alert {
             self.total_alerts += 1;
             let estimated_shift = self.running_mean() - self.config.mu_0;
+            let e_value_at_alert = self.e_value;
+            let cusum_plus_at_alert = self.cusum_plus.s;
 
             // Reset after alert.
             self.e_value = 1.0;
@@ -332,8 +334,8 @@ impl AllocationBudget {
             Some(BudgetAlert {
                 frame: self.frame,
                 estimated_shift,
-                e_value: self.e_value,
-                cusum_plus: self.cusum_plus.s,
+                e_value: e_value_at_alert,
+                cusum_plus: cusum_plus_at_alert,
                 e_process_triggered,
                 cusum_triggered,
             })

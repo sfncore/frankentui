@@ -537,7 +537,10 @@ impl ResizeCoalescer {
     /// Create a new coalescer with the given configuration and initial size.
     pub fn new(config: CoalescerConfig, initial_size: (u16, u16)) -> Self {
         let bocpd = if config.enable_bocpd {
-            let bocpd_cfg = config.bocpd_config.clone().unwrap_or_default();
+            let mut bocpd_cfg = config.bocpd_config.clone().unwrap_or_default();
+            if config.enable_logging {
+                bocpd_cfg.enable_logging = true;
+            }
             Some(BocpdDetector::new(bocpd_cfg))
         } else {
             None
@@ -1145,6 +1148,15 @@ impl ResizeCoalescer {
             if let Some(entry) = self.logs.last() {
                 let _ = sink.write_jsonl(&entry.to_jsonl());
             }
+            if let Some(ref bocpd) = self.bocpd
+                && let Some(jsonl) = bocpd.decision_log_jsonl(
+                    self.config.steady_delay_ms,
+                    self.config.burst_delay_ms,
+                    forced,
+                )
+            {
+                let _ = sink.write_jsonl(&jsonl);
+            }
         }
     }
 }
@@ -1405,6 +1417,181 @@ mod tests {
             enable_bocpd: false,
             bocpd_config: None,
         }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct SimulationMetrics {
+        event_count: u64,
+        apply_count: u64,
+        forced_count: u64,
+        mean_coalesce_ms: f64,
+        max_coalesce_ms: f64,
+        decision_checksum: u64,
+        final_regime: Regime,
+    }
+
+    impl SimulationMetrics {
+        fn to_jsonl(self, pattern: &str, mode: &str) -> String {
+            let apply_ratio = if self.event_count == 0 {
+                0.0
+            } else {
+                self.apply_count as f64 / self.event_count as f64
+            };
+
+            format!(
+                r#"{{"event":"simulation_summary","pattern":"{pattern}","mode":"{mode}","events":{},"applies":{},"forced":{},"apply_ratio":{:.4},"mean_coalesce_ms":{:.3},"max_coalesce_ms":{:.3},"final_regime":"{}","checksum":"{:016x}"}}"#,
+                self.event_count,
+                self.apply_count,
+                self.forced_count,
+                apply_ratio,
+                self.mean_coalesce_ms,
+                self.max_coalesce_ms,
+                self.final_regime.as_str(),
+                self.decision_checksum
+            )
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct SimulationComparison {
+        apply_delta: i64,
+        mean_coalesce_delta_ms: f64,
+    }
+
+    impl SimulationComparison {
+        fn from_metrics(heuristic: SimulationMetrics, bocpd: SimulationMetrics) -> Self {
+            let heuristic_apply = i64::try_from(heuristic.apply_count).unwrap_or(i64::MAX);
+            let bocpd_apply = i64::try_from(bocpd.apply_count).unwrap_or(i64::MAX);
+            let apply_delta = heuristic_apply.saturating_sub(bocpd_apply);
+            let mean_coalesce_delta_ms = heuristic.mean_coalesce_ms - bocpd.mean_coalesce_ms;
+            Self {
+                apply_delta,
+                mean_coalesce_delta_ms,
+            }
+        }
+
+        fn to_jsonl(self, pattern: &str) -> String {
+            format!(
+                r#"{{"event":"simulation_compare","pattern":"{pattern}","apply_delta":{},"mean_coalesce_delta_ms":{:.3}}}"#,
+                self.apply_delta, self.mean_coalesce_delta_ms
+            )
+        }
+    }
+
+    fn as_u64(value: usize) -> u64 {
+        u64::try_from(value).unwrap_or(u64::MAX)
+    }
+
+    fn build_schedule(base: Instant, events: &[(u16, u16, u64)]) -> Vec<(Instant, u16, u16)> {
+        let mut schedule = Vec::with_capacity(events.len());
+        let mut elapsed_ms = 0u64;
+        for (w, h, delay_ms) in events {
+            elapsed_ms = elapsed_ms.saturating_add(*delay_ms);
+            schedule.push((base + Duration::from_millis(elapsed_ms), *w, *h));
+        }
+        schedule
+    }
+
+    fn run_simulation(
+        events: &[(u16, u16, u64)],
+        config: CoalescerConfig,
+        tick_ms: u64,
+    ) -> SimulationMetrics {
+        let mut c = ResizeCoalescer::new(config, (80, 24));
+        let base = Instant::now();
+        let schedule = build_schedule(base, events);
+        let last_event_ms = schedule
+            .last()
+            .map(|(time, _, _)| {
+                u64::try_from(time.duration_since(base).as_millis()).unwrap_or(u64::MAX)
+            })
+            .unwrap_or(0);
+        let end_ms = last_event_ms
+            .saturating_add(c.config.hard_deadline_ms)
+            .saturating_add(tick_ms);
+
+        let mut next_idx = 0usize;
+        let mut now_ms = 0u64;
+        while now_ms <= end_ms {
+            let now = base + Duration::from_millis(now_ms);
+
+            while next_idx < schedule.len() && schedule[next_idx].0 <= now {
+                let (event_time, w, h) = schedule[next_idx];
+                let _ = c.handle_resize_at(w, h, event_time);
+                next_idx += 1;
+            }
+
+            let _ = c.tick_at(now);
+            now_ms = now_ms.saturating_add(tick_ms);
+        }
+
+        let mut coalesce_values = Vec::new();
+        let mut apply_count = 0usize;
+        let mut forced_count = 0usize;
+        for entry in c.logs() {
+            if matches!(entry.action, "apply" | "apply_forced" | "apply_immediate") {
+                apply_count += 1;
+                if entry.forced {
+                    forced_count += 1;
+                }
+                if let Some(ms) = entry.coalesce_ms {
+                    coalesce_values.push(ms);
+                }
+            }
+        }
+
+        let max_coalesce_ms = coalesce_values
+            .iter()
+            .copied()
+            .fold(0.0_f64, |acc, value| acc.max(value));
+        let mean_coalesce_ms = if coalesce_values.is_empty() {
+            0.0
+        } else {
+            let sum = coalesce_values.iter().sum::<f64>();
+            sum / as_u64(coalesce_values.len()) as f64
+        };
+
+        SimulationMetrics {
+            event_count: as_u64(events.len()),
+            apply_count: as_u64(apply_count),
+            forced_count: as_u64(forced_count),
+            mean_coalesce_ms,
+            max_coalesce_ms,
+            decision_checksum: c.decision_checksum(),
+            final_regime: c.regime(),
+        }
+    }
+
+    fn steady_pattern() -> Vec<(u16, u16, u64)> {
+        let mut events = Vec::new();
+        for i in 0..8u16 {
+            let width = 90 + i;
+            let height = 30 + (i % 3);
+            events.push((width, height, 300));
+        }
+        events
+    }
+
+    fn burst_pattern() -> Vec<(u16, u16, u64)> {
+        let mut events = Vec::new();
+        for i in 0..30u16 {
+            let width = 100 + i;
+            let height = 25 + (i % 5);
+            events.push((width, height, 10));
+        }
+        events
+    }
+
+    fn oscillatory_pattern() -> Vec<(u16, u16, u64)> {
+        let mut events = Vec::new();
+        let sizes = [(120, 40), (140, 28), (130, 36), (150, 32)];
+        let delays = [40u64, 200u64, 60u64, 180u64];
+        for i in 0..16usize {
+            let (w, h) = sizes[i % sizes.len()];
+            let delay = delays[i % delays.len()];
+            events.push((w + (i as u16 % 3), h, delay));
+        }
+        events
     }
 
     #[test]
@@ -1699,6 +1886,17 @@ mod tests {
     }
 
     #[test]
+    fn bocpd_logging_inherits_coalescer_logging() {
+        let mut config = test_config();
+        config.enable_bocpd = true;
+        config.bocpd_config = Some(BocpdConfig::default());
+
+        let c = ResizeCoalescer::new(config, (80, 24));
+        let bocpd = c.bocpd().expect("BOCPD should be enabled");
+        assert!(bocpd.config().enable_logging);
+    }
+
+    #[test]
     fn stats_reflect_state() {
         let mut c = ResizeCoalescer::new(test_config(), (80, 24));
 
@@ -1744,6 +1942,72 @@ mod tests {
             .collect();
 
         assert_eq!(results[0], results[1], "Results must be deterministic");
+    }
+
+    #[test]
+    fn simulation_bocpd_vs_heuristic_metrics() {
+        let tick_ms = 5;
+        // Keep heuristic thresholds high so burst classification is conservative,
+        // while BOCPD uses a responsive posterior to detect bursty streams.
+        let mut heuristic_config = test_config();
+        heuristic_config.burst_enter_rate = 60.0;
+        heuristic_config.burst_exit_rate = 30.0;
+        let mut bocpd_cfg = BocpdConfig::responsive();
+        bocpd_cfg.burst_prior = 0.35;
+        bocpd_cfg.steady_threshold = 0.2;
+        bocpd_cfg.burst_threshold = 0.6;
+        let bocpd_config = heuristic_config.clone().with_bocpd_config(bocpd_cfg);
+        let patterns = vec![
+            ("steady", steady_pattern()),
+            ("burst", burst_pattern()),
+            ("oscillatory", oscillatory_pattern()),
+        ];
+
+        for (pattern, events) in patterns {
+            let heuristic = run_simulation(&events, heuristic_config.clone(), tick_ms);
+            let bocpd = run_simulation(&events, bocpd_config.clone(), tick_ms);
+
+            let heuristic_jsonl = heuristic.to_jsonl(pattern, "heuristic");
+            let bocpd_jsonl = bocpd.to_jsonl(pattern, "bocpd");
+            let comparison = SimulationComparison::from_metrics(heuristic, bocpd);
+            let comparison_jsonl = comparison.to_jsonl(pattern);
+
+            eprintln!("{heuristic_jsonl}");
+            eprintln!("{bocpd_jsonl}");
+            eprintln!("{comparison_jsonl}");
+
+            assert!(heuristic_jsonl.contains("\"event\":\"simulation_summary\""));
+            assert!(bocpd_jsonl.contains("\"event\":\"simulation_summary\""));
+            assert!(comparison_jsonl.contains("\"event\":\"simulation_compare\""));
+
+            #[allow(clippy::cast_precision_loss)]
+            let max_allowed = test_config().hard_deadline_ms as f64 + 1.0;
+            assert!(
+                heuristic.max_coalesce_ms <= max_allowed,
+                "heuristic latency bounded for {pattern}"
+            );
+            assert!(
+                bocpd.max_coalesce_ms <= max_allowed,
+                "bocpd latency bounded for {pattern}"
+            );
+
+            if pattern == "burst" {
+                let event_count = as_u64(events.len());
+                assert!(
+                    heuristic.apply_count < event_count,
+                    "heuristic should coalesce under burst pattern"
+                );
+                assert!(
+                    bocpd.apply_count < event_count,
+                    "bocpd should coalesce under burst pattern"
+                );
+                assert!(
+                    comparison.apply_delta > 0,
+                    "BOCPD should reduce renders in burst (apply_delta={})",
+                    comparison.apply_delta
+                );
+            }
+        }
     }
 
     #[test]

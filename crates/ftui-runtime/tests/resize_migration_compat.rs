@@ -547,3 +547,197 @@ fn program_config_custom_coalescer() {
     assert_eq!(config.resize_coalescer.steady_delay_ms, 8);
     assert_eq!(config.resize_coalescer.hard_deadline_ms, 50);
 }
+
+// =============================================================================
+// Simulation: BOCPD vs Heuristic Coalescer (bd-3e1t.2.6)
+// =============================================================================
+
+#[derive(Debug, Clone)]
+struct SimMetrics {
+    applies: usize,
+    forced: usize,
+    decisions: usize,
+    mean_coalesce_ms: f64,
+    p95_coalesce_ms: f64,
+    max_coalesce_ms: f64,
+}
+
+fn build_events_steady() -> Vec<(u64, (u16, u16))> {
+    (0..20)
+        .map(|i| {
+            let t = i * 200;
+            let w = 80 + (i % 6) as u16;
+            let h = 24 + (i % 3) as u16;
+            (t, (w, h))
+        })
+        .collect()
+}
+
+fn build_events_burst() -> Vec<(u64, (u16, u16))> {
+    (0..80)
+        .map(|i| {
+            let t = i * 5;
+            let w = 80 + (i % 18) as u16;
+            let h = 24 + (i % 7) as u16;
+            (t, (w, h))
+        })
+        .collect()
+}
+
+fn build_events_oscillatory() -> Vec<(u64, (u16, u16))> {
+    let mut events = Vec::new();
+    for cycle in 0..5 {
+        let base = cycle * 320;
+        for i in 0..10 {
+            let t = base + i * 12;
+            let w = 84 + ((cycle + i) % 9) as u16;
+            let h = 26 + ((cycle + i * 2) % 5) as u16;
+            events.push((t, (w, h)));
+        }
+    }
+    events
+}
+
+fn compute_metrics(coalescer: &ResizeCoalescer) -> SimMetrics {
+    let mut coalesce_samples = Vec::new();
+    let mut applies = 0;
+    let mut forced = 0;
+
+    for entry in coalescer.logs() {
+        if matches!(entry.action, "apply" | "apply_forced" | "apply_immediate") {
+            applies += 1;
+            if entry.forced {
+                forced += 1;
+            }
+            if let Some(ms) = entry.coalesce_ms {
+                coalesce_samples.push(ms);
+            }
+        }
+    }
+
+    let mean = if coalesce_samples.is_empty() {
+        0.0
+    } else {
+        coalesce_samples.iter().sum::<f64>() / coalesce_samples.len() as f64
+    };
+
+    let max = coalesce_samples
+        .iter()
+        .copied()
+        .fold(0.0_f64, |a, b| a.max(b));
+
+    let p95 = if coalesce_samples.is_empty() {
+        0.0
+    } else {
+        coalesce_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let idx = ((coalesce_samples.len() as f64) * 0.95).ceil() as usize;
+        let idx = idx.saturating_sub(1).min(coalesce_samples.len() - 1);
+        coalesce_samples[idx]
+    };
+
+    SimMetrics {
+        applies,
+        forced,
+        decisions: coalescer.logs().len(),
+        mean_coalesce_ms: mean,
+        p95_coalesce_ms: p95,
+        max_coalesce_ms: max,
+    }
+}
+
+fn run_simulation(
+    config: CoalescerConfig,
+    events: &[(u64, (u16, u16))],
+    tick_ms: u64,
+    end_ms: u64,
+) -> SimMetrics {
+    let base = Instant::now();
+    let mut coalescer = ResizeCoalescer::new(config, (80, 24)).with_last_render(base);
+
+    let mut timeline: Vec<u64> = (0..=end_ms).step_by(tick_ms as usize).collect();
+    for (t, _) in events {
+        timeline.push(*t);
+    }
+    timeline.sort_unstable();
+    timeline.dedup();
+
+    let mut idx = 0usize;
+    for t_ms in timeline {
+        let now = base + Duration::from_millis(t_ms);
+        while idx < events.len() && events[idx].0 == t_ms {
+            let (w, h) = events[idx].1;
+            coalescer.handle_resize_at(w, h, now);
+            idx += 1;
+        }
+        coalescer.tick_at(now);
+    }
+
+    compute_metrics(&coalescer)
+}
+
+#[test]
+fn simulation_compare_bocpd_vs_heuristic() {
+    let base = CoalescerConfig::default().with_logging(true);
+    let cfg_heuristic = base.clone();
+    let cfg_bocpd = base.clone().with_bocpd();
+
+    let scenarios = [
+        ("steady", build_events_steady()),
+        ("burst", build_events_burst()),
+        ("oscillatory", build_events_oscillatory()),
+    ];
+
+    for (name, events) in scenarios {
+        let last_event = events.last().map(|(t, _)| *t).unwrap_or(0);
+        let end_ms = last_event + base.hard_deadline_ms + 200;
+
+        let metrics_heuristic = run_simulation(cfg_heuristic.clone(), &events, 8, end_ms);
+        let metrics_bocpd = run_simulation(cfg_bocpd.clone(), &events, 8, end_ms);
+
+        eprintln!(
+            "{{\"test\":\"resize_coalescer_sim\",\"scenario\":\"{}\",\"mode\":\"heuristic\",\"applies\":{},\"forced\":{},\"decisions\":{},\"mean_ms\":{:.2},\"p95_ms\":{:.2},\"max_ms\":{:.2}}}",
+            name,
+            metrics_heuristic.applies,
+            metrics_heuristic.forced,
+            metrics_heuristic.decisions,
+            metrics_heuristic.mean_coalesce_ms,
+            metrics_heuristic.p95_coalesce_ms,
+            metrics_heuristic.max_coalesce_ms
+        );
+        eprintln!(
+            "{{\"test\":\"resize_coalescer_sim\",\"scenario\":\"{}\",\"mode\":\"bocpd\",\"applies\":{},\"forced\":{},\"decisions\":{},\"mean_ms\":{:.2},\"p95_ms\":{:.2},\"max_ms\":{:.2}}}",
+            name,
+            metrics_bocpd.applies,
+            metrics_bocpd.forced,
+            metrics_bocpd.decisions,
+            metrics_bocpd.mean_coalesce_ms,
+            metrics_bocpd.p95_coalesce_ms,
+            metrics_bocpd.max_coalesce_ms
+        );
+
+        let bound = base.hard_deadline_ms as f64 + 1.0;
+        assert!(
+            metrics_heuristic.max_coalesce_ms <= bound,
+            "heuristic max coalesce exceeded deadline: {:.2} > {:.2}",
+            metrics_heuristic.max_coalesce_ms,
+            bound
+        );
+        assert!(
+            metrics_bocpd.max_coalesce_ms <= bound,
+            "bocpd max coalesce exceeded deadline: {:.2} > {:.2}",
+            metrics_bocpd.max_coalesce_ms,
+            bound
+        );
+        assert!(metrics_heuristic.applies > 0, "heuristic had no applies");
+        assert!(metrics_bocpd.applies > 0, "bocpd had no applies");
+
+        if name == "burst" {
+            assert!(
+                metrics_bocpd.applies <= metrics_heuristic.applies,
+                "bocpd should not apply more than heuristic in burst: {} > {}",
+                metrics_bocpd.applies,
+                metrics_heuristic.applies
+            );
+        }
+    }
+}

@@ -61,11 +61,11 @@ use crate::state_persistence::StateRegistry;
 use crate::subscription::SubscriptionManager;
 use crate::terminal_writer::{RuntimeDiffConfig, ScreenMode, TerminalWriter, UiAnchor};
 use crate::voi_sampling::{VoiConfig, VoiSampler};
-use crate::{BucketKey, ConformalConfig, ConformalPredictor};
+use crate::{BucketKey, ConformalConfig, ConformalPrediction, ConformalPredictor};
 use ftui_core::event::Event;
 use ftui_core::terminal_capabilities::TerminalCapabilities;
 use ftui_core::terminal_session::{SessionOptions, TerminalSession};
-use ftui_render::budget::{FrameBudgetConfig, RenderBudget};
+use ftui_render::budget::{BudgetDecision, DegradationLevel, FrameBudgetConfig, RenderBudget};
 use ftui_render::buffer::Buffer;
 use ftui_render::diff_strategy::DiffStrategy;
 use ftui_render::frame::Frame;
@@ -621,6 +621,150 @@ impl InlineAutoRemeasureState {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ConformalEvidence {
+    bucket_key: String,
+    n_b: usize,
+    alpha: f64,
+    q_b: f64,
+    y_hat: f64,
+    upper_us: f64,
+    risk: bool,
+    fallback_level: u8,
+    window_size: usize,
+    reset_count: u64,
+}
+
+impl ConformalEvidence {
+    fn from_prediction(prediction: &ConformalPrediction) -> Self {
+        let alpha = (1.0 - prediction.confidence).clamp(0.0, 1.0);
+        Self {
+            bucket_key: prediction.bucket.to_string(),
+            n_b: prediction.sample_count,
+            alpha,
+            q_b: prediction.quantile,
+            y_hat: prediction.y_hat,
+            upper_us: prediction.upper_us,
+            risk: prediction.risk,
+            fallback_level: prediction.fallback_level,
+            window_size: prediction.window_size,
+            reset_count: prediction.reset_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BudgetDecisionEvidence {
+    frame_idx: u64,
+    decision: BudgetDecision,
+    controller_decision: BudgetDecision,
+    degradation_before: DegradationLevel,
+    degradation_after: DegradationLevel,
+    frame_time_us: f64,
+    budget_us: f64,
+    pid_output: f64,
+    pid_p: f64,
+    pid_i: f64,
+    pid_d: f64,
+    e_value: f64,
+    frames_observed: u32,
+    frames_since_change: u32,
+    in_warmup: bool,
+    conformal: Option<ConformalEvidence>,
+}
+
+impl BudgetDecisionEvidence {
+    fn decision_from_levels(before: DegradationLevel, after: DegradationLevel) -> BudgetDecision {
+        if after > before {
+            BudgetDecision::Degrade
+        } else if after < before {
+            BudgetDecision::Upgrade
+        } else {
+            BudgetDecision::Hold
+        }
+    }
+
+    #[must_use]
+    fn to_jsonl(&self) -> String {
+        let conformal = self.conformal.as_ref();
+        let bucket_key = Self::opt_str(conformal.map(|c| c.bucket_key.as_str()));
+        let n_b = Self::opt_usize(conformal.map(|c| c.n_b));
+        let alpha = Self::opt_f64(conformal.map(|c| c.alpha));
+        let q_b = Self::opt_f64(conformal.map(|c| c.q_b));
+        let y_hat = Self::opt_f64(conformal.map(|c| c.y_hat));
+        let upper_us = Self::opt_f64(conformal.map(|c| c.upper_us));
+        let risk = Self::opt_bool(conformal.map(|c| c.risk));
+        let fallback_level = Self::opt_u8(conformal.map(|c| c.fallback_level));
+        let window_size = Self::opt_usize(conformal.map(|c| c.window_size));
+        let reset_count = Self::opt_u64(conformal.map(|c| c.reset_count));
+
+        format!(
+            r#"{{"event":"budget_decision","frame_idx":{},"decision":"{}","decision_controller":"{}","degradation_before":"{}","degradation_after":"{}","frame_time_us":{:.6},"budget_us":{:.6},"pid_output":{:.6},"pid_p":{:.6},"pid_i":{:.6},"pid_d":{:.6},"e_value":{:.6},"frames_observed":{},"frames_since_change":{},"in_warmup":{},"bucket_key":{},"n_b":{},"alpha":{},"q_b":{},"y_hat":{},"upper_us":{},"risk":{},"fallback_level":{},"window_size":{},"reset_count":{}}}"#,
+            self.frame_idx,
+            self.decision.as_str(),
+            self.controller_decision.as_str(),
+            self.degradation_before.as_str(),
+            self.degradation_after.as_str(),
+            self.frame_time_us,
+            self.budget_us,
+            self.pid_output,
+            self.pid_p,
+            self.pid_i,
+            self.pid_d,
+            self.e_value,
+            self.frames_observed,
+            self.frames_since_change,
+            self.in_warmup,
+            bucket_key,
+            n_b,
+            alpha,
+            q_b,
+            y_hat,
+            upper_us,
+            risk,
+            fallback_level,
+            window_size,
+            reset_count
+        )
+    }
+
+    fn opt_f64(value: Option<f64>) -> String {
+        value
+            .map(|v| format!("{v:.6}"))
+            .unwrap_or_else(|| "null".to_string())
+    }
+
+    fn opt_u64(value: Option<u64>) -> String {
+        value
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string())
+    }
+
+    fn opt_u8(value: Option<u8>) -> String {
+        value
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string())
+    }
+
+    fn opt_usize(value: Option<usize>) -> String {
+        value
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string())
+    }
+
+    fn opt_bool(value: Option<bool>) -> String {
+        value
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string())
+    }
+
+    fn opt_str(value: Option<&str>) -> String {
+        value
+            .map(|v| format!("\"{}\"", v.replace('"', "\\\"")))
+            .unwrap_or_else(|| "null".to_string())
+    }
+}
+
 /// The program runtime that manages the update/view loop.
 pub struct Program<M: Model, W: Write + Send = Stdout> {
     /// The application model.
@@ -637,6 +781,8 @@ pub struct Program<M: Model, W: Write + Send = Stdout> {
     last_tick: Instant,
     /// Whether the UI needs to be redrawn.
     dirty: bool,
+    /// Monotonic frame index for evidence logging.
+    frame_idx: u64,
     /// Current terminal width.
     width: u16,
     /// Current terminal height.
@@ -655,6 +801,8 @@ pub struct Program<M: Model, W: Write + Send = Stdout> {
     locale_version: u64,
     /// Resize coalescer for rapid resize events.
     resize_coalescer: ResizeCoalescer,
+    /// Shared evidence sink for decision logs (optional).
+    evidence_sink: Option<EvidenceSink>,
     /// Resize handling behavior.
     resize_behavior: ResizeBehavior,
     /// Input fairness guard for scheduler integration.
@@ -739,6 +887,7 @@ impl<M: Model> Program<M, Stdout> {
             tick_rate: None,
             last_tick: Instant::now(),
             dirty: true,
+            frame_idx: 0,
             width,
             height,
             poll_timeout: config.poll_timeout,
@@ -748,6 +897,7 @@ impl<M: Model> Program<M, Stdout> {
             locale_context,
             locale_version,
             resize_coalescer,
+            evidence_sink,
             resize_behavior: config.resize_behavior,
             fairness_guard: InputFairnessGuard::new(),
             event_recorder: None,
@@ -1199,11 +1349,15 @@ impl<M: Model, W: Write + Send> Program<M, W> {
     fn render_frame(&mut self) -> io::Result<()> {
         crate::debug_trace!("render_frame: {}x{}", self.width, self.height);
 
+        self.frame_idx = self.frame_idx.wrapping_add(1);
+        let frame_idx = self.frame_idx;
+        let degradation_start = self.budget.degradation();
+
         // Reset budget for new frame, potentially upgrading quality
         self.budget.next_frame();
 
         // Apply conformal risk gate before rendering (if enabled)
-        let mut conformal_y_hat_us = None;
+        let mut conformal_prediction = None;
         if let Some(predictor) = self.conformal_predictor.as_ref() {
             let baseline_us = self
                 .last_frame_time_us
@@ -1232,12 +1386,18 @@ impl<M: Model, W: Write + Send> Program<M, W> {
                 risk = prediction.risk,
                 "conformal risk gate"
             );
-            conformal_y_hat_us = Some(baseline_us);
+            conformal_prediction = Some(prediction);
         }
 
         // Early skip if budget says to skip this frame entirely
         if self.budget.exhausted() {
             self.budget.record_frame_time(Duration::ZERO);
+            self.emit_budget_evidence(
+                frame_idx,
+                degradation_start,
+                0.0,
+                conformal_prediction.as_ref(),
+            );
             crate::debug_trace!(
                 "frame skipped: budget exhausted (degradation={})",
                 self.budget.degradation().as_str()
@@ -1348,9 +1508,10 @@ impl<M: Model, W: Write + Send> Program<M, W> {
         self.budget.record_frame_time(frame_time);
         let frame_time_us = frame_time.as_secs_f64() * 1_000_000.0;
 
-        if let (Some(predictor), Some(y_hat_us)) =
-            (self.conformal_predictor.as_mut(), conformal_y_hat_us)
-        {
+        if let (Some(predictor), Some(prediction)) = (
+            self.conformal_predictor.as_mut(),
+            conformal_prediction.as_ref(),
+        ) {
             let diff_strategy = self
                 .writer
                 .last_diff_strategy()
@@ -1361,12 +1522,63 @@ impl<M: Model, W: Write + Send> Program<M, W> {
                 self.width,
                 frame_height,
             );
-            predictor.observe(key, y_hat_us, frame_time_us);
+            predictor.observe(key, prediction.y_hat, frame_time_us);
         }
         self.last_frame_time_us = Some(frame_time_us);
+        self.emit_budget_evidence(
+            frame_idx,
+            degradation_start,
+            frame_time_us,
+            conformal_prediction.as_ref(),
+        );
         self.dirty = false;
 
         Ok(())
+    }
+
+    fn emit_budget_evidence(
+        &self,
+        frame_idx: u64,
+        degradation_start: DegradationLevel,
+        frame_time_us: f64,
+        conformal_prediction: Option<&ConformalPrediction>,
+    ) {
+        let Some(ref sink) = self.evidence_sink else {
+            return;
+        };
+        let Some(telemetry) = self.budget.telemetry() else {
+            return;
+        };
+
+        let budget_us = conformal_prediction
+            .map(|prediction| prediction.budget_us)
+            .unwrap_or_else(|| self.budget.total().as_secs_f64() * 1_000_000.0);
+        let conformal = conformal_prediction.map(ConformalEvidence::from_prediction);
+        let degradation_after = self.budget.degradation();
+
+        let evidence = BudgetDecisionEvidence {
+            frame_idx,
+            decision: BudgetDecisionEvidence::decision_from_levels(
+                degradation_start,
+                degradation_after,
+            ),
+            controller_decision: telemetry.last_decision,
+            degradation_before: degradation_start,
+            degradation_after,
+            frame_time_us,
+            budget_us,
+            pid_output: telemetry.pid_output,
+            pid_p: telemetry.pid_p,
+            pid_i: telemetry.pid_i,
+            pid_d: telemetry.pid_d,
+            e_value: telemetry.e_value,
+            frames_observed: telemetry.frames_observed,
+            frames_since_change: telemetry.frames_since_change,
+            in_warmup: telemetry.in_warmup,
+            conformal,
+        };
+
+        let _ = sink.write_jsonl(&evidence.to_jsonl());
     }
 
     fn render_buffer(&mut self, frame_height: u16) -> (Buffer, Option<(u16, u16)>, bool) {
@@ -1937,6 +2149,10 @@ impl Default for BatchController {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ftui_core::terminal_capabilities::TerminalCapabilities;
+    use ftui_render::buffer::Buffer;
+    use ftui_render::cell::Cell;
+    use ftui_render::diff_strategy::DiffStrategy;
 
     // Simple test model
     struct TestModel {
@@ -2054,6 +2270,10 @@ mod tests {
         assert!(config.bracketed_paste);
         assert_eq!(config.resize_behavior, ResizeBehavior::Throttled);
         assert!(config.inline_auto_remeasure.is_none());
+        assert!(config.conformal_config.is_none());
+        assert!(config.diff_config.bayesian_enabled);
+        assert!(config.diff_config.dirty_rows_enabled);
+        assert!(!config.resize_coalescer.enable_bocpd);
         assert_eq!(
             config.resize_coalescer.steady_delay_ms,
             CoalescerConfig::default().steady_delay_ms
@@ -2475,6 +2695,60 @@ mod tests {
     }
 
     #[test]
+    fn budget_decision_jsonl_contains_required_fields() {
+        let evidence = BudgetDecisionEvidence {
+            frame_idx: 7,
+            decision: BudgetDecision::Degrade,
+            controller_decision: BudgetDecision::Hold,
+            degradation_before: DegradationLevel::Full,
+            degradation_after: DegradationLevel::NoStyling,
+            frame_time_us: 12_345.678,
+            budget_us: 16_000.0,
+            pid_output: 1.25,
+            pid_p: 0.5,
+            pid_i: 0.25,
+            pid_d: 0.5,
+            e_value: 2.0,
+            frames_observed: 42,
+            frames_since_change: 3,
+            in_warmup: false,
+            conformal: Some(ConformalEvidence {
+                bucket_key: "inline:dirty:10".to_string(),
+                n_b: 32,
+                alpha: 0.05,
+                q_b: 1000.0,
+                y_hat: 12_000.0,
+                upper_us: 13_000.0,
+                risk: true,
+                fallback_level: 1,
+                window_size: 256,
+                reset_count: 2,
+            }),
+        };
+
+        let jsonl = evidence.to_jsonl();
+        assert!(jsonl.contains("\"event\":\"budget_decision\""));
+        assert!(jsonl.contains("\"decision\":\"degrade\""));
+        assert!(jsonl.contains("\"decision_controller\":\"stay\""));
+        assert!(jsonl.contains("\"degradation_before\":\"Full\""));
+        assert!(jsonl.contains("\"degradation_after\":\"NoStyling\""));
+        assert!(jsonl.contains("\"frame_time_us\":12345.678000"));
+        assert!(jsonl.contains("\"budget_us\":16000.000000"));
+        assert!(jsonl.contains("\"pid_output\":1.250000"));
+        assert!(jsonl.contains("\"e_value\":2.000000"));
+        assert!(jsonl.contains("\"bucket_key\":\"inline:dirty:10\""));
+        assert!(jsonl.contains("\"n_b\":32"));
+        assert!(jsonl.contains("\"alpha\":0.050000"));
+        assert!(jsonl.contains("\"q_b\":1000.000000"));
+        assert!(jsonl.contains("\"y_hat\":12000.000000"));
+        assert!(jsonl.contains("\"upper_us\":13000.000000"));
+        assert!(jsonl.contains("\"risk\":true"));
+        assert!(jsonl.contains("\"fallback_level\":1"));
+        assert!(jsonl.contains("\"window_size\":256"));
+        assert!(jsonl.contains("\"reset_count\":2"));
+    }
+
+    #[test]
     fn program_config_with_resize_coalescer() {
         let config = ProgramConfig::default().with_resize_coalescer(CoalescerConfig {
             steady_delay_ms: 8,
@@ -2508,6 +2782,124 @@ mod tests {
     fn program_config_with_legacy_resize_disabled_keeps_default() {
         let config = ProgramConfig::default().with_legacy_resize(false);
         assert_eq!(config.resize_behavior, ResizeBehavior::Throttled);
+    }
+
+    fn diff_strategy_trace(bayesian_enabled: bool) -> Vec<DiffStrategy> {
+        let config = RuntimeDiffConfig::default().with_bayesian_enabled(bayesian_enabled);
+        let mut writer = TerminalWriter::with_diff_config(
+            Vec::<u8>::new(),
+            ScreenMode::AltScreen,
+            UiAnchor::Bottom,
+            TerminalCapabilities::basic(),
+            config,
+        );
+        writer.set_size(8, 4);
+
+        let mut buffer = Buffer::new(8, 4);
+        let mut trace = Vec::new();
+
+        writer.present_ui(&buffer, None, false).unwrap();
+        trace.push(
+            writer
+                .last_diff_strategy()
+                .unwrap_or(DiffStrategy::FullRedraw),
+        );
+
+        buffer.set_raw(0, 0, Cell::from_char('A'));
+        writer.present_ui(&buffer, None, false).unwrap();
+        trace.push(
+            writer
+                .last_diff_strategy()
+                .unwrap_or(DiffStrategy::FullRedraw),
+        );
+
+        buffer.set_raw(1, 1, Cell::from_char('B'));
+        writer.present_ui(&buffer, None, false).unwrap();
+        trace.push(
+            writer
+                .last_diff_strategy()
+                .unwrap_or(DiffStrategy::FullRedraw),
+        );
+
+        trace
+    }
+
+    fn coalescer_checksum(enable_bocpd: bool) -> String {
+        let mut config = CoalescerConfig::default().with_logging(true);
+        if enable_bocpd {
+            config = config.with_bocpd();
+        }
+
+        let base = Instant::now();
+        let mut coalescer = ResizeCoalescer::new(config, (80, 24)).with_last_render(base);
+
+        let events = [
+            (0_u64, (82_u16, 24_u16)),
+            (10, (83, 25)),
+            (20, (84, 26)),
+            (35, (90, 28)),
+            (55, (92, 30)),
+        ];
+
+        let mut idx = 0usize;
+        for t_ms in (0_u64..=160).step_by(8) {
+            let now = base + Duration::from_millis(t_ms);
+            while idx < events.len() && events[idx].0 == t_ms {
+                let (w, h) = events[idx].1;
+                coalescer.handle_resize_at(w, h, now);
+                idx += 1;
+            }
+            coalescer.tick_at(now);
+        }
+
+        coalescer.decision_checksum_hex()
+    }
+
+    fn conformal_trace(enabled: bool) -> Vec<(f64, bool)> {
+        if !enabled {
+            return Vec::new();
+        }
+
+        let mut predictor = ConformalPredictor::new(ConformalConfig::default());
+        let key = BucketKey::from_context(ScreenMode::AltScreen, DiffStrategy::Full, 80, 24);
+        let mut trace = Vec::new();
+
+        for i in 0..30 {
+            let y_hat = 16_000.0 + (i as f64) * 15.0;
+            let observed = y_hat + (i % 7) as f64 * 120.0;
+            predictor.observe(key, y_hat, observed);
+            let prediction = predictor.predict(key, y_hat, 20_000.0);
+            trace.push((prediction.upper_us, prediction.risk));
+        }
+
+        trace
+    }
+
+    #[test]
+    fn policy_toggle_matrix_determinism() {
+        for &bayesian in &[false, true] {
+            for &bocpd in &[false, true] {
+                for &conformal in &[false, true] {
+                    let diff_a = diff_strategy_trace(bayesian);
+                    let diff_b = diff_strategy_trace(bayesian);
+                    assert_eq!(diff_a, diff_b, "diff strategy not deterministic");
+
+                    let checksum_a = coalescer_checksum(bocpd);
+                    let checksum_b = coalescer_checksum(bocpd);
+                    assert_eq!(checksum_a, checksum_b, "coalescer checksum mismatch");
+
+                    let conf_a = conformal_trace(conformal);
+                    let conf_b = conformal_trace(conformal);
+                    assert_eq!(conf_a, conf_b, "conformal predictor not deterministic");
+
+                    if conformal {
+                        assert!(!conf_a.is_empty(), "conformal trace should be populated");
+                    } else {
+                        assert!(conf_a.is_empty(), "conformal trace should be empty");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

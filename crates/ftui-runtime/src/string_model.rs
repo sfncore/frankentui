@@ -44,9 +44,8 @@ use crate::program::{Cmd, Model};
 use ftui_core::event::Event;
 use ftui_render::cell::{Cell, CellContent};
 use ftui_render::frame::Frame;
-use ftui_text::Text;
+use ftui_text::{Text, grapheme_width};
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 /// A simplified model trait that uses string-based views.
 ///
@@ -150,7 +149,7 @@ fn render_text_to_frame(text: &Text, frame: &mut Frame) {
                     break;
                 }
 
-                let w = UnicodeWidthStr::width(grapheme);
+                let w = grapheme_width(grapheme);
                 if w == 0 {
                     continue;
                 }
@@ -197,7 +196,6 @@ fn apply_style(cell: &mut Cell, style: ftui_style::Style) {
 mod tests {
     use super::*;
     use ftui_render::grapheme_pool::GraphemePool;
-    use unicode_width::UnicodeWidthStr;
 
     // ---------- Shared test message type ----------
 
@@ -388,7 +386,7 @@ mod tests {
 
         adapter.view(&mut frame);
 
-        let grapheme_width = UnicodeWidthStr::width("👩‍🚀");
+        let grapheme_width = grapheme_width("👩‍🚀");
         assert!(grapheme_width >= 2);
 
         let head = frame.buffer.get(0, 0).unwrap();

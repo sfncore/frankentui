@@ -128,7 +128,7 @@ struct InlineRegion {
 struct DiffDecision {
     #[allow(dead_code)] // reserved for future diff strategy introspection
     strategy: DiffStrategy,
-    diff: Option<BufferDiff>,
+    has_diff: bool,
 }
 
 // =============================================================================
@@ -292,6 +292,8 @@ pub struct TerminalWriter<W: Write> {
     last_inline_region: Option<InlineRegion>,
     /// Bayesian diff strategy selector.
     diff_strategy: DiffStrategySelector,
+    /// Reusable diff buffer to avoid per-frame allocations.
+    diff_scratch: BufferDiff,
     /// Frames since last diff probe while in FullRedraw.
     full_redraw_probe: u64,
     /// Runtime diff configuration.
@@ -384,6 +386,7 @@ impl<W: Write> TerminalWriter<W> {
             scroll_region_active: false,
             last_inline_region: None,
             diff_strategy,
+            diff_scratch: BufferDiff::new(),
             full_redraw_probe: 0,
             diff_config,
             evidence_sink: None,
@@ -832,7 +835,7 @@ impl<W: Write> TerminalWriter<W> {
             self.last_diff_strategy = Some(DiffStrategy::FullRedraw);
             return DiffDecision {
                 strategy: DiffStrategy::FullRedraw,
-                diff: None,
+                has_diff: false,
             };
         }
 
@@ -875,22 +878,23 @@ impl<W: Write> TerminalWriter<W> {
             self.full_redraw_probe = 0;
         }
 
-        let diff = match strategy {
+        let mut has_diff = false;
+        match strategy {
             DiffStrategy::Full => {
                 let prev = self.prev_buffer.as_ref().expect("prev buffer must exist");
-                Some(BufferDiff::compute(prev, buffer))
+                self.diff_scratch.compute_into(prev, buffer);
+                has_diff = true;
             }
             DiffStrategy::DirtyRows => {
                 let prev = self.prev_buffer.as_ref().expect("prev buffer must exist");
-                Some(BufferDiff::compute_dirty(prev, buffer))
+                self.diff_scratch.compute_dirty_into(prev, buffer);
+                has_diff = true;
             }
-            DiffStrategy::FullRedraw => None,
-        };
+            DiffStrategy::FullRedraw => {}
+        }
 
         // Update posterior if Bayesian mode is enabled
-        if self.diff_config.bayesian_enabled
-            && let Some(ref diff) = diff
-        {
+        if self.diff_config.bayesian_enabled && has_diff {
             let width = buffer.width() as usize;
             let height = buffer.height() as usize;
             let cells_scanned = match strategy {
@@ -898,7 +902,8 @@ impl<W: Write> TerminalWriter<W> {
                 DiffStrategy::DirtyRows => dirty_rows * width,
                 DiffStrategy::FullRedraw => 0,
             };
-            self.diff_strategy.observe(cells_scanned, diff.len());
+            self.diff_strategy
+                .observe(cells_scanned, self.diff_scratch.len());
         }
 
         if let Some(evidence) = self.diff_strategy.last_evidence() {
@@ -937,7 +942,7 @@ impl<W: Write> TerminalWriter<W> {
         }
 
         self.last_diff_strategy = Some(strategy);
-        DiffDecision { strategy, diff }
+        DiffDecision { strategy, has_diff }
     }
 
     /// Present UI in inline mode with cursor save/restore.
@@ -1014,8 +1019,11 @@ impl<W: Write> TerminalWriter<W> {
             // Emit diff
             {
                 let _span = debug_span!("ftui.render.emit").entered();
-                if let Some(diff) = decision.diff.as_ref() {
-                    self.emit_diff(buffer, diff, Some(visible_height), ui_y_start)?;
+                if decision.has_diff {
+                    let diff = std::mem::take(&mut self.diff_scratch);
+                    let result = self.emit_diff(buffer, &diff, Some(visible_height), ui_y_start);
+                    self.diff_scratch = diff;
+                    result?;
                 } else {
                     self.emit_full_redraw(buffer, Some(visible_height), ui_y_start)?;
                 }
@@ -1083,8 +1091,11 @@ impl<W: Write> TerminalWriter<W> {
 
         {
             let _span = debug_span!("ftui.render.emit").entered();
-            if let Some(diff) = decision.diff.as_ref() {
-                self.emit_diff(buffer, diff, None, 0)?;
+            if decision.has_diff {
+                let diff = std::mem::take(&mut self.diff_scratch);
+                let result = self.emit_diff(buffer, &diff, None, 0);
+                self.diff_scratch = diff;
+                result?;
             } else {
                 self.emit_full_redraw(buffer, None, 0)?;
             }
