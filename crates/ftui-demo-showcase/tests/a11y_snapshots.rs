@@ -673,6 +673,68 @@ fn a11y_dashboard_screen_reduced_motion_80x24() {
 }
 
 // ============================================================================
+// Accessibility Panel Screen A11y Tests
+// ============================================================================
+
+#[test]
+fn a11y_accessibility_panel_high_contrast_80x24() {
+    let mut screen = ftui_demo_showcase::screens::accessibility_panel::AccessibilityPanel::new();
+    let a11y = theme::A11ySettings {
+        high_contrast: true,
+        reduced_motion: false,
+        large_text: false,
+    };
+    screen.sync_a11y(a11y, theme::ThemeId::CyberpunkAurora);
+    let frame = render_screen_with_a11y(&screen, &a11y, 80, 24);
+    assert_snapshot!(
+        "a11y_accessibility_panel_high_contrast_80x24",
+        &frame.buffer
+    );
+}
+
+#[test]
+fn a11y_accessibility_panel_large_text_80x24() {
+    let mut screen = ftui_demo_showcase::screens::accessibility_panel::AccessibilityPanel::new();
+    let a11y = theme::A11ySettings {
+        high_contrast: false,
+        reduced_motion: false,
+        large_text: true,
+    };
+    screen.sync_a11y(a11y, theme::ThemeId::CyberpunkAurora);
+    let frame = render_screen_with_a11y(&screen, &a11y, 80, 24);
+    assert_snapshot!("a11y_accessibility_panel_large_text_80x24", &frame.buffer);
+}
+
+#[test]
+fn a11y_accessibility_panel_reduced_motion_80x24() {
+    let mut screen = ftui_demo_showcase::screens::accessibility_panel::AccessibilityPanel::new();
+    let a11y = theme::A11ySettings {
+        high_contrast: false,
+        reduced_motion: true,
+        large_text: false,
+    };
+    screen.sync_a11y(a11y, theme::ThemeId::CyberpunkAurora);
+    let frame = render_screen_with_a11y(&screen, &a11y, 80, 24);
+    assert_snapshot!(
+        "a11y_accessibility_panel_reduced_motion_80x24",
+        &frame.buffer
+    );
+}
+
+#[test]
+fn a11y_accessibility_panel_all_modes_120x40() {
+    let mut screen = ftui_demo_showcase::screens::accessibility_panel::AccessibilityPanel::new();
+    let a11y = theme::A11ySettings {
+        high_contrast: true,
+        reduced_motion: true,
+        large_text: true,
+    };
+    screen.sync_a11y(a11y, theme::ThemeId::CyberpunkAurora);
+    let frame = render_screen_with_a11y(&screen, &a11y, 120, 40);
+    assert_snapshot!("a11y_accessibility_panel_all_modes_120x40", &frame.buffer);
+}
+
+// ============================================================================
 // Edge Cases & Regression Tests
 // ============================================================================
 

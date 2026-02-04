@@ -64,7 +64,25 @@ fn terminal_caps_screen()
         ftui_demo_showcase::screens::terminal_capabilities::TerminalCapabilitiesScreen::with_profile(
             TerminalProfile::Modern,
         );
+    screen.set_detected_profile_override(TerminalProfile::Xterm256Color);
     screen.set_env_override(terminal_caps_env());
+    screen
+}
+
+fn i18n_stress_screen(
+    set_steps: usize,
+    sample_steps: usize,
+) -> ftui_demo_showcase::screens::i18n_demo::I18nDemo {
+    let mut screen = ftui_demo_showcase::screens::i18n_demo::I18nDemo::new();
+    for _ in 0..3 {
+        screen.update(&press(KeyCode::Tab));
+    }
+    for _ in 0..set_steps {
+        screen.update(&press(KeyCode::Char(']')));
+    }
+    for _ in 0..sample_steps {
+        screen.update(&press(KeyCode::Down));
+    }
     screen
 }
 
@@ -175,6 +193,30 @@ fn shakespeare_tiny_40x10() {
     let area = Rect::new(0, 0, 40, 10);
     screen.view(&mut frame, area);
     assert_snapshot!("shakespeare_tiny_40x10", &frame.buffer);
+}
+
+// ============================================================================
+// i18n Stress Lab
+// ============================================================================
+
+#[test]
+fn i18n_stress_lab_rtl_120x40() {
+    let screen = i18n_stress_screen(2, 0); // RTL set, first sample
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("i18n_stress_lab_rtl_120x40", &frame.buffer);
+}
+
+#[test]
+fn i18n_stress_lab_emoji_120x40() {
+    let screen = i18n_stress_screen(3, 1); // Emoji set, second sample
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("i18n_stress_lab_emoji_120x40", &frame.buffer);
 }
 
 // ============================================================================
@@ -291,6 +333,53 @@ fn widget_gallery_with_tick_120x40() {
 }
 
 // ============================================================================
+// Widget Builder
+// ============================================================================
+
+#[test]
+fn widget_builder_initial_120x40() {
+    let screen = ftui_demo_showcase::screens::widget_builder::WidgetBuilder::new();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("widget_builder_initial_120x40", &frame.buffer);
+}
+
+#[test]
+fn widget_builder_initial_80x24() {
+    let screen = ftui_demo_showcase::screens::widget_builder::WidgetBuilder::new();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(80, 24, &mut pool);
+    let area = Rect::new(0, 0, 80, 24);
+    screen.view(&mut frame, area);
+    assert_snapshot!("widget_builder_initial_80x24", &frame.buffer);
+}
+
+#[test]
+fn widget_builder_status_wall_120x40() {
+    let mut screen = ftui_demo_showcase::screens::widget_builder::WidgetBuilder::new();
+    screen.update(&press(KeyCode::Char('p')));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("widget_builder_status_wall_120x40", &frame.buffer);
+}
+
+#[test]
+fn widget_builder_minimal_120x40() {
+    let mut screen = ftui_demo_showcase::screens::widget_builder::WidgetBuilder::new();
+    screen.update(&press(KeyCode::Char('p')));
+    screen.update(&press(KeyCode::Char('p')));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("widget_builder_minimal_120x40", &frame.buffer);
+}
+
+// ============================================================================
 // Layout Lab
 // ============================================================================
 
@@ -343,6 +432,53 @@ fn layout_lab_wide_200x50() {
     let area = Rect::new(0, 0, 200, 50);
     screen.view(&mut frame, area);
     assert_snapshot!("layout_lab_wide_200x50", &frame.buffer);
+}
+
+// ============================================================================
+// Layout Inspector
+// ============================================================================
+
+#[test]
+fn layout_inspector_flex_trio_80x24() {
+    let screen = ftui_demo_showcase::screens::layout_inspector::LayoutInspector::new();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(80, 24, &mut pool);
+    let area = Rect::new(0, 0, 80, 24);
+    screen.view(&mut frame, area);
+    assert_snapshot!("layout_inspector_flex_trio_80x24", &frame.buffer);
+}
+
+#[test]
+fn layout_inspector_tight_grid_80x24() {
+    let mut screen = ftui_demo_showcase::screens::layout_inspector::LayoutInspector::new();
+    screen.update(&press(KeyCode::Char('n')));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(80, 24, &mut pool);
+    let area = Rect::new(0, 0, 80, 24);
+    screen.view(&mut frame, area);
+    assert_snapshot!("layout_inspector_tight_grid_80x24", &frame.buffer);
+}
+
+#[test]
+fn layout_inspector_fit_content_80x24() {
+    let mut screen = ftui_demo_showcase::screens::layout_inspector::LayoutInspector::new();
+    screen.update(&press(KeyCode::Char('n')));
+    screen.update(&press(KeyCode::Char('n')));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(80, 24, &mut pool);
+    let area = Rect::new(0, 0, 80, 24);
+    screen.view(&mut frame, area);
+    assert_snapshot!("layout_inspector_fit_content_80x24", &frame.buffer);
+}
+
+#[test]
+fn layout_inspector_flex_trio_120x40() {
+    let screen = ftui_demo_showcase::screens::layout_inspector::LayoutInspector::new();
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("layout_inspector_flex_trio_120x40", &frame.buffer);
 }
 
 // ============================================================================
@@ -1643,6 +1779,38 @@ fn terminal_capabilities_simulation_profile_120x40() {
 }
 
 #[test]
+fn terminal_capabilities_simulation_tmux_120x40() {
+    let mut screen = terminal_caps_screen();
+    screen.set_profile_override(TerminalProfile::Tmux);
+    screen.update(&press(KeyCode::Tab));
+    screen.update(&press(KeyCode::Tab));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!(
+        "terminal_capabilities_simulation_tmux_120x40",
+        &frame.buffer
+    );
+}
+
+#[test]
+fn terminal_capabilities_simulation_dumb_120x40() {
+    let mut screen = terminal_caps_screen();
+    screen.set_profile_override(TerminalProfile::Dumb);
+    screen.update(&press(KeyCode::Tab));
+    screen.update(&press(KeyCode::Tab));
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!(
+        "terminal_capabilities_simulation_dumb_120x40",
+        &frame.buffer
+    );
+}
+
+#[test]
 fn terminal_capabilities_zero_area() {
     let screen = terminal_caps_screen();
     let mut pool = GraphemePool::new();
@@ -1658,4 +1826,33 @@ fn terminal_capabilities_title() {
         ftui_demo_showcase::screens::terminal_capabilities::TerminalCapabilitiesScreen::new();
     assert_eq!(screen.title(), "Terminal Capabilities");
     assert_eq!(screen.tab_label(), "Caps");
+}
+
+// ============================================================================
+// Inline Mode Story
+// ============================================================================
+
+#[test]
+fn inline_mode_story_inline_bottom_80x24() {
+    let mut screen = ftui_demo_showcase::screens::inline_mode_story::InlineModeStory::new();
+    screen.set_ui_height(2);
+    screen.set_anchor(ftui_demo_showcase::screens::inline_mode_story::InlineAnchor::Bottom);
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(80, 24, &mut pool);
+    let area = Rect::new(0, 0, 80, 24);
+    screen.view(&mut frame, area);
+    assert_snapshot!("inline_mode_story_inline_bottom_80x24", &frame.buffer);
+}
+
+#[test]
+fn inline_mode_story_compare_top_120x40() {
+    let mut screen = ftui_demo_showcase::screens::inline_mode_story::InlineModeStory::new();
+    screen.set_ui_height(3);
+    screen.set_anchor(ftui_demo_showcase::screens::inline_mode_story::InlineAnchor::Top);
+    screen.set_compare(true);
+    let mut pool = GraphemePool::new();
+    let mut frame = Frame::new(120, 40, &mut pool);
+    let area = Rect::new(0, 0, 120, 40);
+    screen.view(&mut frame, area);
+    assert_snapshot!("inline_mode_story_compare_top_120x40", &frame.buffer);
 }

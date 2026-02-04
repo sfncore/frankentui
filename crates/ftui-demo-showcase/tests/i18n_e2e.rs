@@ -904,9 +904,13 @@ fn integration_panel_switching() {
     let _ = screen.update(&key_press(KeyCode::Tab));
     let panel2 = render_lines(&screen, 120, 40);
 
-    // All three panels should render different content
+    let _ = screen.update(&key_press(KeyCode::Tab));
+    let panel3 = render_lines(&screen, 120, 40);
+
+    // All panels should render different content
     assert_ne!(panel0, panel1, "panel 0 vs 1 should differ");
     assert_ne!(panel1, panel2, "panel 1 vs 2 should differ");
+    assert_ne!(panel2, panel3, "panel 2 vs 3 should differ");
 
     log_jsonl("integration", "panel_switch", true, "");
 }
