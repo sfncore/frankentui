@@ -61,7 +61,7 @@ pub fn render(
                 String::new()
             };
 
-            format!("  {} {}{}", status_icon, c.name, progress)
+            format!("  {} {}{}", status_icon, c.title, progress)
         })
         .collect();
 

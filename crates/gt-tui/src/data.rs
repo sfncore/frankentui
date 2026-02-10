@@ -87,9 +87,11 @@ pub struct ConvoyItem {
     #[serde(default)]
     pub id: String,
     #[serde(default)]
-    pub name: String,
+    pub title: String,
     #[serde(default)]
     pub status: String,
+    #[serde(default)]
+    pub created_at: String,
     #[serde(default)]
     pub progress: String,
     #[serde(default)]

@@ -1,78 +1,13 @@
 use ftui_core::geometry::Rect;
+use ftui_render::cell::Cell;
 use ftui_render::frame::Frame;
 use ftui_widgets::block::Block;
 use ftui_widgets::borders::{BorderType, Borders};
-use ftui_widgets::tree::{Tree, TreeGuides, TreeNode};
 use ftui_widgets::Widget;
 
+use crate::app::TreeEntry;
 use crate::data::TownStatus;
 use crate::theme;
-
-/// Build the agent tree from town status data.
-pub fn build_tree(status: &TownStatus) -> TreeNode {
-    let town_label = if status.name.is_empty() {
-        "Gas Town".to_string()
-    } else {
-        status.name.clone()
-    };
-
-    let mut root = TreeNode::new(format!(" {}", town_label));
-
-    // Town-level agents (mayor, deacon)
-    for agent in &status.agents {
-        let indicator = status_indicator(agent.running, &agent.state);
-        let session_hint = if agent.session.is_empty() {
-            String::new()
-        } else {
-            format!(" [{}]", agent.session)
-        };
-        let mail_hint = if agent.unread_mail > 0 {
-            format!(" ({})", agent.unread_mail)
-        } else {
-            String::new()
-        };
-        root = root.child(TreeNode::new(format!(
-            "{} {}{}{}", indicator, agent.name, session_hint, mail_hint
-        )));
-    }
-
-    if status.rigs.is_empty() {
-        root = root.child(TreeNode::new("  (no rigs)"));
-        return root;
-    }
-
-    for rig in &status.rigs {
-        let mut rig_node = TreeNode::new(format!(" {}", rig.name));
-
-        for agent in &rig.agents {
-            let indicator = status_indicator(agent.running, &agent.state);
-            let session_hint = if agent.session.is_empty() {
-                String::new()
-            } else {
-                format!(" [{}]", agent.session)
-            };
-            let work_hint = if agent.has_work { " " } else { "" };
-            let mail_hint = if agent.unread_mail > 0 {
-                format!(" ({})", agent.unread_mail)
-            } else {
-                String::new()
-            };
-            rig_node = rig_node.child(TreeNode::new(format!(
-                "{} {}{}{}{}", indicator, agent.name, work_hint, session_hint, mail_hint
-            )));
-        }
-
-        if rig.polecat_count > 0 {
-            rig_node = rig_node.child(TreeNode::new(format!(
-                "  {} polecats", rig.polecat_count
-            )));
-        }
-
-        root = root.child(rig_node);
-    }
-
-    root
-}
 
 fn status_indicator(running: bool, state: &str) -> &'static str {
     if running {
@@ -87,7 +22,14 @@ fn status_indicator(running: bool, state: &str) -> &'static str {
     }
 }
 
-pub fn render(frame: &mut Frame, area: Rect, status: &TownStatus, focused: bool) {
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    status: &TownStatus,
+    focused: bool,
+    tree_entries: &[TreeEntry],
+    cursor: usize,
+) {
     let border_style = if focused {
         theme::panel_border_focused()
     } else {
@@ -95,7 +37,7 @@ pub fn render(frame: &mut Frame, area: Rect, status: &TownStatus, focused: bool)
     };
 
     let block = Block::new()
-        .title(" Agents ")
+        .title(" Agents (j/k Enter) ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .style(theme::panel_bg())
@@ -104,11 +46,108 @@ pub fn render(frame: &mut Frame, area: Rect, status: &TownStatus, focused: bool)
     let inner = block.inner(area);
     block.render(area, frame);
 
-    let tree_root = build_tree(status);
-    let tree = Tree::new(tree_root)
-        .with_guides(TreeGuides::Rounded)
-        .with_guide_style(theme::panel_border_style())
-        .with_label_style(theme::event_default());
+    if tree_entries.is_empty() {
+        // Fallback: render plain text tree from status
+        render_fallback(frame, inner, status);
+        return;
+    }
 
-    tree.render(inner, frame);
+    // Render flat list with indentation and cursor highlight
+    let max_rows = inner.height as usize;
+    let start = if cursor >= max_rows {
+        cursor - max_rows + 1
+    } else {
+        0
+    };
+
+    for (i, entry) in tree_entries.iter().skip(start).take(max_rows).enumerate() {
+        let y = inner.y + i as u16;
+        if y >= inner.y + inner.height {
+            break;
+        }
+
+        let indent = "  ".repeat(entry.depth as usize);
+        let prefix = if entry.depth == 0 && entry.tmux_session.is_empty() {
+            " "  // Rig header
+        } else if !entry.tmux_session.is_empty() {
+            "  "
+        } else {
+            "  "
+        };
+
+        let line = format!("{}{}{}", indent, prefix, entry.label);
+
+        let is_selected = (start + i) == cursor;
+        let row_area = Rect::new(inner.x, y, inner.width, 1);
+
+        if is_selected && focused {
+            // Highlight selected row
+            frame.buffer.fill(
+                row_area,
+                Cell::default()
+                    .with_bg(ftui_extras::theme::bg::HIGHLIGHT.into())
+                    .with_fg(ftui_extras::theme::fg::PRIMARY.into()),
+            );
+        }
+
+        // Draw the text
+        let max_chars = inner.width as usize;
+        let display: String = line.chars().take(max_chars).collect();
+        for (j, ch) in display.chars().enumerate() {
+            let x = inner.x + j as u16;
+            if x < inner.x + inner.width {
+                if let Some(cell) = frame.buffer.get_mut(x, y) {
+                    let new_cell = if is_selected && focused {
+                        Cell::from_char(ch)
+                            .with_bg(ftui_extras::theme::bg::HIGHLIGHT.into())
+                            .with_fg(ftui_extras::theme::fg::PRIMARY.into())
+                    } else if !entry.tmux_session.is_empty() {
+                        Cell::from_char(ch)
+                            .with_fg(ftui_extras::theme::accent::INFO.into())
+                    } else if entry.depth == 0 {
+                        Cell::from_char(ch)
+                            .with_fg(ftui_extras::theme::accent::PRIMARY.into())
+                    } else {
+                        Cell::from_char(ch)
+                    };
+                    *cell = new_cell;
+                }
+            }
+        }
+    }
+}
+
+/// Fallback tree rendering before status data arrives.
+fn render_fallback(frame: &mut Frame, area: Rect, status: &TownStatus) {
+    let lines: Vec<String> = if status.rigs.is_empty() {
+        vec!["  Loading...".to_string()]
+    } else {
+        let mut out = Vec::new();
+        for agent in &status.agents {
+            let ind = status_indicator(agent.running, &agent.state);
+            out.push(format!("{} {} [{}]", ind, agent.name, agent.session));
+        }
+        for rig in &status.rigs {
+            out.push(format!(" {}", rig.name));
+            for agent in &rig.agents {
+                let ind = status_indicator(agent.running, &agent.state);
+                out.push(format!("  {} {} [{}]", ind, agent.name, agent.session));
+            }
+        }
+        out
+    };
+
+    for (i, line) in lines.iter().take(area.height as usize).enumerate() {
+        let y = area.y + i as u16;
+        let max_chars = area.width as usize;
+        let display: String = line.chars().take(max_chars).collect();
+        for (j, ch) in display.chars().enumerate() {
+            let x = area.x + j as u16;
+            if x < area.x + area.width {
+                if let Some(cell) = frame.buffer.get_mut(x, y) {
+                    *cell = Cell::from_char(ch);
+                }
+            }
+        }
+    }
 }

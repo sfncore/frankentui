@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use ftui_core::event::{KeyCode, KeyEventKind, Modifiers};
+use ftui_core::event::{KeyCode, KeyEventKind, Modifiers, MouseButton, MouseEventKind};
 use ftui_core::geometry::Rect;
 use ftui_extras::theme;
 use ftui_layout::{Constraint, Flex};
@@ -52,6 +52,14 @@ impl Panel {
     }
 }
 
+/// A flattened tree entry for selection-based navigation.
+#[derive(Debug, Clone)]
+pub struct TreeEntry {
+    pub label: String,
+    pub tmux_session: String,
+    pub depth: u16,
+}
+
 pub struct GtDashboard {
     pub status: TownStatus,
     pub convoys: Vec<ConvoyItem>,
@@ -62,13 +70,20 @@ pub struct GtDashboard {
     pub spinner_tick: u32,
     pub convoy_list_state: RefCell<ListState>,
     pub last_refresh: Instant,
+    /// Flattened tree entries for cursor-based navigation
+    pub tree_entries: Vec<TreeEntry>,
+    /// Selected row in the agent tree
+    pub tree_cursor: usize,
+    /// Saved rect for the agent tree panel (for mouse hit detection)
+    pub tree_area: RefCell<Rect>,
 }
 
 impl GtDashboard {
     pub fn new() -> Self {
         let mut event_viewer = LogViewer::new(5_000);
         event_viewer.push("Gas Town TUI starting...");
-        event_viewer.push("Waiting for events from ~/.events.jsonl");
+        event_viewer.push("Press Tab to switch panels, j/k to navigate, Enter to switch tmux");
+        event_viewer.push("Click agent names to jump to their tmux session");
         event_viewer.push("");
 
         Self {
@@ -84,6 +99,44 @@ impl GtDashboard {
             spinner_tick: 0,
             convoy_list_state: RefCell::new(ListState::default()),
             last_refresh: Instant::now(),
+            tree_entries: Vec::new(),
+            tree_cursor: 0,
+            tree_area: RefCell::new(Rect::default()),
+        }
+    }
+
+    /// Rebuild the flat tree entries from current status.
+    fn rebuild_tree_entries(&mut self) {
+        self.tree_entries.clear();
+
+        // Town-level agents
+        for agent in &self.status.agents {
+            self.tree_entries.push(TreeEntry {
+                label: format!("{} ({})", agent.name, agent.role),
+                tmux_session: agent.session.clone(),
+                depth: 0,
+            });
+        }
+
+        // Rig agents
+        for rig in &self.status.rigs {
+            self.tree_entries.push(TreeEntry {
+                label: rig.name.clone(),
+                tmux_session: String::new(),
+                depth: 0,
+            });
+            for agent in &rig.agents {
+                self.tree_entries.push(TreeEntry {
+                    label: format!("{} ({})", agent.name, agent.role),
+                    tmux_session: agent.session.clone(),
+                    depth: 1,
+                });
+            }
+        }
+
+        // Clamp cursor
+        if !self.tree_entries.is_empty() && self.tree_cursor >= self.tree_entries.len() {
+            self.tree_cursor = self.tree_entries.len() - 1;
         }
     }
 
@@ -97,15 +150,21 @@ impl GtDashboard {
             KeyCode::Char('q') if !key.modifiers.contains(Modifiers::CTRL) => {
                 return Cmd::Quit;
             }
-            KeyCode::Char('c') | KeyCode::Char('C') if key.modifiers.contains(Modifiers::CTRL) => {
+            KeyCode::Char('c') | KeyCode::Char('C')
+                if key.modifiers.contains(Modifiers::CTRL) =>
+            {
                 return Cmd::Quit;
             }
             KeyCode::Tab => {
                 self.active_panel = self.active_panel.next();
+                self.event_viewer
+                    .push(format!("Panel: {}", self.active_panel.label()));
                 return Cmd::None;
             }
             KeyCode::BackTab => {
                 self.active_panel = self.active_panel.prev();
+                self.event_viewer
+                    .push(format!("Panel: {}", self.active_panel.label()));
                 return Cmd::None;
             }
             KeyCode::Char('1') => {
@@ -121,7 +180,6 @@ impl GtDashboard {
                 return Cmd::None;
             }
             KeyCode::Char('r') => {
-                // Force refresh
                 self.last_refresh = Instant::now();
                 self.event_viewer.push("Refreshing...");
                 return Cmd::Batch(vec![
@@ -138,8 +196,25 @@ impl GtDashboard {
             _ => {}
         }
 
-        // Panel-specific scrolling
+        // Panel-specific keys
         match self.active_panel {
+            Panel::AgentTree => {
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        if !self.tree_entries.is_empty() {
+                            self.tree_cursor =
+                                (self.tree_cursor + 1).min(self.tree_entries.len() - 1);
+                        }
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.tree_cursor = self.tree_cursor.saturating_sub(1);
+                    }
+                    KeyCode::Enter => {
+                        self.switch_selected_tmux();
+                    }
+                    _ => {}
+                }
+            }
             Panel::EventFeed => {
                 let viewport_h = self.event_state.borrow().last_viewport_height.max(1);
                 match key.code {
@@ -179,74 +254,65 @@ impl GtDashboard {
                     _ => {}
                 }
             }
-            Panel::AgentTree => {
-                match key.code {
-                    KeyCode::Enter => {
-                        // Clickable tmux session switching — find selected agent and switch
-                        self.switch_to_tmux_session();
-                    }
-                    _ => {}
-                }
-            }
         }
 
         Cmd::None
     }
 
-    fn handle_mouse(&mut self, _mouse: ftui_core::event::MouseEvent) -> Cmd<Msg> {
-        // Mouse click in agent tree triggers tmux session switch
-        // The tree widget uses hit regions, but for now we handle basic clicks
-        Cmd::None
-    }
-
-    /// Collect all tmux sessions from status for menu navigation.
-    pub fn tmux_sessions(&self) -> Vec<(String, String)> {
-        let mut sessions = Vec::new();
-
-        // Town-level agents
-        for agent in &self.status.agents {
-            if !agent.session.is_empty() {
-                sessions.push((
-                    format!("{} ({})", agent.name, agent.role),
-                    agent.session.clone(),
-                ));
-            }
+    fn handle_mouse(&mut self, mouse: ftui_core::event::MouseEvent) -> Cmd<Msg> {
+        // Only handle left clicks
+        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return Cmd::None;
         }
 
-        // Rig agents
-        for rig in &self.status.rigs {
-            for agent in &rig.agents {
-                if !agent.session.is_empty() {
-                    sessions.push((
-                        format!("{}/{}", rig.name, agent.name),
-                        agent.session.clone(),
+        let tree_area = *self.tree_area.borrow();
+
+        // Check if click is inside the agent tree panel
+        if mouse.x >= tree_area.x
+            && mouse.x < tree_area.x + tree_area.width
+            && mouse.y >= tree_area.y
+            && mouse.y < tree_area.y + tree_area.height
+        {
+            // Map click row to tree entry (accounting for border = 1 row offset)
+            let row_in_panel = (mouse.y - tree_area.y).saturating_sub(1) as usize;
+            if row_in_panel < self.tree_entries.len() {
+                self.tree_cursor = row_in_panel;
+                self.active_panel = Panel::AgentTree;
+
+                let entry = &self.tree_entries[row_in_panel];
+                if !entry.tmux_session.is_empty() {
+                    self.event_viewer.push(format!(
+                        "Switching to tmux: {}",
+                        entry.tmux_session
                     ));
+                    let _ = Command::new("tmux")
+                        .args(["switch-client", "-t", &entry.tmux_session])
+                        .status();
+                } else {
+                    self.event_viewer
+                        .push(format!("Selected: {} (no session)", entry.label));
                 }
             }
+
+            return Cmd::None;
         }
 
-        sessions
+        Cmd::None
     }
 
-    fn switch_to_tmux_session(&self) {
-        // Switch to first available running session
-        for agent in &self.status.agents {
-            if agent.running && !agent.session.is_empty() {
+    fn switch_selected_tmux(&mut self) {
+        if let Some(entry) = self.tree_entries.get(self.tree_cursor) {
+            if !entry.tmux_session.is_empty() {
+                self.event_viewer.push(format!(
+                    "Switching to tmux: {}",
+                    entry.tmux_session
+                ));
                 let _ = Command::new("tmux")
-                    .args(["switch-client", "-t", &agent.session])
+                    .args(["switch-client", "-t", &entry.tmux_session])
                     .status();
-                return;
-            }
-        }
-
-        for rig in &self.status.rigs {
-            for agent in &rig.agents {
-                if agent.running && !agent.session.is_empty() {
-                    let _ = Command::new("tmux")
-                        .args(["switch-client", "-t", &agent.session])
-                        .status();
-                    return;
-                }
+            } else {
+                self.event_viewer
+                    .push(format!("No tmux session for: {}", entry.label));
             }
         }
     }
@@ -256,7 +322,6 @@ impl Model for GtDashboard {
     type Message = Msg;
 
     fn init(&mut self) -> Cmd<Self::Message> {
-        // Kick off initial data fetch
         Cmd::Batch(vec![
             Cmd::Task(
                 Default::default(),
@@ -277,6 +342,7 @@ impl Model for GtDashboard {
             Msg::StatusRefresh(status) => {
                 self.status = status;
                 self.last_refresh = Instant::now();
+                self.rebuild_tree_entries();
                 Cmd::None
             }
             Msg::ConvoyRefresh(convoys) => {
@@ -310,9 +376,9 @@ impl Model for GtDashboard {
         // Main layout: status bar (1), content (fill), keybinds (1)
         let outer = Flex::vertical()
             .constraints([
-                Constraint::Fixed(1),  // Status bar
-                Constraint::Min(6),    // Content
-                Constraint::Fixed(1),  // Keybinds
+                Constraint::Fixed(1), // Status bar
+                Constraint::Min(6),   // Content
+                Constraint::Fixed(1), // Keybinds
             ])
             .split(area);
 
@@ -327,12 +393,17 @@ impl Model for GtDashboard {
             ])
             .split(outer[1]);
 
-        // Agent tree (left sidebar)
+        // Save tree area for mouse hit detection
+        *self.tree_area.borrow_mut() = content[0];
+
+        // Agent tree (left sidebar) — with cursor
         panels::agent_tree::render(
             frame,
             content[0],
             &self.status,
             self.active_panel == Panel::AgentTree,
+            &self.tree_entries,
+            self.tree_cursor,
         );
 
         // Main content area: convoys (40%) + events (60%)
@@ -370,8 +441,9 @@ impl Model for GtDashboard {
             .separator("  ")
             .left(StatusItem::key_hint("Tab", "Panel"))
             .left(StatusItem::key_hint("1-3", "Jump"))
-            .left(StatusItem::key_hint("j/k", "Scroll"))
+            .left(StatusItem::key_hint("j/k", "Nav"))
             .left(StatusItem::key_hint("Enter", "Tmux"))
+            .left(StatusItem::key_hint("Click", "Switch"))
             .center(StatusItem::text(&panel_label))
             .right(StatusItem::key_hint("r", "Refresh"))
             .right(StatusItem::key_hint("q", "Quit"));
