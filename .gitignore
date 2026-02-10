@@ -77,3 +77,9 @@ setup_fonts.sh
 dist/
 saga_of_frankenterm_js.md
 SESSION_REPORT.md
+
+# Gas Town (added by gt)
+.runtime/
+.claude/
+.logs/
+.beads/

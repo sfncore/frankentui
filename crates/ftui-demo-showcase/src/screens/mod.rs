@@ -7,6 +7,7 @@
 
 pub mod accessibility_panel;
 pub mod action_timeline;
+pub mod agent_tree;
 pub mod advanced_features;
 pub mod advanced_text_editor;
 pub mod async_tasks;
@@ -561,6 +562,16 @@ pub const SCREEN_REGISTRY: &[ScreenMeta] = &[
         category: ScreenCategory::Text,
         palette_tags: &["editor", "preview", "markdown", "search", "diff"],
         blurb: "Split-pane editor with live Markdown preview, search, and diff mode.",
+        default_hotkey: None,
+        tour_step_hint: None,
+    },
+    ScreenMeta {
+        id: ScreenId::AgentTree,
+        title: "Agent Tree",
+        short_label: "Agents",
+        category: ScreenCategory::Systems,
+        palette_tags: &["agents", "tree", "hierarchy", "gas-town"],
+        blurb: "Gas Town agent hierarchy with Tree widget and status indicators.",
         default_hotkey: None,
         tour_step_hint: None,
     },

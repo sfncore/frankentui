@@ -778,6 +778,8 @@ pub enum ScreenId {
     KanbanBoard,
     /// Live Markdown editor with split preview (bd-iuvb.13).
     MarkdownLiveEditor,
+    /// Agent tree hierarchy display (bd-y8lc).
+    AgentTree,
 }
 
 impl ScreenId {
@@ -854,6 +856,7 @@ impl ScreenId {
             Self::HyperlinkPlayground => "HyperlinkPlayground",
             Self::KanbanBoard => "KanbanBoard",
             Self::MarkdownLiveEditor => "MarkdownLiveEditor",
+            Self::AgentTree => "AgentTree",
         }
     }
 
@@ -998,6 +1001,8 @@ pub struct ScreenStates {
     pub kanban_board: screens::kanban_board::KanbanBoard,
     /// Live Markdown editor screen state (bd-iuvb.13).
     pub markdown_live_editor: screens::markdown_live_editor::MarkdownLiveEditor,
+    /// Agent tree screen state (bd-y8lc).
+    pub agent_tree: screens::agent_tree::AgentTree,
     /// Tracks whether each screen has errored during rendering.
     /// Indexed by `ScreenId::index()`.
     screen_errors: Vec<Option<String>>,
@@ -1050,6 +1055,7 @@ impl Default for ScreenStates {
             hyperlink_playground: Default::default(),
             kanban_board: Default::default(),
             markdown_live_editor: Default::default(),
+            agent_tree: Default::default(),
             screen_errors: vec![None; screens::screen_registry().len()],
             visual_effects_deterministic_tick_ms: None,
         }
@@ -1290,6 +1296,9 @@ impl ScreenStates {
             ScreenId::MarkdownLiveEditor => {
                 self.markdown_live_editor.update(event);
             }
+            ScreenId::AgentTree => {
+                self.agent_tree.update(event);
+            }
         }
     }
 
@@ -1370,6 +1379,7 @@ impl ScreenStates {
             ScreenId::HyperlinkPlayground => self.hyperlink_playground.tick(tick_count),
             ScreenId::KanbanBoard => self.kanban_board.tick(tick_count),
             ScreenId::MarkdownLiveEditor => self.markdown_live_editor.tick(tick_count),
+            ScreenId::AgentTree => self.agent_tree.tick(tick_count),
         }
     }
 
@@ -1454,6 +1464,7 @@ impl ScreenStates {
                 ScreenId::HyperlinkPlayground => self.hyperlink_playground.view(frame, area),
                 ScreenId::KanbanBoard => self.kanban_board.view(frame, area),
                 ScreenId::MarkdownLiveEditor => self.markdown_live_editor.view(frame, area),
+                ScreenId::AgentTree => self.agent_tree.view(frame, area),
             }
         }));
 
@@ -4042,6 +4053,7 @@ impl AppModel {
             ScreenId::HyperlinkPlayground => self.screens.hyperlink_playground.keybindings(),
             ScreenId::KanbanBoard => self.screens.kanban_board.keybindings(),
             ScreenId::MarkdownLiveEditor => self.screens.markdown_live_editor.keybindings(),
+            ScreenId::AgentTree => self.screens.agent_tree.keybindings(),
         };
         if self.tour.is_active() {
             entries.push(screens::HelpEntry {
