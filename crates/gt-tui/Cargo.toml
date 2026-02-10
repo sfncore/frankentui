@@ -1,0 +1,22 @@
+[package]
+name = "gt-tui"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Gas Town operator dashboard built on FrankenTUI"
+
+[[bin]]
+name = "gt-tui"
+path = "src/main.rs"
+
+[dependencies]
+ftui-core = { path = "../ftui-core", version = "0.1.1" }
+ftui-render = { path = "../ftui-render", version = "0.1.1" }
+ftui-runtime = { path = "../ftui-runtime", version = "0.1.1" }
+ftui-widgets = { path = "../ftui-widgets", version = "0.1.1" }
+ftui-style = { path = "../ftui-style", version = "0.1.1" }
+ftui-text = { path = "../ftui-text", version = "0.1.1" }
+ftui-layout = { path = "../ftui-layout", version = "0.1.1" }
+ftui-extras = { path = "../ftui-extras", version = "0.1.1", features = ["theme"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
