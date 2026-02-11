@@ -3,7 +3,9 @@
 //! Full tmux control with a session/window/pane tree view and
 //! context-sensitive actions.
 
-use ftui_core::event::{KeyCode, KeyEvent, MouseEvent};
+use std::cell::RefCell;
+
+use ftui_core::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ftui_core::geometry::Rect;
 use ftui_extras::theme;
 use ftui_layout::{Constraint, Flex};
@@ -55,6 +57,7 @@ pub struct TmuxCommanderScreen {
     /// Feedback message with TTL
     feedback: Option<(String, u64)>,
     tick_count: u64,
+    tree_area: RefCell<Rect>,
 }
 
 impl TmuxCommanderScreen {
@@ -68,6 +71,7 @@ impl TmuxCommanderScreen {
             pending_confirm: None,
             feedback: None,
             tick_count: 0,
+            tree_area: RefCell::new(Rect::default()),
         }
     }
 
@@ -347,7 +351,20 @@ impl TmuxCommanderScreen {
         Cmd::None
     }
 
-    pub fn handle_mouse(&mut self, _mouse: &MouseEvent) -> Cmd<Msg> {
+    pub fn handle_mouse(&mut self, mouse: &MouseEvent) -> Cmd<Msg> {
+        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return Cmd::None;
+        }
+        let tree = *self.tree_area.borrow();
+        if tree.contains(mouse.x, mouse.y) {
+            // Click in tree — select node (border=1 offset)
+            let row = (mouse.y - tree.y).saturating_sub(1) as usize;
+            let total = self.total_visible_rows();
+            if row < total {
+                self.tree_cursor = row;
+                self.focus = Focus::Tree;
+            }
+        }
         Cmd::None
     }
 
@@ -382,6 +399,8 @@ impl TmuxCommanderScreen {
                 Constraint::Percentage(60.0),
             ])
             .split(outer[0]);
+
+        *self.tree_area.borrow_mut() = columns[0];
 
         self.render_tree(frame, columns[0]);
         self.render_detail(frame, columns[1]);

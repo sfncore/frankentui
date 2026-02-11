@@ -5,7 +5,9 @@
 //! with sessions/agents, hit Go to create the tmux session.
 //! Supports: create, delete, duplicate, apply.
 
-use ftui_core::event::{KeyCode, KeyEvent, MouseEvent};
+use std::cell::RefCell;
+
+use ftui_core::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ftui_core::geometry::Rect;
 use ftui_extras::theme;
 use ftui_layout::{Constraint, Flex};
@@ -207,6 +209,7 @@ pub struct LayoutManagerScreen {
     pending_confirm: Option<(String, u64)>,
     feedback: Option<(String, u64)>,
     tick_count: u64,
+    config_list_area: RefCell<Rect>,
 }
 
 impl LayoutManagerScreen {
@@ -230,6 +233,7 @@ impl LayoutManagerScreen {
             pending_confirm: None,
             feedback: None,
             tick_count: 0,
+            config_list_area: RefCell::new(Rect::default()),
         }
     }
 
@@ -776,7 +780,23 @@ impl LayoutManagerScreen {
         )
     }
 
-    pub fn handle_mouse(&mut self, _mouse: &MouseEvent) -> Cmd<Msg> {
+    pub fn handle_mouse(&mut self, mouse: &MouseEvent) -> Cmd<Msg> {
+        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return Cmd::None;
+        }
+        let list = *self.config_list_area.borrow();
+        if list.contains(mouse.x, mouse.y) {
+            // Click in config list — select config (border=1 offset)
+            let row = (mouse.y - list.y).saturating_sub(1) as usize;
+            if row < self.configs.len() {
+                self.selected_config = row;
+                self.focus = Focus::Configs;
+                self.load_config(row);
+            }
+        } else {
+            // Click in layout area — focus layout
+            self.focus = Focus::Layout;
+        }
         Cmd::None
     }
 
@@ -808,6 +828,8 @@ impl LayoutManagerScreen {
         let columns = Flex::horizontal()
             .constraints([Constraint::Percentage(25.0), Constraint::Percentage(75.0)])
             .split(outer[0]);
+
+        *self.config_list_area.borrow_mut() = columns[0];
 
         self.render_config_list(frame, columns[0]);
         self.render_visual_layout(frame, columns[1]);

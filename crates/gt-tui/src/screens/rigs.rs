@@ -4,7 +4,9 @@
 //! witness/refinery status. Actions: start witness/refinery, start crew,
 //! sling work, view polecats/beads.
 
-use ftui_core::event::{KeyCode, KeyEvent, MouseEvent};
+use std::cell::RefCell;
+
+use ftui_core::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ftui_core::geometry::Rect;
 use ftui_extras::theme;
 use ftui_layout::{Constraint, Flex};
@@ -41,6 +43,8 @@ pub struct RigsScreen {
     selected_action: usize,
     feedback: Option<(String, u64)>,
     tick_count: u64,
+    list_area: RefCell<Rect>,
+    detail_area: RefCell<Rect>,
 }
 
 impl RigsScreen {
@@ -51,6 +55,8 @@ impl RigsScreen {
             selected_action: 0,
             feedback: None,
             tick_count: 0,
+            list_area: RefCell::new(Rect::default()),
+            detail_area: RefCell::new(Rect::default()),
         }
     }
 
@@ -217,7 +223,24 @@ impl RigsScreen {
         )
     }
 
-    pub fn handle_mouse(&mut self, _mouse: &MouseEvent) -> Cmd<Msg> {
+    pub fn handle_mouse(&mut self, mouse: &MouseEvent, status: &TownStatus) -> Cmd<Msg> {
+        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return Cmd::None;
+        }
+        let list = *self.list_area.borrow();
+        let detail = *self.detail_area.borrow();
+
+        if list.contains(mouse.x, mouse.y) {
+            // Click in rig list — select rig (account for 1-row border)
+            let row = (mouse.y - list.y).saturating_sub(1) as usize;
+            if row < status.rigs.len() {
+                self.selected_rig = row;
+                self.selected_action = 0;
+                self.focus = Focus::List;
+            }
+        } else if detail.contains(mouse.x, mouse.y) {
+            self.focus = Focus::Detail;
+        }
         Cmd::None
     }
 
@@ -229,6 +252,9 @@ impl RigsScreen {
         let columns = Flex::horizontal()
             .constraints([Constraint::Percentage(35.0), Constraint::Percentage(65.0)])
             .split(area);
+
+        *self.list_area.borrow_mut() = columns[0];
+        *self.detail_area.borrow_mut() = columns[1];
 
         self.render_rig_list(frame, columns[0], status);
         self.render_rig_detail(frame, columns[1], status);

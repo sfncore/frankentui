@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 
-use ftui_core::event::{KeyCode, KeyEvent};
+use ftui_core::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ftui_core::geometry::Rect;
 use ftui_extras::theme;
 use ftui_layout::{Constraint, Flex};
@@ -96,6 +96,7 @@ pub struct BeadsOverviewScreen {
     in_progress_state: RefCell<TableState>,
     blocked_state: RefCell<TableState>,
     tick_count: u64,
+    section_areas: RefCell<[Rect; 3]>,
 }
 
 impl BeadsOverviewScreen {
@@ -106,6 +107,7 @@ impl BeadsOverviewScreen {
             in_progress_state: RefCell::new(TableState::default()),
             blocked_state: RefCell::new(TableState::default()),
             tick_count: 0,
+            section_areas: RefCell::new([Rect::default(); 3]),
         }
     }
 
@@ -374,6 +376,34 @@ impl BeadsOverviewScreen {
         Cmd::None
     }
 
+    pub fn handle_mouse(&mut self, mouse: &MouseEvent, beads: &BeadsSnapshot) -> Cmd<Msg> {
+        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return Cmd::None;
+        }
+        let areas = *self.section_areas.borrow();
+        // Check which section was clicked
+        let clicked_section = if areas[0].contains(mouse.x, mouse.y) {
+            Some((Section::Ready, &areas[0]))
+        } else if areas[1].contains(mouse.x, mouse.y) {
+            Some((Section::InProgress, &areas[1]))
+        } else if areas[2].contains(mouse.x, mouse.y) {
+            Some((Section::Blocked, &areas[2]))
+        } else {
+            None
+        };
+
+        if let Some((section, area)) = clicked_section {
+            self.active_section = section;
+            // Map click row to item (border=1, header=1 → offset 2)
+            let row = (mouse.y - area.y).saturating_sub(2) as usize;
+            let items = section.items_from(beads);
+            if row < items.len() {
+                self.active_table_state().borrow_mut().select(Some(row));
+            }
+        }
+        Cmd::None
+    }
+
     pub fn tick(&mut self, tick_count: u64) {
         self.tick_count = tick_count;
     }
@@ -397,6 +427,8 @@ impl BeadsOverviewScreen {
                 Constraint::Percentage(30.0),
             ])
             .split(table_area);
+
+        *self.section_areas.borrow_mut() = [sections[0], sections[1], sections[2]];
 
         let ready_title = format!(" Ready ({}) ", beads.ready.len());
         {
