@@ -17,6 +17,7 @@ use ftui_widgets::Widget;
 
 use crate::data::AgentInfo;
 use crate::msg::Msg;
+use crate::tmux_pane::{ActivateResult, PaneMode, TmuxPaneControl};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -50,6 +51,7 @@ pub struct AgentDetailScreen {
     last_action: Option<String>,
     action_feedback_ttl: u64,
     layout_actions: Cell<Rect>,
+    pub tmux_pane: TmuxPaneControl,
 }
 
 impl AgentDetailScreen {
@@ -61,7 +63,13 @@ impl AgentDetailScreen {
             last_action: None,
             action_feedback_ttl: 0,
             layout_actions: Cell::new(Rect::default()),
+            tmux_pane: TmuxPaneControl::new(),
         }
+    }
+
+    /// Re-scan tmux pane layout (called on status refresh).
+    pub fn rescan_tmux(&mut self) {
+        self.tmux_pane.scan();
     }
 
     fn execute_action(&mut self, agents: &[AgentInfo]) {
@@ -71,8 +79,40 @@ impl AgentDetailScreen {
         let idx = self.selected_agent.min(agents.len() - 1);
         let agent = &agents[idx];
         let action = ACTION_LABELS[self.focused_action].1;
-        self.last_action = Some(format!("{} -> {}", action, agent.name));
-        self.action_feedback_ttl = 30;
+
+        match action {
+            "attach" => self.attach_agent(agent),
+            _ => {
+                self.last_action = Some(format!("{} -> {}", action, agent.name));
+                self.action_feedback_ttl = 30;
+            }
+        }
+    }
+
+    fn attach_agent(&mut self, agent: &AgentInfo) {
+        if !agent.running || agent.session.is_empty() {
+            self.last_action = Some(format!("{} is offline", agent.name));
+            self.action_feedback_ttl = 30;
+            return;
+        }
+        match self.tmux_pane.activate_session(&agent.session) {
+            ActivateResult::Switched => {
+                self.last_action = Some(format!("pane \u{2192} {}", agent.session));
+                self.action_feedback_ttl = 40;
+            }
+            ActivateResult::AlreadyActive => {
+                self.last_action = Some(format!("already showing {}", agent.session));
+                self.action_feedback_ttl = 20;
+            }
+            ActivateResult::NoPane => {
+                self.last_action = Some("no adjacent pane".to_string());
+                self.action_feedback_ttl = 30;
+            }
+            ActivateResult::SameSession => {
+                self.last_action = Some(format!("{} (this session)", agent.session));
+                self.action_feedback_ttl = 20;
+            }
+        }
     }
 
     // --- Rendering ---
@@ -228,98 +268,173 @@ impl AgentDetailScreen {
             .render(inner, frame);
     }
 
-    fn render_summary(&self, frame: &mut Frame, area: Rect, agents: &[AgentInfo]) {
+    fn render_tmux_panel(&self, frame: &mut Frame, area: Rect, agents: &[AgentInfo]) {
+        let mode_icon = match &self.tmux_pane.mode {
+            PaneMode::Adjacent(_) => "\u{21c4}",
+            PaneMode::Solo => "\u{25a1}",
+            PaneMode::NoTmux => "\u{2717}",
+        };
+        let title = format!(" {} Tmux Session ", mode_icon);
         let block = Block::new()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .title(" Agent Summary ")
+            .title(title.as_str())
             .title_alignment(Alignment::Center)
             .style(Style::new().fg(theme::fg::PRIMARY));
 
         let inner = block.inner(area);
         block.render(area, frame);
 
-        if inner.height < 1 || inner.width < 4 {
+        if inner.height < 2 || inner.width < 4 {
             return;
         }
 
-        let total = agents.len();
-        let running = agents.iter().filter(|a| a.running).count();
-        let with_work = agents.iter().filter(|a| a.has_work).count();
-        let blocked = agents
-            .iter()
-            .filter(|a| a.state.to_lowercase() == "blocked")
-            .count();
-        let total_mail: u32 = agents.iter().map(|a| a.unread_mail).sum();
+        let mut lines: Vec<Line> = Vec::new();
+        let ctx = &self.tmux_pane.context;
 
-        let mut lines = vec![
-            Line::from_spans([
-                Span::styled("Total agents: ", Style::new().fg(theme::fg::MUTED)),
+        // --- Tmux hierarchy: session > window > panes ---
+        if !ctx.session_name.is_empty() {
+            lines.push(Line::from_spans([
+                Span::styled(" Session: ", Style::new().fg(theme::fg::MUTED)),
                 Span::styled(
-                    format!("{}", total),
-                    Style::new().fg(theme::fg::PRIMARY).bold(),
+                    &ctx.session_name,
+                    Style::new().fg(theme::accent::INFO).bold(),
                 ),
-            ]),
-            Line::from_spans([
-                Span::styled("Running:      ", Style::new().fg(theme::fg::MUTED)),
+            ]));
+            lines.push(Line::from_spans([
+                Span::styled("  Window: ", Style::new().fg(theme::fg::MUTED)),
                 Span::styled(
-                    format!("{}", running),
-                    Style::new().fg(theme::accent::SUCCESS),
+                    format!("{} ({})", ctx.window_index, ctx.window_name),
+                    Style::new().fg(theme::fg::PRIMARY),
                 ),
-            ]),
-            Line::from_spans([
-                Span::styled("With work:    ", Style::new().fg(theme::fg::MUTED)),
+            ]));
+            lines.push(Line::from_spans([
+                Span::styled("    Pane: ", Style::new().fg(theme::fg::MUTED)),
                 Span::styled(
-                    format!("{}", with_work),
+                    format!("{} (this TUI)", ctx.pane_id),
+                    Style::new().fg(theme::fg::SECONDARY),
+                ),
+            ]));
+
+            // Adjacent pane info
+            match &self.tmux_pane.mode {
+                PaneMode::Adjacent(adj_id) => {
+                    let running_desc = match &self.tmux_pane.adjacent_info {
+                        Some(info) if !info.command.is_empty() => {
+                            if !info.title.is_empty() && info.title != info.command {
+                                format!("{} {} ({})", adj_id, info.command, info.title)
+                            } else {
+                                format!("{} running: {}", adj_id, info.command)
+                            }
+                        }
+                        _ => format!("{} (adjacent)", adj_id),
+                    };
+                    lines.push(Line::from_spans([
+                        Span::styled("          ", Style::new().fg(theme::fg::MUTED)),
+                        Span::styled(
+                            running_desc,
+                            Style::new().fg(theme::accent::SUCCESS),
+                        ),
+                    ]));
+                }
+                PaneMode::Solo => {
+                    lines.push(Line::from_spans([
+                        Span::styled("          ", Style::new().fg(theme::fg::MUTED)),
+                        Span::styled(
+                            "no adjacent pane",
+                            Style::new().fg(theme::fg::DISABLED),
+                        ),
+                    ]));
+                }
+                PaneMode::NoTmux => {}
+            }
+        } else {
+            lines.push(Line::styled(
+                " Not running inside tmux",
+                Style::new().fg(theme::fg::DISABLED),
+            ));
+        }
+
+        lines.push(Line::raw(""));
+
+        // --- Currently showing in adjacent pane ---
+        if let Some(active) = self.tmux_pane.active_session_name() {
+            lines.push(Line::from_spans([
+                Span::styled(" Showing: ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled(
+                    active,
                     Style::new().fg(theme::accent::INFO),
                 ),
-            ]),
-            Line::from_spans([
-                Span::styled("Blocked:      ", Style::new().fg(theme::fg::MUTED)),
-                Span::styled(
-                    format!("{}", blocked),
-                    Style::new().fg(theme::accent::WARNING),
-                ),
-            ]),
-            Line::from_spans([
-                Span::styled("Unread mail:  ", Style::new().fg(theme::fg::MUTED)),
-                Span::styled(
-                    format!("{}", total_mail),
-                    Style::new().fg(if total_mail > 0 {
-                        theme::accent::WARNING
-                    } else {
-                        theme::fg::MUTED
-                    }),
-                ),
-            ]),
-        ];
+            ]));
+        } else if matches!(self.tmux_pane.mode, PaneMode::Adjacent(_)) {
+            lines.push(Line::from_spans([
+                Span::styled(" Showing: ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("(none yet)", Style::new().fg(theme::fg::DISABLED)),
+            ]));
+        }
 
-        // Per-agent status list
-        if inner.height > 7 {
-            lines.push(Line::raw(""));
-            lines.push(Line::styled(
-                "Agents:",
-                Style::new().fg(theme::fg::MUTED).bold(),
-            ));
-            for agent in agents {
-                let sc = state_color(&agent.state);
-                let mut spans = vec![
+        lines.push(Line::raw(""));
+
+        // --- Selected agent's session + keybind hints ---
+        if !agents.is_empty() {
+            let idx = self.selected_agent.min(agents.len() - 1);
+            let agent = &agents[idx];
+
+            if !agent.running || agent.session.is_empty() {
+                lines.push(Line::styled(
+                    "  Agent is offline",
+                    Style::new().fg(theme::fg::DISABLED),
+                ));
+            } else {
+                let action_desc = "Switch adjacent pane";
+
+                lines.push(Line::from_spans([
                     Span::styled(
-                        format!("  {:<12} ", agent.name),
-                        Style::new().fg(theme::fg::PRIMARY),
+                        "  Enter ",
+                        Style::new().fg(theme::accent::PRIMARY).bold(),
                     ),
                     Span::styled(
-                        format!("{:<8}", agent.state),
-                        Style::new().fg(sc),
+                        format!(" {action_desc} \u{2192} "),
+                        Style::new().fg(theme::fg::SECONDARY),
                     ),
-                ];
-                if agent.unread_mail > 0 {
-                    spans.push(Span::styled(
-                        format!(" ({}mail)", agent.unread_mail),
-                        Style::new().fg(theme::accent::WARNING),
+                    Span::styled(
+                        &agent.session,
+                        Style::new().fg(theme::accent::INFO),
+                    ),
+                ]));
+                lines.push(Line::from_spans([
+                    Span::styled(
+                        "    a   ",
+                        Style::new().fg(theme::accent::PRIMARY).bold(),
+                    ),
+                    Span::styled(
+                        format!(" {action_desc} (same)"),
+                        Style::new().fg(theme::fg::SECONDARY),
+                    ),
+                ]));
+
+                // Raw tmux command for reference
+                if inner.height > 14 {
+                    lines.push(Line::raw(""));
+                    lines.push(Line::styled(
+                        "  tmux command:",
+                        Style::new().fg(theme::fg::DISABLED),
+                    ));
+                    let tmux_cmd = match &self.tmux_pane.mode {
+                        PaneMode::Adjacent(pane_id) => format!(
+                            "  tmux respawn-pane -k -t {} \\", pane_id,
+                        ),
+                        _ => "  (no adjacent pane)".to_string(),
+                    };
+                    lines.push(Line::styled(
+                        tmux_cmd,
+                        Style::new().fg(theme::fg::DISABLED),
+                    ));
+                    lines.push(Line::styled(
+                        format!("    \"tmux attach-session -t {}\"", agent.session),
+                        Style::new().fg(theme::fg::DISABLED),
                     ));
                 }
-                lines.push(Line::from_spans(spans));
             }
         }
 
@@ -433,12 +548,14 @@ impl AgentDetailScreen {
                 self.focused_action = 2;
                 self.execute_action(agents);
             }
-            KeyCode::Char('a') => {
-                self.focused_action = 3;
-                self.execute_action(agents);
-            }
-            KeyCode::Enter => {
-                self.execute_action(agents);
+            KeyCode::Char('a') | KeyCode::Enter => {
+                // Enter and 'a' always attach to the selected agent's tmux session
+                if !agents.is_empty() {
+                    let idx = self.selected_agent.min(agents.len() - 1);
+                    let agent = agents[idx].clone();
+                    self.focused_action = 3;
+                    self.attach_agent(&agent);
+                }
             }
             _ => {}
         }
@@ -498,7 +615,7 @@ impl AgentDetailScreen {
             .split(content_area);
 
         self.render_info(frame, columns[0], agents);
-        self.render_summary(frame, columns[1], agents);
+        self.render_tmux_panel(frame, columns[1], agents);
         self.render_actions(frame, action_area);
     }
 }

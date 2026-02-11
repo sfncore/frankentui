@@ -37,7 +37,7 @@ pub fn render(
     };
 
     let block = Block::new()
-        .title(" Agents (j/k Enter) ")
+        .title(" Agents (j/k Enter=switch) ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .style(theme::panel_bg())
@@ -52,8 +52,12 @@ pub fn render(
         return;
     }
 
+    // Reserve last 2 rows for the selected-entry footer
+    let footer_rows: u16 = if inner.height > 4 { 2 } else { 0 };
+    let list_height = (inner.height - footer_rows) as usize;
+
     // Render flat list with indentation and cursor highlight
-    let max_rows = inner.height as usize;
+    let max_rows = list_height;
     let start = if cursor >= max_rows {
         cursor - max_rows + 1
     } else {
@@ -75,7 +79,11 @@ pub fn render(
             " \u{25cb} "  // ○ offline
         };
 
-        let line = format!("{}{}{}", indent, prefix, entry.label);
+        let line = if entry.running && !entry.tmux_session.is_empty() {
+            format!("{}{}{} [{}]", indent, prefix, entry.label, entry.tmux_session)
+        } else {
+            format!("{}{}{}", indent, prefix, entry.label)
+        };
 
         let is_selected = (start + i) == cursor;
         let row_area = Rect::new(inner.x, y, inner.width, 1);
@@ -114,6 +122,43 @@ pub fn render(
                             .with_fg(ftui_extras::theme::fg::MUTED.into())
                     };
                     *cell = new_cell;
+                }
+            }
+        }
+    }
+
+    // Footer: show the exact popup command for the selected entry
+    if footer_rows > 0 {
+        if let Some(entry) = tree_entries.get(cursor) {
+            let footer_y = inner.y + inner.height - footer_rows;
+            let w = inner.width as usize;
+
+            let (line1, line2) = if entry.running && !entry.tmux_session.is_empty() {
+                (
+                    format!(" Enter: switch pane -> {}", entry.tmux_session),
+                    format!(" respawn-pane -k … attach -t {}", entry.tmux_session),
+                )
+            } else if entry.tmux_session.is_empty() && entry.depth == 0 {
+                (" (rig header)".to_string(), String::new())
+            } else {
+                (" (offline — no session)".to_string(), String::new())
+            };
+
+            // Draw footer lines
+            let footer_color = ftui_extras::theme::fg::DISABLED;
+            for (row, text) in [line1, line2].iter().enumerate() {
+                let y = footer_y + row as u16;
+                if y >= inner.y + inner.height {
+                    break;
+                }
+                let display: String = text.chars().take(w).collect();
+                for (j, ch) in display.chars().enumerate() {
+                    let x = inner.x + j as u16;
+                    if x < inner.x + inner.width {
+                        if let Some(cell) = frame.buffer.get_mut(x, y) {
+                            *cell = Cell::from_char(ch).with_fg(footer_color.into());
+                        }
+                    }
                 }
             }
         }

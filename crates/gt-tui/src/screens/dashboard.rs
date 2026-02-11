@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::process::Command;
 
 use ftui_core::event::{KeyCode, KeyEvent, Modifiers, MouseButton, MouseEventKind};
 use ftui_core::geometry::Rect;
@@ -14,6 +13,7 @@ use ftui_widgets::log_viewer::{LogViewer, LogViewerState};
 use crate::data::{ConvoyItem, TownStatus};
 use crate::msg::Msg;
 use crate::panels;
+use crate::tmux_pane::{ActivateResult, TmuxPaneControl};
 
 // ---------------------------------------------------------------------------
 // Focus IDs for dashboard panels
@@ -82,6 +82,7 @@ pub struct DashboardScreen {
     pub tree_entries: Vec<TreeEntry>,
     pub tree_cursor: usize,
     pub tree_area: RefCell<Rect>,
+    pub tmux_pane: TmuxPaneControl,
 }
 
 impl DashboardScreen {
@@ -92,6 +93,7 @@ impl DashboardScreen {
             tree_entries: Vec::new(),
             tree_cursor: 0,
             tree_area: RefCell::new(Rect::default()),
+            tmux_pane: TmuxPaneControl::new(),
         }
     }
 
@@ -101,6 +103,8 @@ impl DashboardScreen {
 
     /// Rebuild the flat tree entries from current status.
     pub fn rebuild_tree_entries(&mut self, status: &TownStatus) {
+        // Re-detect pane layout on each status refresh
+        self.tmux_pane.scan();
         self.tree_entries.clear();
 
         // Town-level agents
@@ -198,9 +202,11 @@ impl DashboardScreen {
                         self.tree_cursor =
                             (self.tree_cursor + 1).min(self.tree_entries.len() - 1);
                     }
+                    self.peek_selected_tmux(event_viewer);
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.tree_cursor = self.tree_cursor.saturating_sub(1);
+                    self.peek_selected_tmux(event_viewer);
                 }
                 KeyCode::Enter => {
                     self.switch_selected_tmux(event_viewer);
@@ -275,7 +281,7 @@ impl DashboardScreen {
                 let entry = &self.tree_entries[row_in_panel];
                 if entry.running && !entry.tmux_session.is_empty() {
                     let session = entry.tmux_session.clone();
-                    self.open_agent_popup(&session, event_viewer);
+                    self.activate_agent_session(&session, event_viewer);
                 } else {
                     event_viewer
                         .push(format!("{} is offline", entry.label));
@@ -288,31 +294,40 @@ impl DashboardScreen {
         Cmd::None
     }
 
-    /// Open the selected agent's tmux session in a popup overlay.
-    fn open_agent_popup(&mut self, session: &str, event_viewer: &mut LogViewer) {
-        event_viewer
-            .push(format!("Opening popup: {session}"));
-        let attach_cmd = format!("tmux attach-session -t {} -r", session);
-        let _ = Command::new("tmux")
-            .args([
-                "display-popup",
-                "-E",
-                "-w", "85%",
-                "-h", "85%",
-                "-T", session,
-                &attach_cmd,
-            ])
-            .status();
+    /// Peek: switch the adjacent pane to show the selected agent's session.
+    fn activate_agent_session(&mut self, session: &str, event_viewer: &mut LogViewer) {
+        match self.tmux_pane.activate_session(session) {
+            ActivateResult::Switched => {
+                event_viewer.push(format!("Pane → {session}"));
+            }
+            ActivateResult::AlreadyActive => {}
+            ActivateResult::NoPane => {
+                event_viewer.push("No adjacent pane".to_string());
+            }
+            ActivateResult::SameSession => {
+                event_viewer.push(format!("{session} (this session)"));
+            }
+        }
     }
 
+    /// Preview the selected agent's session in the adjacent pane as cursor moves.
+    fn peek_selected_tmux(&mut self, event_viewer: &mut LogViewer) {
+        if let Some(entry) = self.tree_entries.get(self.tree_cursor) {
+            if entry.running && !entry.tmux_session.is_empty() {
+                let session = entry.tmux_session.clone();
+                self.activate_agent_session(&session, event_viewer);
+            }
+        }
+    }
+
+    /// Enter: show the selected agent's session in the adjacent pane.
     fn switch_selected_tmux(&mut self, event_viewer: &mut LogViewer) {
         if let Some(entry) = self.tree_entries.get(self.tree_cursor) {
             if !entry.running || entry.tmux_session.is_empty() {
-                event_viewer
-                    .push(format!("{} is offline", entry.label));
+                event_viewer.push(format!("{} is offline", entry.label));
             } else {
                 let session = entry.tmux_session.clone();
-                self.open_agent_popup(&session, event_viewer);
+                self.activate_agent_session(&session, event_viewer);
             }
         }
     }

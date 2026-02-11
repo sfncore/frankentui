@@ -461,6 +461,7 @@ impl Model for GtApp {
                 self.all_agents = Self::collect_agents(&self.status);
                 self.last_refresh = Instant::now();
                 self.dashboard.rebuild_tree_entries(&self.status);
+                self.agent_screen.rescan_tmux();
                 Cmd::None
             }
             Msg::ConvoyRefresh(convoys) => {
