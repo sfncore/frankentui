@@ -784,6 +784,8 @@ pub enum ScreenId {
     AgentTree,
     /// Convoy panel with table widget and progress columns (bd-y6oc).
     ConvoyPanel,
+    /// Agent detail panel with info and actions (bd-ydjj).
+    AgentDetail,
 }
 
 impl ScreenId {
@@ -863,6 +865,7 @@ impl ScreenId {
             Self::MarkdownLiveEditor => "MarkdownLiveEditor",
             Self::AgentTree => "AgentTree",
             Self::ConvoyPanel => "ConvoyPanel",
+            Self::AgentDetail => "AgentDetail",
         }
     }
 
@@ -1013,6 +1016,8 @@ pub struct ScreenStates {
     pub agent_tree: screens::agent_tree::AgentTree,
     /// Convoy panel screen state (bd-y6oc).
     pub convoy_panel: screens::convoy_panel::ConvoyPanel,
+    /// Agent detail panel screen state (bd-ydjj).
+    pub agent_detail: screens::agent_detail::AgentDetail,
     /// Tracks whether each screen has errored during rendering.
     /// Indexed by `ScreenId::index()`.
     screen_errors: Vec<Option<String>>,
@@ -1068,6 +1073,7 @@ impl Default for ScreenStates {
             markdown_live_editor: Default::default(),
             agent_tree: Default::default(),
             convoy_panel: Default::default(),
+            agent_detail: Default::default(),
             screen_errors: vec![None; screens::screen_registry().len()],
             visual_effects_deterministic_tick_ms: None,
         }
@@ -1317,6 +1323,9 @@ impl ScreenStates {
             ScreenId::ConvoyPanel => {
                 self.convoy_panel.update(event);
             }
+            ScreenId::AgentDetail => {
+                self.agent_detail.update(event);
+            }
         }
     }
 
@@ -1401,6 +1410,7 @@ impl ScreenStates {
             ScreenId::MarkdownLiveEditor => self.markdown_live_editor.tick(tick_count),
             ScreenId::AgentTree => self.agent_tree.tick(tick_count),
             ScreenId::ConvoyPanel => self.convoy_panel.tick(tick_count),
+            ScreenId::AgentDetail => self.agent_detail.tick(tick_count),
         }
     }
 
@@ -1488,6 +1498,7 @@ impl ScreenStates {
                 ScreenId::MarkdownLiveEditor => self.markdown_live_editor.view(frame, area),
                 ScreenId::AgentTree => self.agent_tree.view(frame, area),
                 ScreenId::ConvoyPanel => self.convoy_panel.view(frame, area),
+                ScreenId::AgentDetail => self.agent_detail.view(frame, area),
             }
         }));
 
@@ -4079,6 +4090,7 @@ impl AppModel {
             ScreenId::MarkdownLiveEditor => self.screens.markdown_live_editor.keybindings(),
             ScreenId::AgentTree => self.screens.agent_tree.keybindings(),
             ScreenId::ConvoyPanel => self.screens.convoy_panel.keybindings(),
+            ScreenId::AgentDetail => self.screens.agent_detail.keybindings(),
         };
         if self.tour.is_active() {
             entries.push(screens::HelpEntry {

@@ -7,6 +7,7 @@
 
 pub mod accessibility_panel;
 pub mod action_timeline;
+pub mod agent_detail;
 pub mod agent_tree;
 pub mod convoy_panel;
 pub mod advanced_features;
@@ -594,6 +595,16 @@ pub const SCREEN_REGISTRY: &[ScreenMeta] = &[
         category: ScreenCategory::Systems,
         palette_tags: &["convoy", "table", "progress", "status"],
         blurb: "Table-based convoy panel with progress columns and detail view.",
+        default_hotkey: None,
+        tour_step_hint: None,
+    },
+    ScreenMeta {
+        id: ScreenId::AgentDetail,
+        title: "Agent Detail",
+        short_label: "Agent",
+        category: ScreenCategory::Interaction,
+        palette_tags: &["agent", "detail", "modal", "panel"],
+        blurb: "Agent detail panel with info, events, and action buttons.",
         default_hotkey: None,
         tour_step_hint: None,
     },

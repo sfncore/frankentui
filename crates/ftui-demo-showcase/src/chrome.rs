@@ -1336,6 +1336,7 @@ pub fn accent_for(id: ScreenId) -> theme::ColorToken {
         ScreenId::MarkdownLiveEditor => theme::screen_accent::MARKDOWN,
         ScreenId::AgentTree => theme::screen_accent::PERFORMANCE,
         ScreenId::ConvoyPanel => theme::screen_accent::PERFORMANCE,
+        ScreenId::AgentDetail => theme::screen_accent::ADVANCED,
     }
 }
 
