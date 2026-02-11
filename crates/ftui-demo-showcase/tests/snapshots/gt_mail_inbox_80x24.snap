@@ -1,0 +1,24 @@
+╭Inbox (13 unread)─────────────────────────────────────────────────────────────╮
+│ P  From             Time  Subject                                            │
+│    polecat/jade     00:33 Performance metrics report                         │
+│    polecat/onyx     05:48 Build failure on main                              │
+│    polecat/amber    18:55 Merge queue status update                          │
+│ !  witness          01:56 New molecule dispatched                            │
+│    hq/scheduler     07:10 Context recovery needed                            │
+│    polecat/amber    08:48 Handoff notes attached                             │
+│    polecat/amber    10:54 Merge queue status update                          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭Performance metrics report────────────────────────────────────────────────────╮
+│From: polecat/jade                                                            │
+│Priority: Low | Time: 00:33 | Status: Unread                                  │
+│──────────────────────────────────────────────────────────────────────────────│
+│Rig health check completed successfully.                                      │
+│                                                                              │
+│  Polecats: 3/3 healthy                                                       │
+│  Refinery: operational                                                       │
+│  Witness: monitoring                                                         │
+│  Beads DB: synced                                                            │
+│                                                                              │
+│No action required.                                                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ Message 1/20 | Unread: 13 | Focus: MessageList | Enter=read  Tab=switch  r=togg

@@ -1,0 +1,24 @@
+╭ Event Feed ──────────────────────────────────────────────────────────────────╮
+│[00:00:00] ✉ basalt: escalation from basalt                                   │
+│[00:00:02] ⚑ refinery: warning: mayor idle for 5m                             │
+│[00:00:04] ● granite: polecat obsidian checked in                             │
+│[00:00:06] ✗ witness: merge conflict in bd-14e4                               │
+│[00:00:08] ● slate: molecule step completed by obsidian                       │
+│[00:00:10] ⊕ obsidian: fast-forward merge bd-3b0c                             │
+│[00:00:12] ⊕ refinery: MQ entry processed for bd-a5d9                         │
+│[00:00:14] ✗ marble: zombie detected: granite unresponsive                    │
+│[00:00:16] ● flint: heartbeat OK from quartz                                  │
+│[00:00:18] ● flint: molecule step completed by refinery                       │
+│[00:00:20] ● quartz: molecule step completed by refinery                      │
+│[00:00:22] ✗ slate: merge conflict in bd-647d                                 │
+│[00:00:24] ✗ basalt: zombie detected: refinery unresponsive                   │
+│[00:00:26] ✉ mayor: sent nudge to marble                                      │
+│[00:00:28] ⊕ slate: MQ entry processed for bd-d614                            │
+│[00:00:30] ⚑ slate: patrol: checking witness progress                         │
+│[00:00:32] ⚑ flint: patrol: MQ depth = 86dc entries                           │
+│[00:00:34] ✗ basalt: build failure on bd-75f0                                 │
+│[00:00:36] ● mayor: bd-b3d0 status → in_progress                              │
+│[00:00:38] → flint: spawned polecat marble                                    │
+│[00:00:40] → quartz: dispatched bd-5990 to mayor                            9 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ filter: all | LIVE | events: 30  [/]search [f]ilter [Space]pause               

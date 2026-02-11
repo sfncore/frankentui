@@ -1,0 +1,24 @@
+╭─────Command Palette──────╮                                                    
+│Ctrl+P or : to open palett│                                                    
+│                          │                                                    
+│Actions:                  │                                                    
+│  Immediate: refresh, list│          ┌────── Command Palette ──────┐           
+│  With args: sling, nudge,│          │>Type to search...           │           
+│                          │          │> [System] Rig List  List al…│           
+│Navigation:               │          │  [Mail] Send Mail  Send mai…│           
+│  Up/Down move selection  │          │  [Work] Sling Work  Assign …│           
+│  Enter   execute action  │          │  [Agent] Nudge Agent  Send …│           
+│  Esc     dismiss palette │          │  [Beads] Beads Ready  Show …│           
+│  Type    fuzzy filter    │          │  [Beads] Beads Stats  Show …│           
+│                          │          │  [System] Polecat List      │           
+│Executions: 0             │          │  [Convoy] Create Convoy     │           
+│                          │          │  [System] Refresh Status    │           
+│                          │          └─────────────────────────────┘           
+│                          │                                                    
+│                          │                                                    
+│                          │                                                    
+│                          │                                                    
+│                          │                                                    
+│                          │                                                    
+│                          │                                                    
+╰──────────────────────────╯                                                    

@@ -1,0 +1,40 @@
+╭ Convoys ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ID        │Title                                                                     │Progress    │Status    │Age     │
+│cv-a1b2   │Widget upgrade epic                                                       │            │▶ Running │2h 15m  │
+│cv-c3d4   │Test coverage sweep                                                       │            │✓ Done    │5h 30m  │
+│cv-e5f6   │Refinery merge backlog                                                    │            │⊘ Blocked │1h 45m  │
+│cv-g7h8   │Documentation sprint                                                      │0/5         │◌ Queued  │10m     │
+│cv-i9j0   │CI pipeline fix                                                           │            │✗ Failed  │45m     │
+│cv-k1l2   │Style theme overhaul                                                      │            │▶ Running │3h 20m  │
+│cv-m3n4   │Accessibility audit                                                       │  9         │▶ Running │55m     │
+│cv-o5p6   │Performance benchmarks                                                    │            │✓ Done    │8h 10m  │
+│cv-q7r8   │Mermaid diagram renderer                                                  │            │▶ Running │1h 30m  │
+│cv-s9t0   │Agent handoff protocol                                                    │0/4         │◌ Queued  │5m      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

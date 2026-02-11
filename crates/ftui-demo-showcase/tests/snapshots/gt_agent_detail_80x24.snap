@@ -1,0 +1,24 @@
+ Agent:  obsidian  witness  refinery  cobalt  mayor   (j/k or Up/Down to switch)
+╭────────── obsidian ──────────╮╭─────────────── Recent Events ────────────────╮
+│  Role: polecat               ││ t142  HOOK     Hooked bd-ydjj via molecule bd│
+│  Addr: frankentui/polecats/ob││ t143  STEP     Started bd-wisp-n2xn: Load con│
+│  Tmux: polecat-obsidian-7a41 ││ t148  STEP     Closed bd-wisp-n2xn           │
+│ State: RUNNING               ││ t149  STEP     Started bd-wisp-kmve: Set up b│
+│                              ││ t151  STEP     Closed bd-wisp-kmve           │
+│  Hook: Agent Detail: Modal pa││ t152  BUILD    cargo check passed            │
+│        (bd-ydjj)             ││ t153  STEP     Started bd-wisp-vpc2: Implemen│
+│                              ││                                              │
+│  Mail: 0 unread              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+│                              ││                                              │
+╰──────────────────────────────╯╰──────────────────────────────────────────────╯
+╭ Actions ─────────────────────────────────────────────────────────────────────╮
+│   [n] nudge   [m] mail   [p] peek   [a] attach                               │
+╰──────────────────────────────────────────────────────────────────────────────╯

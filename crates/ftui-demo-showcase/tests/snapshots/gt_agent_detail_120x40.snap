@@ -1,0 +1,40 @@
+ Agent:  obsidian  witness  refinery  cobalt  mayor   (j/k or Up/Down to switch)                                        
+╭────────────────── obsidian ──────────────────╮╭─────────────────────────── Recent Events ────────────────────────────╮
+│  Role: polecat                               ││ t142  HOOK     Hooked bd-ydjj via molecule bd-wisp-gp4t              │
+│  Addr: frankentui/polecats/obsidian          ││ t143  STEP     Started bd-wisp-n2xn: Load context                    │
+│  Tmux: polecat-obsidian-7a41                 ││ t148  STEP     Closed bd-wisp-n2xn                                   │
+│ State: RUNNING                               ││ t149  STEP     Started bd-wisp-kmve: Set up branch                   │
+│                                              ││ t151  STEP     Closed bd-wisp-kmve                                   │
+│  Hook: Agent Detail: Modal panel with info an││ t152  BUILD    cargo check passed                                    │
+│        (bd-ydjj)                             ││ t153  STEP     Started bd-wisp-vpc2: Implement                       │
+│                                              ││                                                                      │
+│  Mail: 0 unread                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+╰──────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────╯
+╭ Actions ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│   [n] nudge   [m] mail   [p] peek   [a] attach                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

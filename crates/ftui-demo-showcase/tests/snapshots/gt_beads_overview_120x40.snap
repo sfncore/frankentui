@@ -1,0 +1,40 @@
+╔ Ready ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║ID        ║Title                                                                                        ║Pri ║Type    ║
+║bd-nmg1   ║Snapshot tests for all panels                                                                ║P2  ║task    ║
+║bd-280t   ║Focus management: FocusGraph                                                                 ║P3  ║task    ║
+║bd-4fhg   ║Beads overview dashboard                                                                     ║P3  ║task    ║
+║bd-x7k2   ║Agent log viewer integration                                                                 ║P2  ║feature ║
+║bd-r3m9   ║Keyboard shortcut reference                                                                  ║P4  ║task    ║
+║                                                                                                                      ║
+║                                                                                                                      ║
+║                                                                                                                      ║
+║                                                                                                                      ║
+║                                                                                                                      ║
+╚══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+╭ In Progress ─────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ID        │Title                                                                                        │Pri │Type    │
+│bd-9f1f   │gt-tui v2: Rich widget upgrade epic                                                          │P1  │epic    │
+│bd-a2c4   │Mermaid renderer performance                                                                 │P2  │task    │
+│bd-f8g1   │Theme hot-reload support                                                                     │P3  │feature │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Blocked ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ID        │Title                                                                   │Pri │Type    │Blocked By          │
+│bd-j5k7   │Deploy to production                                                    │P1  │task    │bd-9f1f             │
+│bd-m2n4   │Integration test suite                                                  │P2  │task    │bd-nmg1             │
+│bd-p8q1   │User docs update                                                        │P3  │task    │bd-4fhg             │
+│bd-t5u7   │Release changelog                                                       │P3  │task    │bd-9f1f, bd-j5k7    │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Stats ───────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│Open: 12  Closed: 47  Blocked: 4                                                                                      │
+│Ready: 5  In Progress: 3  Active: Ready                                                                               │
+│                                                                                                                      │
+│Close rate (14d):                                                                                                     │
+│▁ ▂▄▃▆▅▂▇▄▃▅█▆                                                                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

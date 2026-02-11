@@ -1,0 +1,40 @@
+╭────────────Command Palette─────────────╮                                                                              
+│Ctrl+P or : to open palette             │                                                                              
+│                                        │                                                                              
+│Actions:                                │                                                                              
+│  Immediate: refresh, list, stats       │                                                                              
+│  With args: sling, nudge, mail         │                                                                              
+│                                        │                ┌───────────── Command Palette ──────────────┐                
+│Navigation:                             │                │>Type to search...                          │                
+│  Up/Down move selection                │                │> [System] Rig List  List all rigs in Gas T…│                
+│  Enter   execute action                │                │  [Mail] Send Mail  Send mail to an agent o…│                
+│  Esc     dismiss palette               │                │  [Work] Sling Work  Assign work to a polec…│                
+│  Type    fuzzy filter                  │                │  [Agent] Nudge Agent  Send a nudge to a st…│                
+│                                        │                │  [Beads] Beads Ready  Show ready work with…│                
+│Executions: 0                           │                │  [Beads] Beads Stats  Show beads statistic…│                
+│                                        │                │  [System] Polecat List  List all polecats …│                
+│                                        │                │  [Convoy] Create Convoy  Create a new conv…│                
+│                                        │                │  [System] Refresh Status  Refresh rig stat…│                
+│                                        │                └────────────────────────────────────────────┘                
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+│                                        │                                                                              
+╰────────────────────────────────────────╯                                                                              
