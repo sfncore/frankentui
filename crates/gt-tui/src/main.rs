@@ -4,6 +4,8 @@ mod app;
 mod data;
 mod msg;
 mod panels;
+mod screen;
+mod screens;
 #[allow(dead_code)]
 mod theme;
 
@@ -16,7 +18,7 @@ fn main() -> std::io::Result<()> {
         ..Default::default()
     };
 
-    let dashboard = app::GtDashboard::new();
+    let dashboard = app::GtApp::new();
     let mut program = Program::with_config(dashboard, config)?;
     program.run()
 }

@@ -1,6 +1,7 @@
 use ftui_core::event::{Event, KeyEvent, MouseEvent};
 
-use crate::data::{ConvoyItem, GtEvent, TownStatus};
+use crate::data::{BeadsSnapshot, ConvoyItem, GtEvent, TownStatus};
+use crate::screen::ActiveScreen;
 
 #[derive(Debug)]
 pub enum Msg {
@@ -10,7 +11,9 @@ pub enum Msg {
     Resize { width: u16, height: u16 },
     StatusRefresh(TownStatus),
     ConvoyRefresh(Vec<ConvoyItem>),
+    BeadsRefresh(BeadsSnapshot),
     NewEvent(GtEvent),
+    SwitchScreen(ActiveScreen),
     Tick,
     Noop,
 }

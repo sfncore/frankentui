@@ -62,3 +62,15 @@ pub fn keybind_key() -> Style {
 pub fn keybind_action() -> Style {
     Style::new().fg(theme::fg::SECONDARY)
 }
+
+pub fn content_border() -> Style {
+    Style::new().fg(theme::fg::MUTED)
+}
+
+pub fn muted() -> Style {
+    Style::new().fg(theme::fg::MUTED)
+}
+
+pub fn table_theme_phase(tick_count: u64) -> f32 {
+    ((tick_count as f32) * 0.02) % 1.0
+}

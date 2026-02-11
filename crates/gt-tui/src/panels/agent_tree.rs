@@ -5,7 +5,7 @@ use ftui_widgets::block::Block;
 use ftui_widgets::borders::{BorderType, Borders};
 use ftui_widgets::Widget;
 
-use crate::app::TreeEntry;
+use crate::screens::dashboard::TreeEntry;
 use crate::data::TownStatus;
 use crate::theme;
 
@@ -69,10 +69,10 @@ pub fn render(
         let indent = "  ".repeat(entry.depth as usize);
         let prefix = if entry.depth == 0 && entry.tmux_session.is_empty() {
             " "  // Rig header
-        } else if !entry.tmux_session.is_empty() {
-            "  "
+        } else if entry.running {
+            " \u{25cf} "  // ● online
         } else {
-            "  "
+            " \u{25cb} "  // ○ offline
         };
 
         let line = format!("{}{}{}", indent, prefix, entry.label);
@@ -101,14 +101,17 @@ pub fn render(
                         Cell::from_char(ch)
                             .with_bg(ftui_extras::theme::bg::HIGHLIGHT.into())
                             .with_fg(ftui_extras::theme::fg::PRIMARY.into())
-                    } else if !entry.tmux_session.is_empty() {
+                    } else if entry.running {
                         Cell::from_char(ch)
                             .with_fg(ftui_extras::theme::accent::INFO.into())
-                    } else if entry.depth == 0 {
+                    } else if entry.depth == 0 && entry.tmux_session.is_empty() {
+                        // Rig header
                         Cell::from_char(ch)
                             .with_fg(ftui_extras::theme::accent::PRIMARY.into())
                     } else {
+                        // Offline agent — dimmed
                         Cell::from_char(ch)
+                            .with_fg(ftui_extras::theme::fg::MUTED.into())
                     };
                     *cell = new_cell;
                 }

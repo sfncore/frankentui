@@ -1,229 +1,303 @@
 use std::cell::RefCell;
-use std::process::Command;
 use std::time::{Duration, Instant};
 
-use ftui_core::event::{KeyCode, KeyEventKind, Modifiers, MouseButton, MouseEventKind};
+use ftui_core::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, Modifiers, MouseButton, MouseEventKind,
+};
 use ftui_core::geometry::Rect;
 use ftui_extras::theme;
 use ftui_layout::{Constraint, Flex};
 use ftui_render::cell::Cell;
 use ftui_render::frame::Frame;
 use ftui_runtime::{Cmd, Every, Model, Subscription};
-use ftui_widgets::focus::graph::{FocusId, FocusNode, NavDirection};
-use ftui_widgets::focus::manager::FocusManager;
-use ftui_widgets::list::ListState;
+use ftui_widgets::command_palette::{ActionItem, CommandPalette, PaletteAction};
 use ftui_widgets::log_viewer::{LogViewer, LogViewerState};
 use ftui_widgets::spinner::SpinnerState;
 use ftui_widgets::status_line::{StatusItem, StatusLine};
 use ftui_widgets::Widget;
 
-use crate::data::{self, ConvoyItem, TownStatus};
+use crate::data::{self, AgentInfo, BeadsSnapshot, ConvoyItem, TownStatus};
 use crate::msg::Msg;
 use crate::panels;
+use crate::screen::ActiveScreen;
+use crate::screens::agent_detail::AgentDetailScreen;
+use crate::screens::beads_overview::BeadsOverviewScreen;
+use crate::screens::convoy_panel::ConvoyPanelScreen;
+use crate::screens::docs_browser::DocsBrowserScreen;
+use crate::screens::dashboard::DashboardScreen;
+use crate::screens::event_feed::EventFeedScreen;
+use crate::screens::mail_inbox::MailInboxScreen;
 
-// ---------------------------------------------------------------------------
-// Focus IDs for dashboard panels
-// ---------------------------------------------------------------------------
-
-pub const FOCUS_AGENT_TREE: FocusId = 1;
-pub const FOCUS_CONVOYS: FocusId = 2;
-pub const FOCUS_EVENT_FEED: FocusId = 3;
-
-/// Label for a focus ID.
-fn focus_label(id: FocusId) -> &'static str {
-    match id {
-        FOCUS_AGENT_TREE => "Agents",
-        FOCUS_CONVOYS => "Convoys",
-        FOCUS_EVENT_FEED => "Events",
-        _ => "Unknown",
-    }
+/// Build the Gas Town action items for the command palette.
+fn gas_town_actions() -> Vec<ActionItem> {
+    vec![
+        // Navigation
+        ActionItem::new("screen-dashboard", "Dashboard")
+            .with_description("Switch to Dashboard (F1)")
+            .with_tags(&["screen", "dashboard", "home", "overview"])
+            .with_category("Navigation"),
+        ActionItem::new("screen-events", "Event Feed")
+            .with_description("Switch to Event Feed (F2)")
+            .with_tags(&["screen", "events", "feed", "log"])
+            .with_category("Navigation"),
+        ActionItem::new("screen-convoys", "Convoy Panel")
+            .with_description("Switch to Convoy Panel (F3)")
+            .with_tags(&["screen", "convoys", "progress"])
+            .with_category("Navigation"),
+        ActionItem::new("screen-agents", "Agent Detail")
+            .with_description("Switch to Agent Detail (F4)")
+            .with_tags(&["screen", "agents", "detail"])
+            .with_category("Navigation"),
+        ActionItem::new("screen-mail", "Mail Inbox")
+            .with_description("Switch to Mail Inbox (F5)")
+            .with_tags(&["screen", "mail", "inbox"])
+            .with_category("Navigation"),
+        ActionItem::new("screen-beads", "Beads Overview")
+            .with_description("Switch to Beads Overview (F6)")
+            .with_tags(&["screen", "beads", "issues"])
+            .with_category("Navigation"),
+        ActionItem::new("screen-docs", "CLI Docs Browser")
+            .with_description("Search and browse gt CLI reference (F7)")
+            .with_tags(&["screen", "docs", "help", "reference", "commands"])
+            .with_category("Navigation"),
+        // System
+        ActionItem::new("gt-status", "Refresh Status")
+            .with_description("Refresh rig status (gt status)")
+            .with_tags(&["refresh", "status", "update"])
+            .with_category("System"),
+        ActionItem::new("gt-sling", "Sling Work")
+            .with_description("Assign work to a polecat (gt sling)")
+            .with_tags(&["work", "assign", "dispatch"])
+            .with_category("Work"),
+        ActionItem::new("gt-nudge", "Nudge Agent")
+            .with_description("Send a nudge to a stuck agent (gt nudge)")
+            .with_tags(&["agent", "nudge", "unstick"])
+            .with_category("Agent"),
+        ActionItem::new("gt-mail-send", "Send Mail")
+            .with_description("Send mail to an agent or role (gt mail send)")
+            .with_tags(&["mail", "send", "message"])
+            .with_category("Mail"),
+        ActionItem::new("gt-convoy-create", "Create Convoy")
+            .with_description("Create a new convoy (gt convoy create)")
+            .with_tags(&["convoy", "create", "group"])
+            .with_category("Convoy"),
+        ActionItem::new("gt-polecat-list", "Polecat List")
+            .with_description("List all polecats in the rig")
+            .with_tags(&["polecat", "list", "workers"])
+            .with_category("System"),
+        ActionItem::new("gt-rig-list", "Rig List")
+            .with_description("List all rigs in Gas Town")
+            .with_tags(&["rig", "list", "town"])
+            .with_category("System"),
+        ActionItem::new("bd-ready", "Beads Ready")
+            .with_description("Show ready work with no blockers (bd ready)")
+            .with_tags(&["beads", "ready", "work"])
+            .with_category("Beads"),
+        ActionItem::new("bd-stats", "Beads Stats")
+            .with_description("Show beads statistics and counts (bd stats)")
+            .with_tags(&["beads", "stats", "metrics"])
+            .with_category("Beads"),
+    ]
 }
 
-/// Build a FocusManager with panel nodes wired for Tab/BackTab cycling.
-fn build_focus_manager() -> FocusManager {
-    let mut mgr = FocusManager::new();
-    let graph = mgr.graph_mut();
-
-    // Insert nodes (bounds updated each frame during view)
-    graph.insert(FocusNode::new(FOCUS_AGENT_TREE, Rect::default()).with_tab_index(0));
-    graph.insert(FocusNode::new(FOCUS_CONVOYS, Rect::default()).with_tab_index(1));
-    graph.insert(FocusNode::new(FOCUS_EVENT_FEED, Rect::default()).with_tab_index(2));
-
-    // Wire Next/Prev cycle: AgentTree <-> Convoys <-> EventFeed <-> AgentTree
-    graph.connect(FOCUS_AGENT_TREE, NavDirection::Next, FOCUS_CONVOYS);
-    graph.connect(FOCUS_CONVOYS, NavDirection::Next, FOCUS_EVENT_FEED);
-    graph.connect(FOCUS_EVENT_FEED, NavDirection::Next, FOCUS_AGENT_TREE);
-
-    graph.connect(FOCUS_AGENT_TREE, NavDirection::Prev, FOCUS_EVENT_FEED);
-    graph.connect(FOCUS_CONVOYS, NavDirection::Prev, FOCUS_AGENT_TREE);
-    graph.connect(FOCUS_EVENT_FEED, NavDirection::Prev, FOCUS_CONVOYS);
-
-    // Spatial: Left/Right between sidebar and main panels
-    graph.connect(FOCUS_AGENT_TREE, NavDirection::Right, FOCUS_CONVOYS);
-    graph.connect(FOCUS_CONVOYS, NavDirection::Left, FOCUS_AGENT_TREE);
-    graph.connect(FOCUS_EVENT_FEED, NavDirection::Left, FOCUS_AGENT_TREE);
-
-    // Spatial: Up/Down between convoys and event feed
-    graph.connect(FOCUS_CONVOYS, NavDirection::Down, FOCUS_EVENT_FEED);
-    graph.connect(FOCUS_EVENT_FEED, NavDirection::Up, FOCUS_CONVOYS);
-
-    // Start with agent tree focused
-    mgr.focus(FOCUS_AGENT_TREE);
-
-    mgr
-}
-
-/// A flattened tree entry for selection-based navigation.
-#[derive(Debug, Clone)]
-pub struct TreeEntry {
-    pub label: String,
-    pub tmux_session: String,
-    pub depth: u16,
-}
-
-pub struct GtDashboard {
+pub struct GtApp {
+    pub active_screen: ActiveScreen,
+    // Shared data
     pub status: TownStatus,
     pub convoys: Vec<ConvoyItem>,
+    pub beads: BeadsSnapshot,
+    pub all_agents: Vec<AgentInfo>,
     pub event_viewer: LogViewer,
     pub event_state: RefCell<LogViewerState>,
-    pub focus: FocusManager,
+    // Per-screen state
+    pub dashboard: DashboardScreen,
+    pub event_feed_screen: EventFeedScreen,
+    pub convoy_screen: ConvoyPanelScreen,
+    pub agent_screen: AgentDetailScreen,
+    pub mail_screen: MailInboxScreen,
+    pub beads_screen: BeadsOverviewScreen,
+    pub docs_screen: DocsBrowserScreen,
+    // Global UI
     pub spinner_state: SpinnerState,
     pub spinner_tick: u32,
-    pub convoy_list_state: RefCell<ListState>,
     pub last_refresh: Instant,
-    /// Flattened tree entries for cursor-based navigation
-    pub tree_entries: Vec<TreeEntry>,
-    /// Selected row in the agent tree
-    pub tree_cursor: usize,
-    /// Saved rect for the agent tree panel (for mouse hit detection)
-    pub tree_area: RefCell<Rect>,
+    pub palette_btn_area: RefCell<Rect>,
+    pub palette: CommandPalette,
 }
 
-impl GtDashboard {
+impl GtApp {
     pub fn new() -> Self {
         let mut event_viewer = LogViewer::new(5_000);
         event_viewer.push("Gas Town TUI starting...");
-        event_viewer.push("Press Tab to switch panels, j/k to navigate, Enter to switch tmux");
-        event_viewer.push("Arrow keys for spatial navigation between panels");
+        event_viewer.push("F1-F6 to switch screens, Tab to switch panels");
+        event_viewer.push("Ctrl+P or : to open command palette");
         event_viewer.push("Click agent names to jump to their tmux session");
         event_viewer.push("");
 
+        let mut palette = CommandPalette::new().with_max_visible(9);
+        palette.replace_actions(gas_town_actions());
+
         Self {
+            active_screen: ActiveScreen::Dashboard,
             status: TownStatus {
                 name: "Gas Town".to_string(),
                 ..Default::default()
             },
             convoys: Vec::new(),
+            beads: BeadsSnapshot::default(),
+            all_agents: Vec::new(),
             event_viewer,
             event_state: RefCell::new(LogViewerState::default()),
-            focus: build_focus_manager(),
+            dashboard: DashboardScreen::new(),
+            event_feed_screen: EventFeedScreen::new(),
+            convoy_screen: ConvoyPanelScreen::new(),
+            agent_screen: AgentDetailScreen::new(),
+            mail_screen: MailInboxScreen::new(),
+            beads_screen: BeadsOverviewScreen::new(),
+            docs_screen: DocsBrowserScreen::new(data::load_cli_docs()),
             spinner_state: SpinnerState::default(),
             spinner_tick: 0,
-            convoy_list_state: RefCell::new(ListState::default()),
             last_refresh: Instant::now(),
-            tree_entries: Vec::new(),
-            tree_cursor: 0,
-            tree_area: RefCell::new(Rect::default()),
+            palette_btn_area: RefCell::new(Rect::default()),
+            palette,
         }
     }
 
-    /// Which panel currently has focus.
-    fn active_panel_id(&self) -> FocusId {
-        self.focus.current().unwrap_or(FOCUS_AGENT_TREE)
-    }
-
-    /// Rebuild the flat tree entries from current status.
-    fn rebuild_tree_entries(&mut self) {
-        self.tree_entries.clear();
-
-        // Town-level agents
-        for agent in &self.status.agents {
-            self.tree_entries.push(TreeEntry {
-                label: format!("{} ({})", agent.name, agent.role),
-                tmux_session: agent.session.clone(),
-                depth: 0,
-            });
+    /// Execute a command palette action by ID.
+    fn execute_palette_action(&mut self, id: &str) -> Cmd<Msg> {
+        // Screen navigation
+        let screen = match id {
+            "screen-dashboard" => Some(ActiveScreen::Dashboard),
+            "screen-events" => Some(ActiveScreen::EventFeed),
+            "screen-convoys" => Some(ActiveScreen::Convoys),
+            "screen-agents" => Some(ActiveScreen::Agents),
+            "screen-mail" => Some(ActiveScreen::Mail),
+            "screen-beads" => Some(ActiveScreen::Beads),
+            "screen-docs" => Some(ActiveScreen::Docs),
+            _ => None,
+        };
+        if let Some(s) = screen {
+            self.active_screen = s;
+            self.event_viewer
+                .push(format!("Screen: {}", s.label()));
+            return Cmd::None;
         }
 
-        // Rig agents
-        for rig in &self.status.rigs {
-            self.tree_entries.push(TreeEntry {
-                label: rig.name.clone(),
-                tmux_session: String::new(),
-                depth: 0,
-            });
-            for agent in &rig.agents {
-                self.tree_entries.push(TreeEntry {
-                    label: format!("{} ({})", agent.name, agent.role),
-                    tmux_session: agent.session.clone(),
-                    depth: 1,
-                });
+        match id {
+            "gt-status" => {
+                self.last_refresh = Instant::now();
+                self.event_viewer.push("Refreshing status...");
+                Cmd::Batch(vec![
+                    Cmd::Task(
+                        Default::default(),
+                        Box::new(|| Msg::StatusRefresh(data::fetch_status())),
+                    ),
+                    Cmd::Task(
+                        Default::default(),
+                        Box::new(|| Msg::ConvoyRefresh(data::fetch_convoys())),
+                    ),
+                ])
+            }
+            other => {
+                self.event_viewer
+                    .push(format!("Action: {other} (not yet wired)"));
+                Cmd::None
             }
         }
+    }
 
-        // Clamp cursor
-        if !self.tree_entries.is_empty() && self.tree_cursor >= self.tree_entries.len() {
-            self.tree_cursor = self.tree_entries.len() - 1;
+    /// Collect all agents from top-level and per-rig into a flat list.
+    fn collect_agents(status: &TownStatus) -> Vec<AgentInfo> {
+        let mut agents = status.agents.clone();
+        for rig in &status.rigs {
+            agents.extend(rig.agents.iter().cloned());
+        }
+        agents
+    }
+
+    /// Returns true if the active screen is in a text-input mode (e.g. search bar).
+    fn consumes_text_input(&self) -> bool {
+        match self.active_screen {
+            ActiveScreen::EventFeed => self.event_feed_screen.consumes_text_input(),
+            ActiveScreen::Docs => self.docs_screen.consumes_text_input(),
+            _ => false,
         }
     }
 
-    fn handle_key(&mut self, key: ftui_core::event::KeyEvent) -> Cmd<Msg> {
+    fn handle_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
         if key.kind != KeyEventKind::Press {
             return Cmd::None;
         }
 
-        // Global keys
-        match key.code {
-            KeyCode::Char('q') if !key.modifiers.contains(Modifiers::CTRL) => {
-                return Cmd::Quit;
+        // When palette is open, route all input through it first
+        if self.palette.is_visible() {
+            let event = Event::Key(key);
+            if let Some(action) = self.palette.handle_event(&event) {
+                return match action {
+                    PaletteAction::Execute(id) => self.execute_palette_action(&id),
+                    PaletteAction::Dismiss => Cmd::None,
+                };
             }
+            // Palette consumed the event
+            return Cmd::None;
+        }
+
+        // Check if active screen is consuming text input (e.g. search bar)
+        let text_input = self.consumes_text_input();
+
+        // Global keys (palette closed)
+        // Ctrl-modified keys and F-keys always work; single-char keys are
+        // suppressed when a screen text-input mode is active.
+        match key.code {
             KeyCode::Char('c') | KeyCode::Char('C')
                 if key.modifiers.contains(Modifiers::CTRL) =>
             {
                 return Cmd::Quit;
             }
-            KeyCode::Tab => {
-                self.focus.navigate(NavDirection::Next);
+            KeyCode::Char('p') if key.modifiers.contains(Modifiers::CTRL) => {
+                self.palette.open();
+                return Cmd::None;
+            }
+            // F-keys always switch screens
+            KeyCode::F(n) => {
+                if let Some(screen) = ActiveScreen::from_f_key(n) {
+                    self.active_screen = screen;
+                    self.event_viewer
+                        .push(format!("Screen: {}", screen.label()));
+                    return Cmd::None;
+                }
+            }
+            // Shift+H / Shift+L — cycle screens (vim-style)
+            KeyCode::Char('H') if key.modifiers.contains(Modifiers::SHIFT) => {
+                self.active_screen = self.active_screen.prev();
                 self.event_viewer
-                    .push(format!("Panel: {}", focus_label(self.active_panel_id())));
+                    .push(format!("Screen: {}", self.active_screen.label()));
                 return Cmd::None;
             }
-            KeyCode::BackTab => {
-                self.focus.navigate(NavDirection::Prev);
+            KeyCode::Char('L') if key.modifiers.contains(Modifiers::SHIFT) => {
+                self.active_screen = self.active_screen.next();
                 self.event_viewer
-                    .push(format!("Panel: {}", focus_label(self.active_panel_id())));
+                    .push(format!("Screen: {}", self.active_screen.label()));
                 return Cmd::None;
             }
-            // Arrow keys for spatial navigation between panels
-            KeyCode::Left if key.modifiers.contains(Modifiers::ALT) => {
-                self.focus.navigate(NavDirection::Left);
+            // Number keys 1-6 — direct screen access (suppressed during text input)
+            KeyCode::Char(ch @ '1'..='7') if !text_input && key.modifiers == Modifiers::NONE => {
+                if let Some(screen) = ActiveScreen::from_number_key(ch) {
+                    self.active_screen = screen;
+                    self.event_viewer
+                        .push(format!("Screen: {}", screen.label()));
+                    return Cmd::None;
+                }
+            }
+            // Single-char global keys: only when no text input active
+            KeyCode::Char('q') if !text_input && !key.modifiers.contains(Modifiers::CTRL) => {
+                return Cmd::Quit;
+            }
+            KeyCode::Char(':') if !text_input => {
+                self.palette.open();
                 return Cmd::None;
             }
-            KeyCode::Right if key.modifiers.contains(Modifiers::ALT) => {
-                self.focus.navigate(NavDirection::Right);
-                return Cmd::None;
-            }
-            KeyCode::Up if key.modifiers.contains(Modifiers::ALT) => {
-                self.focus.navigate(NavDirection::Up);
-                return Cmd::None;
-            }
-            KeyCode::Down if key.modifiers.contains(Modifiers::ALT) => {
-                self.focus.navigate(NavDirection::Down);
-                return Cmd::None;
-            }
-            KeyCode::Char('1') => {
-                self.focus.focus(FOCUS_AGENT_TREE);
-                return Cmd::None;
-            }
-            KeyCode::Char('2') => {
-                self.focus.focus(FOCUS_CONVOYS);
-                return Cmd::None;
-            }
-            KeyCode::Char('3') => {
-                self.focus.focus(FOCUS_EVENT_FEED);
-                return Cmd::None;
-            }
-            KeyCode::Char('r') => {
+            KeyCode::Char('r') if !text_input => {
                 self.last_refresh = Instant::now();
                 self.event_viewer.push("Refreshing...");
                 return Cmd::Batch(vec![
@@ -240,126 +314,124 @@ impl GtDashboard {
             _ => {}
         }
 
-        // Panel-specific keys
-        let active = self.active_panel_id();
-        if active == FOCUS_AGENT_TREE {
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if !self.tree_entries.is_empty() {
-                        self.tree_cursor =
-                            (self.tree_cursor + 1).min(self.tree_entries.len() - 1);
-                    }
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.tree_cursor = self.tree_cursor.saturating_sub(1);
-                }
-                KeyCode::Enter => {
-                    self.switch_selected_tmux();
-                }
-                _ => {}
-            }
-        } else if active == FOCUS_EVENT_FEED {
-            let viewport_h = self.event_state.borrow().last_viewport_height.max(1);
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.event_viewer.scroll_down(1);
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.event_viewer.scroll_up(1);
-                }
-                KeyCode::PageDown => {
-                    self.event_viewer.scroll_down(viewport_h as usize);
-                }
-                KeyCode::PageUp => {
-                    self.event_viewer.scroll_up(viewport_h as usize);
-                }
-                KeyCode::Char('G') => {
-                    self.event_viewer.scroll_to_bottom();
-                }
-                KeyCode::Char('g') => {
-                    self.event_viewer.scroll_to_top();
-                }
-                _ => {}
-            }
-        } else if active == FOCUS_CONVOYS {
-            let mut state = self.convoy_list_state.borrow_mut();
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    let current = state.selected().unwrap_or(0);
-                    let max = self.convoys.len().saturating_sub(1);
-                    state.select(Some(current.saturating_add(1).min(max)));
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    let current = state.selected().unwrap_or(0);
-                    state.select(Some(current.saturating_sub(1)));
-                }
-                _ => {}
-            }
+        // Delegate to active screen
+        match self.active_screen {
+            ActiveScreen::Dashboard => self.dashboard.handle_key(
+                key,
+                &mut self.event_viewer,
+                &self.event_state,
+                &self.convoys,
+            ),
+            ActiveScreen::EventFeed => self.event_feed_screen.handle_key(&key),
+            ActiveScreen::Convoys => self.convoy_screen.handle_key(&key, &self.convoys),
+            ActiveScreen::Agents => self.agent_screen.handle_key(&key, &self.all_agents),
+            ActiveScreen::Mail => self.mail_screen.handle_key(&key),
+            ActiveScreen::Beads => self.beads_screen.handle_key(&key, &self.beads),
+            ActiveScreen::Docs => self.docs_screen.handle_key(&key),
         }
-
-        Cmd::None
     }
 
     fn handle_mouse(&mut self, mouse: ftui_core::event::MouseEvent) -> Cmd<Msg> {
-        // Only handle left clicks
+        // When palette is open, handle mouse on the palette
+        if self.palette.is_visible() {
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    let synth = Event::Key(KeyEvent {
+                        code: KeyCode::Enter,
+                        modifiers: Modifiers::NONE,
+                        kind: KeyEventKind::Press,
+                    });
+                    if let Some(PaletteAction::Execute(id)) = self.palette.handle_event(&synth) {
+                        return self.execute_palette_action(&id);
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    let synth = Event::Key(KeyEvent {
+                        code: KeyCode::Up,
+                        modifiers: Modifiers::NONE,
+                        kind: KeyEventKind::Press,
+                    });
+                    for _ in 0..3 {
+                        let _ = self.palette.handle_event(&synth);
+                    }
+                }
+                MouseEventKind::ScrollDown => {
+                    let synth = Event::Key(KeyEvent {
+                        code: KeyCode::Down,
+                        modifiers: Modifiers::NONE,
+                        kind: KeyEventKind::Press,
+                    });
+                    for _ in 0..3 {
+                        let _ = self.palette.handle_event(&synth);
+                    }
+                }
+                _ => {}
+            }
+            return Cmd::None;
+        }
+
+        // Only handle left clicks on global elements
         if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             return Cmd::None;
         }
 
-        let tree_area = *self.tree_area.borrow();
-
-        // Check if click is inside the agent tree panel
-        if mouse.x >= tree_area.x
-            && mouse.x < tree_area.x + tree_area.width
-            && mouse.y >= tree_area.y
-            && mouse.y < tree_area.y + tree_area.height
-        {
-            // Map click row to tree entry (accounting for border = 1 row offset)
-            let row_in_panel = (mouse.y - tree_area.y).saturating_sub(1) as usize;
-            if row_in_panel < self.tree_entries.len() {
-                self.tree_cursor = row_in_panel;
-                self.focus.focus(FOCUS_AGENT_TREE);
-
-                let entry = &self.tree_entries[row_in_panel];
-                if !entry.tmux_session.is_empty() {
-                    self.event_viewer.push(format!(
-                        "Switching to tmux: {}",
-                        entry.tmux_session
-                    ));
-                    let _ = Command::new("tmux")
-                        .args(["switch-client", "-t", &entry.tmux_session])
-                        .status();
-                } else {
-                    self.event_viewer
-                        .push(format!("Selected: {} (no session)", entry.label));
-                }
-            }
-
+        // Check if click is on the Commands button
+        let btn_area = *self.palette_btn_area.borrow();
+        if btn_area.contains(mouse.x, mouse.y) {
+            self.palette.open();
             return Cmd::None;
         }
 
-        Cmd::None
+        // Delegate to active screen
+        match self.active_screen {
+            ActiveScreen::Dashboard => {
+                self.dashboard
+                    .handle_mouse(mouse, &mut self.event_viewer)
+            }
+            ActiveScreen::EventFeed => self.event_feed_screen.handle_mouse(&mouse),
+            ActiveScreen::Convoys => self.convoy_screen.handle_mouse(&mouse, &self.convoys),
+            ActiveScreen::Agents => self.agent_screen.handle_mouse(&mouse, &self.all_agents),
+            ActiveScreen::Mail => self.mail_screen.handle_mouse(&mouse),
+            ActiveScreen::Beads => Cmd::None,
+            ActiveScreen::Docs => Cmd::None,
+        }
     }
 
-    fn switch_selected_tmux(&mut self) {
-        if let Some(entry) = self.tree_entries.get(self.tree_cursor) {
-            if !entry.tmux_session.is_empty() {
-                self.event_viewer.push(format!(
-                    "Switching to tmux: {}",
-                    entry.tmux_session
-                ));
-                let _ = Command::new("tmux")
-                    .args(["switch-client", "-t", &entry.tmux_session])
-                    .status();
+    fn render_tab_bar(&self, frame: &mut Frame, area: Rect) {
+        let bg = ftui_render::cell::PackedRgba::rgb(30, 30, 45);
+        frame.buffer.fill(area, Cell::default().with_bg(bg));
+
+        let mut x = area.x;
+        for screen in ActiveScreen::ALL {
+            let n = screen.f_key();
+            let label = format!(" {}/F{}\u{00b7}{} ", n, n, screen.label());
+            let is_active = *screen == self.active_screen;
+            let fg = if is_active {
+                theme::bg::DEEP.into()
             } else {
-                self.event_viewer
-                    .push(format!("No tmux session for: {}", entry.label));
+                theme::fg::SECONDARY.into()
+            };
+            let cell_bg = if is_active {
+                theme::accent::PRIMARY.into()
+            } else {
+                bg
+            };
+
+            for ch in label.chars() {
+                if x >= area.right() {
+                    break;
+                }
+                if let Some(cell) = frame.buffer.get_mut(x, area.y) {
+                    *cell = Cell::from_char(ch).with_fg(fg).with_bg(cell_bg);
+                }
+                x += 1;
             }
         }
     }
+
 }
 
-impl Model for GtDashboard {
+impl Model for GtApp {
     type Message = Msg;
 
     fn init(&mut self) -> Cmd<Self::Message> {
@@ -372,6 +444,10 @@ impl Model for GtDashboard {
                 Default::default(),
                 Box::new(|| Msg::ConvoyRefresh(data::fetch_convoys())),
             ),
+            Cmd::Task(
+                Default::default(),
+                Box::new(|| Msg::BeadsRefresh(data::fetch_beads())),
+            ),
         ])
     }
 
@@ -382,21 +458,40 @@ impl Model for GtDashboard {
             Msg::Resize { .. } => Cmd::None,
             Msg::StatusRefresh(status) => {
                 self.status = status;
+                self.all_agents = Self::collect_agents(&self.status);
                 self.last_refresh = Instant::now();
-                self.rebuild_tree_entries();
+                self.dashboard.rebuild_tree_entries(&self.status);
                 Cmd::None
             }
             Msg::ConvoyRefresh(convoys) => {
                 self.convoys = convoys;
                 Cmd::None
             }
+            Msg::BeadsRefresh(snapshot) => {
+                self.beads = snapshot;
+                Cmd::None
+            }
             Msg::NewEvent(event) => {
                 panels::event_feed::push_event(&mut self.event_viewer, &event);
+                self.event_feed_screen.push_real_event(&event);
+                Cmd::None
+            }
+            Msg::SwitchScreen(screen) => {
+                self.active_screen = screen;
+                self.event_viewer
+                    .push(format!("Screen: {}", screen.label()));
                 Cmd::None
             }
             Msg::Tick => {
                 self.spinner_state.tick();
                 self.spinner_tick = self.spinner_tick.wrapping_add(1);
+                let tick = self.spinner_tick as u64;
+                self.event_feed_screen.tick(tick);
+                self.convoy_screen.tick(tick);
+                self.agent_screen.tick(tick);
+                self.mail_screen.tick(tick);
+                self.beads_screen.tick(tick);
+                self.docs_screen.tick(tick);
                 Cmd::None
             }
             Msg::Noop => Cmd::None,
@@ -414,10 +509,11 @@ impl Model for GtDashboard {
                 .with_fg(theme::fg::PRIMARY.into()),
         );
 
-        // Main layout: status bar (1), content (fill), keybinds (1)
+        // Main layout: status bar (1), tab bar (1), content (fill), keybinds (1)
         let outer = Flex::vertical()
             .constraints([
                 Constraint::Fixed(1), // Status bar
+                Constraint::Fixed(1), // Tab bar
                 Constraint::Min(6),   // Content
                 Constraint::Fixed(1), // Keybinds
             ])
@@ -426,73 +522,83 @@ impl Model for GtDashboard {
         // --- Status Bar ---
         panels::status_bar::render(frame, outer[0], &self.status, self.spinner_tick);
 
-        // --- Content: sidebar (30%) + main (70%) ---
-        let content = Flex::horizontal()
-            .constraints([
-                Constraint::Percentage(30.0), // Agent tree
-                Constraint::Min(20),          // Main content
-            ])
-            .split(outer[1]);
+        // --- Tab Bar ---
+        self.render_tab_bar(frame, outer[1]);
 
-        // Save tree area for mouse hit detection
-        *self.tree_area.borrow_mut() = content[0];
-
-        let active = self.focus.current().unwrap_or(FOCUS_AGENT_TREE);
-
-        // Agent tree (left sidebar) — with cursor
-        panels::agent_tree::render(
-            frame,
-            content[0],
-            &self.status,
-            active == FOCUS_AGENT_TREE,
-            &self.tree_entries,
-            self.tree_cursor,
-        );
-
-        // Main content area: convoys (40%) + events (60%)
-        let main_split = Flex::vertical()
-            .constraints([
-                Constraint::Percentage(40.0), // Convoys
-                Constraint::Min(4),           // Events
-            ])
-            .split(content[1]);
-
-        // Convoys panel
-        let mut convoy_state = self.convoy_list_state.borrow_mut();
-        panels::convoys::render(
-            frame,
-            main_split[0],
-            &self.convoys,
-            active == FOCUS_CONVOYS,
-            &mut convoy_state,
-        );
-        drop(convoy_state);
-
-        // Event feed panel
-        panels::event_feed::render(
-            frame,
-            main_split[1],
-            &self.event_viewer,
-            &self.event_state,
-            active == FOCUS_EVENT_FEED,
-        );
+        // --- Content (dispatched to active screen) ---
+        match self.active_screen {
+            ActiveScreen::Dashboard => {
+                self.dashboard.view(
+                    frame,
+                    outer[2],
+                    &self.status,
+                    &self.convoys,
+                    &self.event_viewer,
+                    &self.event_state,
+                );
+            }
+            ActiveScreen::EventFeed => {
+                self.event_feed_screen.view(frame, outer[2]);
+            }
+            ActiveScreen::Convoys => {
+                self.convoy_screen.view(frame, outer[2], &self.convoys);
+            }
+            ActiveScreen::Agents => {
+                self.agent_screen.view(frame, outer[2], &self.all_agents);
+            }
+            ActiveScreen::Mail => {
+                self.mail_screen.view(frame, outer[2]);
+            }
+            ActiveScreen::Beads => {
+                self.beads_screen.view(frame, outer[2], &self.beads);
+            }
+            ActiveScreen::Docs => {
+                self.docs_screen.view(frame, outer[2]);
+            }
+        }
 
         // --- Keybind Help Line ---
-        let panel_label = format!("[{}]", focus_label(active));
+        let btn_label = " \u{25b8} Commands ";
+        let btn_width = btn_label.len() as u16;
+        let bottom = Flex::horizontal()
+            .constraints([
+                Constraint::Min(20),          // Keybind hints
+                Constraint::Fixed(btn_width), // Commands button
+            ])
+            .split(outer[3]);
+
+        let screen_label = format!("[{}]", self.active_screen.label());
         let keybind_bar = StatusLine::new()
             .style(crate::theme::status_bar_style())
             .separator("  ")
-            .left(StatusItem::key_hint("Tab", "Panel"))
-            .left(StatusItem::key_hint("1-3", "Jump"))
-            .left(StatusItem::key_hint("Alt+Arrows", "Spatial"))
-            .left(StatusItem::key_hint("j/k", "Nav"))
-            .left(StatusItem::key_hint("Enter", "Tmux"))
-            .left(StatusItem::key_hint("Click", "Switch"))
-            .center(StatusItem::text(&panel_label))
+            .left(StatusItem::key_hint("1-7/F1-F7", "Screen"))
+            .left(StatusItem::key_hint("Ctrl+P", "Palette"))
+            .center(StatusItem::text(&screen_label))
             .right(StatusItem::key_hint("r", "Refresh"))
             .right(StatusItem::key_hint("q", "Quit"));
 
-        keybind_bar.render(outer[2], frame);
+        keybind_bar.render(bottom[0], frame);
+
+        // Clickable Commands button
+        *self.palette_btn_area.borrow_mut() = bottom[1];
+        let btn_bg = ftui_render::cell::PackedRgba::rgb(60, 60, 90);
+        let btn_fg = ftui_render::cell::PackedRgba::rgb(220, 220, 240);
+        for (i, ch) in btn_label.chars().enumerate() {
+            let x = bottom[1].x + i as u16;
+            if x >= bottom[1].right() {
+                break;
+            }
+            if let Some(cell) = frame.buffer.get_mut(x, bottom[1].y) {
+                cell.content = ftui_render::cell::CellContent::from_char(ch);
+                cell.fg = btn_fg;
+                cell.bg = btn_bg;
+            }
+        }
+
+        // --- Command Palette Overlay (rendered last, on top) ---
+        if self.palette.is_visible() {
+            self.palette.render(area, frame);
+        }
     }
 
     fn subscriptions(&self) -> Vec<Box<dyn Subscription<Self::Message>>> {
@@ -500,6 +606,7 @@ impl Model for GtDashboard {
             Box::new(Every::new(Duration::from_millis(100), || Msg::Tick)),
             Box::new(data::StatusPoller),
             Box::new(data::ConvoyPoller),
+            Box::new(data::BeadsPoller),
             Box::new(data::EventTailer),
         ]
     }
