@@ -15,7 +15,7 @@ use ftui_widgets::borders::{BorderType, Borders};
 use ftui_widgets::paragraph::Paragraph;
 use ftui_widgets::Widget;
 
-use crate::data::AgentInfo;
+use crate::data::{self, AgentInfo};
 use crate::msg::Msg;
 use crate::tmux::{ActivateResult, TmuxPaneControl};
 
@@ -72,20 +72,94 @@ impl AgentDetailScreen {
         self.tmux_pane.scan();
     }
 
-    fn execute_action(&mut self, agents: &[AgentInfo]) {
+    fn execute_action(&mut self, agents: &[AgentInfo]) -> Cmd<Msg> {
         if agents.is_empty() {
-            return;
+            return Cmd::None;
         }
         let idx = self.selected_agent.min(agents.len() - 1);
         let agent = &agents[idx];
         let action = ACTION_LABELS[self.focused_action].1;
 
         match action {
-            "attach" => self.attach_agent(agent),
-            _ => {
-                self.last_action = Some(format!("{} -> {}", action, agent.name));
+            "nudge" => {
+                if agent.address.is_empty() {
+                    self.last_action = Some(format!("{}: no address", agent.name));
+                    self.action_feedback_ttl = 30;
+                    return Cmd::None;
+                }
+                let cmd = format!("gt nudge {} \"Check in\"", agent.address);
+                self.last_action = Some(format!("$ {}", cmd));
+                self.action_feedback_ttl = 40;
+                let cmd_owned = cmd.clone();
+                Cmd::Task(
+                    Default::default(),
+                    Box::new(move || {
+                        let output = data::run_cli_command(&cmd_owned);
+                        Msg::CommandOutput(cmd_owned, output)
+                    }),
+                )
+            }
+            "mail" => {
+                if agent.address.is_empty() {
+                    self.last_action = Some(format!("{}: no address", agent.name));
+                    self.action_feedback_ttl = 30;
+                    return Cmd::None;
+                }
+                let cmd = format!(
+                    "gt mail send {} -s \"Ping from TUI\" -m \"Status check from gt-tui\"",
+                    agent.address,
+                );
+                self.last_action = Some(format!("$ {}", cmd));
+                self.action_feedback_ttl = 40;
+                let cmd_owned = cmd.clone();
+                Cmd::Task(
+                    Default::default(),
+                    Box::new(move || {
+                        let output = data::run_cli_command(&cmd_owned);
+                        Msg::CommandOutput(cmd_owned, output)
+                    }),
+                )
+            }
+            "peek" => {
+                self.peek_agent(agent);
+                Cmd::None
+            }
+            "attach" => {
+                self.attach_agent(agent);
+                Cmd::None
+            }
+            _ => Cmd::None,
+        }
+    }
+
+    fn peek_agent(&mut self, agent: &AgentInfo) {
+        if !agent.running || agent.session.is_empty() {
+            self.last_action = Some(format!("{} is offline", agent.name));
+            self.action_feedback_ttl = 30;
+            return;
+        }
+        match self.tmux_pane.peek_session(&agent.session) {
+            ActivateResult::Peeked => {
+                self.last_action = Some(format!("peeking: {}", agent.session));
                 self.action_feedback_ttl = 30;
             }
+            ActivateResult::AlreadyPeeked | ActivateResult::AlreadyLinked => {
+                self.last_action = Some(format!("already viewing: {}", agent.session));
+                self.action_feedback_ttl = 20;
+            }
+            ActivateResult::SameSession => {
+                self.last_action = Some(format!("{} (this session)", agent.session));
+                self.action_feedback_ttl = 20;
+            }
+            ActivateResult::NoTmux => {
+                self.last_action = Some("not in tmux".to_string());
+                self.action_feedback_ttl = 30;
+            }
+            ActivateResult::SessionNotFound => {
+                self.last_action = Some(format!("{} not found", agent.session));
+                self.action_feedback_ttl = 30;
+            }
+            _ => {}
         }
     }
 
@@ -465,15 +539,15 @@ impl AgentDetailScreen {
             }
             KeyCode::Char('n') => {
                 self.focused_action = 0;
-                self.execute_action(agents);
+                return self.execute_action(agents);
             }
             KeyCode::Char('m') => {
                 self.focused_action = 1;
-                self.execute_action(agents);
+                return self.execute_action(agents);
             }
             KeyCode::Char('p') => {
                 self.focused_action = 2;
-                self.execute_action(agents);
+                return self.execute_action(agents);
             }
             KeyCode::Char('a') | KeyCode::Enter => {
                 // Enter and 'a' always attach to the selected agent's tmux session
@@ -503,7 +577,7 @@ impl AgentDetailScreen {
                     let btn_idx = (relative_x / btn_width) as usize;
                     if btn_idx < ACTION_LABELS.len() {
                         self.focused_action = btn_idx;
-                        self.execute_action(agents);
+                        return self.execute_action(agents);
                     }
                 }
             }

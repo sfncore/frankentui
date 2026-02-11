@@ -144,17 +144,29 @@ impl RigsScreen {
             }
             // Quick keys for common actions
             KeyCode::Char('w') => {
-                return self.run_command(&format!("gt nudge {}/witness \"Start patrol\"", rig.name));
+                if rig.has_witness {
+                    return self.run_command(&format!("gt crew stop {} witness", rig.name));
+                } else {
+                    return self.run_command(&format!("gt crew start {} witness", rig.name));
+                }
             }
-            KeyCode::Char('f') => {
-                return self.run_command(&format!("gt nudge {}/refinery \"Process MQ\"", rig.name));
+            KeyCode::Char('r') => {
+                if rig.has_refinery {
+                    return self.run_command(&format!("gt crew stop {} refinery", rig.name));
+                } else {
+                    return self.run_command(&format!("gt crew start {} refinery", rig.name));
+                }
+            }
+            KeyCode::Char('c') => {
+                return self.run_command(&format!("gt crew start {} --all", rig.name));
+            }
+            KeyCode::Char('p') => {
+                return self.run_command(&format!("gt polecat list {}", rig.name));
             }
             KeyCode::Char('b') => {
-                // Jump to Beads screen
                 return Cmd::Msg(Msg::SwitchScreen(ActiveScreen::Beads));
             }
             KeyCode::Char('a') => {
-                // Jump to Agents screen
                 return Cmd::Msg(Msg::SwitchScreen(ActiveScreen::Agents));
             }
             _ => {}
@@ -164,8 +176,28 @@ impl RigsScreen {
 
     fn execute_action(&mut self, action: &RigAction, rig: &RigStatus) -> Cmd<Msg> {
         let cmd_str = match action.kind {
-            ActionKind::StartWitness => format!("gt nudge {}/witness \"Start patrol\"", rig.name),
-            ActionKind::StartRefinery => format!("gt nudge {}/refinery \"Process MQ\"", rig.name),
+            ActionKind::StartWitness => {
+                format!("gt crew start {} witness", rig.name)
+            }
+            ActionKind::StopWitness => {
+                format!("gt crew stop {} witness", rig.name)
+            }
+            ActionKind::StartRefinery => {
+                format!("gt crew start {} refinery", rig.name)
+            }
+            ActionKind::StopRefinery => {
+                format!("gt crew stop {} refinery", rig.name)
+            }
+            ActionKind::StartAllCrew => {
+                format!("gt crew start {} --all", rig.name)
+            }
+            ActionKind::ListPolecats => {
+                format!("gt polecat list {}", rig.name)
+            }
+            ActionKind::NukeAllPolecats => {
+                // Note: this is destructive — the feedback message shows the command
+                format!("gt polecat nuke --rig {} --force", rig.name)
+            }
             ActionKind::ViewAgents => {
                 return Cmd::Msg(Msg::SwitchScreen(ActiveScreen::Agents));
             }
@@ -411,8 +443,14 @@ impl RigsScreen {
             lines.push(Line::from_spans([
                 Span::styled("[w]", Style::new().fg(theme::accent::PRIMARY).bold()),
                 Span::styled("itness ", Style::new().fg(theme::fg::MUTED)),
-                Span::styled("[f]", Style::new().fg(theme::accent::PRIMARY).bold()),
-                Span::styled("inery ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("[r]", Style::new().fg(theme::accent::PRIMARY).bold()),
+                Span::styled("efinery ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("[c]", Style::new().fg(theme::accent::PRIMARY).bold()),
+                Span::styled("rew ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("[p]", Style::new().fg(theme::accent::PRIMARY).bold()),
+                Span::styled("olecats ", Style::new().fg(theme::fg::MUTED)),
+            ]));
+            lines.push(Line::from_spans([
                 Span::styled("[b]", Style::new().fg(theme::accent::PRIMARY).bold()),
                 Span::styled("eads ", Style::new().fg(theme::fg::MUTED)),
                 Span::styled("[a]", Style::new().fg(theme::accent::PRIMARY).bold()),
@@ -433,7 +471,12 @@ impl RigsScreen {
 #[derive(Debug)]
 enum ActionKind {
     StartWitness,
+    StopWitness,
     StartRefinery,
+    StopRefinery,
+    StartAllCrew,
+    ListPolecats,
+    NukeAllPolecats,
     ViewAgents,
     ViewBeads,
 }
@@ -446,20 +489,52 @@ struct RigAction {
 fn rig_actions(rig: &RigStatus) -> Vec<RigAction> {
     let mut actions = Vec::new();
 
-    if !rig.has_witness {
+    // Witness: start or stop depending on current state
+    if rig.has_witness {
         actions.push(RigAction {
-            label: format!("Start witness (gt nudge {}/witness)", rig.name),
+            label: format!("Stop witness (kill {}/witness)", rig.name),
+            kind: ActionKind::StopWitness,
+        });
+    } else {
+        actions.push(RigAction {
+            label: format!("Start witness (gt crew start {})", rig.name),
             kind: ActionKind::StartWitness,
         });
     }
 
-    if !rig.has_refinery {
+    // Refinery: start or stop depending on current state
+    if rig.has_refinery {
         actions.push(RigAction {
-            label: format!("Start refinery (gt nudge {}/refinery)", rig.name),
+            label: format!("Stop refinery (kill {}/refinery)", rig.name),
+            kind: ActionKind::StopRefinery,
+        });
+    } else {
+        actions.push(RigAction {
+            label: format!("Start refinery (gt crew start {})", rig.name),
             kind: ActionKind::StartRefinery,
         });
     }
 
+    // Crew operations
+    actions.push(RigAction {
+        label: format!("Start all crew (gt crew start {} --all)", rig.name),
+        kind: ActionKind::StartAllCrew,
+    });
+
+    // Polecat operations
+    actions.push(RigAction {
+        label: format!("List polecats (gt polecat list {})", rig.name),
+        kind: ActionKind::ListPolecats,
+    });
+
+    if rig.polecat_count > 0 {
+        actions.push(RigAction {
+            label: format!("Nuke all polecats (gt polecat nuke {}/\\* --force)", rig.name),
+            kind: ActionKind::NukeAllPolecats,
+        });
+    }
+
+    // Navigation
     actions.push(RigAction {
         label: "View agents (F4)".to_string(),
         kind: ActionKind::ViewAgents,

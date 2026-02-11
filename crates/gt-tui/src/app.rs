@@ -129,10 +129,177 @@ fn gas_town_actions(cli_docs: &[CliCommand]) -> Vec<ActionItem> {
     items
 }
 
+/// Compare old and new TownStatus to generate synthetic events for changes.
+fn status_delta_events(
+    old: &TownStatus,
+    new: &TownStatus,
+) -> Vec<data::GtEvent> {
+    use std::collections::HashMap;
+    let mut events = Vec::new();
+
+    // Build lookup of old rig state
+    let old_rigs: HashMap<&str, &data::RigStatus> =
+        old.rigs.iter().map(|r| (r.name.as_str(), r)).collect();
+    let new_rigs: HashMap<&str, &data::RigStatus> =
+        new.rigs.iter().map(|r| (r.name.as_str(), r)).collect();
+
+    // Detect new rigs
+    for (name, _rig) in &new_rigs {
+        if !old_rigs.contains_key(name) {
+            events.push(data::GtEvent {
+                timestamp: String::new(),
+                event_type: "created".to_string(),
+                actor: name.to_string(),
+                message: format!("rig '{}' appeared", name),
+            });
+        }
+    }
+
+    // Detect removed rigs
+    for (name, _rig) in &old_rigs {
+        if !new_rigs.contains_key(name) {
+            events.push(data::GtEvent {
+                timestamp: String::new(),
+                event_type: "removed".to_string(),
+                actor: name.to_string(),
+                message: format!("rig '{}' removed", name),
+            });
+        }
+    }
+
+    // Compare each rig that exists in both
+    for (name, new_rig) in &new_rigs {
+        let Some(old_rig) = old_rigs.get(name) else {
+            continue;
+        };
+
+        // Witness state change
+        if !old_rig.has_witness && new_rig.has_witness {
+            events.push(data::GtEvent {
+                timestamp: String::new(),
+                event_type: "created".to_string(),
+                actor: name.to_string(),
+                message: format!("{}/witness started", name),
+            });
+        } else if old_rig.has_witness && !new_rig.has_witness {
+            events.push(data::GtEvent {
+                timestamp: String::new(),
+                event_type: "removed".to_string(),
+                actor: name.to_string(),
+                message: format!("{}/witness stopped", name),
+            });
+        }
+
+        // Refinery state change
+        if !old_rig.has_refinery && new_rig.has_refinery {
+            events.push(data::GtEvent {
+                timestamp: String::new(),
+                event_type: "created".to_string(),
+                actor: name.to_string(),
+                message: format!("{}/refinery started", name),
+            });
+        } else if old_rig.has_refinery && !new_rig.has_refinery {
+            events.push(data::GtEvent {
+                timestamp: String::new(),
+                event_type: "removed".to_string(),
+                actor: name.to_string(),
+                message: format!("{}/refinery stopped", name),
+            });
+        }
+
+        // Polecat count change
+        if new_rig.polecat_count > old_rig.polecat_count {
+            let diff = new_rig.polecat_count - old_rig.polecat_count;
+            events.push(data::GtEvent {
+                timestamp: String::new(),
+                event_type: "created".to_string(),
+                actor: name.to_string(),
+                message: format!(
+                    "{} polecat{} spawned on {} (now {})",
+                    diff,
+                    if diff == 1 { "" } else { "s" },
+                    name,
+                    new_rig.polecat_count,
+                ),
+            });
+        } else if new_rig.polecat_count < old_rig.polecat_count {
+            let diff = old_rig.polecat_count - new_rig.polecat_count;
+            events.push(data::GtEvent {
+                timestamp: String::new(),
+                event_type: "removed".to_string(),
+                actor: name.to_string(),
+                message: format!(
+                    "{} polecat{} removed from {} (now {})",
+                    diff,
+                    if diff == 1 { "" } else { "s" },
+                    name,
+                    new_rig.polecat_count,
+                ),
+            });
+        }
+
+        // Crew count change
+        if new_rig.crew_count != old_rig.crew_count {
+            events.push(data::GtEvent {
+                timestamp: String::new(),
+                event_type: "update".to_string(),
+                actor: name.to_string(),
+                message: format!(
+                    "{} crew count: {} -> {}",
+                    name, old_rig.crew_count, new_rig.crew_count,
+                ),
+            });
+        }
+
+        // Agent state changes (running → stopped, stopped → running)
+        let old_agents: HashMap<&str, &data::AgentInfo> =
+            old_rig.agents.iter().map(|a| (a.name.as_str(), a)).collect();
+        for agent in &new_rig.agents {
+            if let Some(old_agent) = old_agents.get(agent.name.as_str()) {
+                if !old_agent.running && agent.running {
+                    events.push(data::GtEvent {
+                        timestamp: String::new(),
+                        event_type: "created".to_string(),
+                        actor: format!("{}/{}", name, agent.name),
+                        message: format!("{}/{} came online", name, agent.name),
+                    });
+                } else if old_agent.running && !agent.running {
+                    events.push(data::GtEvent {
+                        timestamp: String::new(),
+                        event_type: "error".to_string(),
+                        actor: format!("{}/{}", name, agent.name),
+                        message: format!("{}/{} went offline", name, agent.name),
+                    });
+                }
+            }
+        }
+    }
+
+    // Unread mail count change
+    if new.overseer.unread_mail != old.overseer.unread_mail
+        && new.overseer.unread_mail > old.overseer.unread_mail
+    {
+        let diff = new.overseer.unread_mail - old.overseer.unread_mail;
+        events.push(data::GtEvent {
+            timestamp: String::new(),
+            event_type: "update".to_string(),
+            actor: "mail".to_string(),
+            message: format!(
+                "{} new mail message{}",
+                diff,
+                if diff == 1 { "" } else { "s" },
+            ),
+        });
+    }
+
+    events
+}
+
 pub struct GtApp {
     pub active_screen: ActiveScreen,
     // Shared data
     pub status: TownStatus,
+    prev_status: Option<TownStatus>,
     pub convoys: Vec<ConvoyItem>,
     pub beads: BeadsSnapshot,
     pub all_agents: Vec<AgentInfo>,
@@ -180,6 +347,7 @@ impl GtApp {
                 name: "Gas Town".to_string(),
                 ..Default::default()
             },
+            prev_status: None,
             convoys: Vec::new(),
             beads: BeadsSnapshot::default(),
             all_agents: Vec::new(),
@@ -562,6 +730,14 @@ impl Model for GtApp {
             Msg::Mouse(mouse) => self.handle_mouse(mouse),
             Msg::Resize { .. } => Cmd::None,
             Msg::StatusRefresh(status) => {
+                // Generate events from status deltas
+                if let Some(prev) = &self.prev_status {
+                    for event in status_delta_events(prev, &status) {
+                        panels::event_feed::push_event(&mut self.event_viewer, &event);
+                        self.event_feed_screen.push_real_event(&event);
+                    }
+                }
+                self.prev_status = Some(status.clone());
                 self.status = status;
                 self.all_agents = Self::collect_agents(&self.status);
                 self.last_refresh = Instant::now();
@@ -576,6 +752,10 @@ impl Model for GtApp {
             }
             Msg::BeadsRefresh(snapshot) => {
                 self.beads = snapshot;
+                Cmd::None
+            }
+            Msg::MailRefresh(messages) => {
+                self.mail_screen.set_messages(messages);
                 Cmd::None
             }
             Msg::NewEvent(event) => {
@@ -773,6 +953,7 @@ impl Model for GtApp {
             Box::new(data::StatusPoller),
             Box::new(data::ConvoyPoller),
             Box::new(data::BeadsPoller),
+            Box::new(data::MailPoller),
             Box::new(data::EventTailer),
         ];
 

@@ -1,4 +1,9 @@
 //! Event Feed screen — search, filter, and rich color-coded event stream.
+//!
+//! All events come from real sources:
+//! - EventTailer (tails ~/.events.jsonl)
+//! - StatusRefresh deltas (rig/agent/polecat changes)
+//! - CommandOutput results
 
 use std::cell::Cell;
 
@@ -20,10 +25,9 @@ use crate::data::GtEvent;
 use crate::msg::Msg;
 
 const MAX_FEED_LINES: usize = 2_000;
-const EVENT_BURST_INTERVAL: u64 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EventType {
+enum EventCategory {
     Sling,
     Mail,
     Merge,
@@ -32,7 +36,7 @@ enum EventType {
     Patrol,
 }
 
-impl EventType {
+impl EventCategory {
     fn icon(self) -> &'static str {
         match self {
             Self::Sling => "\u{2192}",
@@ -52,6 +56,26 @@ impl EventType {
             Self::Error => theme::accent::ERROR,
             Self::Status => theme::accent::ACCENT_5,
             Self::Patrol => theme::accent::WARNING,
+        }
+    }
+
+    /// Classify a GtEvent into a category by looking at its type string.
+    fn from_event_type(event_type: &str) -> Self {
+        let lower = event_type.to_lowercase();
+        if lower.contains("sling") || lower.contains("dispatch") || lower.contains("spawn") {
+            Self::Sling
+        } else if lower.contains("mail") || lower.contains("nudge") || lower.contains("message") {
+            Self::Mail
+        } else if lower.contains("merge") || lower.contains("close") || lower.contains("land") {
+            Self::Merge
+        } else if lower.contains("error") || lower.contains("fail") || lower.contains("offline")
+            || lower.contains("removed") || lower.contains("stopped")
+        {
+            Self::Error
+        } else if lower.contains("patrol") || lower.contains("health") || lower.contains("warning") {
+            Self::Patrol
+        } else {
+            Self::Status
         }
     }
 }
@@ -86,13 +110,13 @@ impl FilterMode {
         }
     }
 
-    fn matches(self, event_type: EventType) -> bool {
+    fn matches(self, cat: EventCategory) -> bool {
         match self {
             Self::All => true,
-            Self::Sling => event_type == EventType::Sling,
-            Self::Mail => event_type == EventType::Mail,
-            Self::Merge => event_type == EventType::Merge,
-            Self::Error => event_type == EventType::Error,
+            Self::Sling => matches!(cat, EventCategory::Sling),
+            Self::Mail => matches!(cat, EventCategory::Mail),
+            Self::Merge => matches!(cat, EventCategory::Merge),
+            Self::Error => matches!(cat, EventCategory::Error),
         }
     }
 }
@@ -104,120 +128,8 @@ enum UiMode {
 }
 
 struct FeedEvent {
-    event_type: EventType,
+    category: EventCategory,
     formatted: String,
-}
-
-const ACTORS: &[&str] = &[
-    "mayor", "witness", "refinery", "obsidian", "granite", "basalt",
-    "slate", "marble", "flint", "quartz",
-];
-
-const SLING_MESSAGES: &[&str] = &[
-    "dispatched bd-{id} to {target}",
-    "created molecule for bd-{id}",
-    "assigned work to {target}",
-    "spawned polecat {target}",
-];
-
-const MAIL_MESSAGES: &[&str] = &[
-    "sent nudge to {target}",
-    "inbox delivery for {target}",
-    "handoff message from {target}",
-    "escalation from {target}",
-];
-
-const MERGE_MESSAGES: &[&str] = &[
-    "merged branch polecat/{target}/bd-{id}",
-    "MQ entry processed for bd-{id}",
-    "rebase successful for {target}",
-    "fast-forward merge bd-{id}",
-];
-
-const ERROR_MESSAGES: &[&str] = &[
-    "polecat {target} health check failed",
-    "zombie detected: {target} unresponsive",
-    "build failure on bd-{id}",
-    "merge conflict in bd-{id}",
-];
-
-const STATUS_MESSAGES: &[&str] = &[
-    "polecat {target} checked in",
-    "bd-{id} status \u{2192} in_progress",
-    "molecule step completed by {target}",
-    "heartbeat OK from {target}",
-];
-
-const PATROL_MESSAGES: &[&str] = &[
-    "patrol sweep: all polecats healthy",
-    "warning: {target} idle for 5m",
-    "patrol: MQ depth = {id} entries",
-    "patrol: checking {target} progress",
-];
-
-fn det_hash(seed: u64) -> u64 {
-    let mut z = seed.wrapping_add(0x9e37_79b9_7f4a_7c15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    z ^ (z >> 31)
-}
-
-fn generate_event(seq: u64) -> FeedEvent {
-    let h = det_hash(seq);
-    let type_idx = (h % 6) as usize;
-    let event_type = match type_idx {
-        0 => EventType::Sling,
-        1 => EventType::Mail,
-        2 => EventType::Merge,
-        3 => EventType::Error,
-        4 => EventType::Status,
-        _ => EventType::Patrol,
-    };
-
-    let actor_idx = ((h >> 8) % ACTORS.len() as u64) as usize;
-    let actor = ACTORS[actor_idx];
-    let target_idx = ((h >> 16) % ACTORS.len() as u64) as usize;
-    let target = ACTORS[target_idx];
-
-    let templates = match event_type {
-        EventType::Sling => SLING_MESSAGES,
-        EventType::Mail => MAIL_MESSAGES,
-        EventType::Merge => MERGE_MESSAGES,
-        EventType::Error => ERROR_MESSAGES,
-        EventType::Status => STATUS_MESSAGES,
-        EventType::Patrol => PATROL_MESSAGES,
-    };
-
-    let tmpl_idx = ((h >> 24) % templates.len() as u64) as usize;
-    let template = templates[tmpl_idx];
-    let fake_id = format!("{:04x}", (h >> 32) & 0xFFFF);
-    let message = template
-        .replace("{target}", target)
-        .replace("{id}", &fake_id);
-
-    let total_seconds = seq * 2;
-    let hours = (total_seconds / 3600) % 24;
-    let minutes = (total_seconds % 3600) / 60;
-    let seconds = total_seconds % 60;
-
-    let formatted = format!(
-        "[{:02}:{:02}:{:02}] {} {}: {}",
-        hours, minutes, seconds,
-        event_type.icon(),
-        actor,
-        message,
-    );
-
-    FeedEvent {
-        event_type,
-        formatted,
-    }
-}
-
-fn colorize_event(event: &FeedEvent) -> Line {
-    let color = event.event_type.color();
-    let style = Style::new().fg(color);
-    Line::styled(event.formatted.clone(), style)
 }
 
 pub struct EventFeedScreen {
@@ -229,8 +141,7 @@ pub struct EventFeedScreen {
     search_config: SearchConfig,
     filter: FilterMode,
     tick_count: u64,
-    events_generated: u64,
-    paused: bool,
+    event_count: u64,
     all_events: Vec<FeedEvent>,
     last_log_area: Cell<Rect>,
 }
@@ -246,7 +157,7 @@ impl EventFeedScreen {
                     .bold(),
             );
 
-        let mut feed = Self {
+        Self {
             viewer,
             viewer_state: LogViewerState::default(),
             mode: UiMode::Normal,
@@ -259,56 +170,50 @@ impl EventFeedScreen {
             },
             filter: FilterMode::All,
             tick_count: 0,
-            events_generated: 0,
-            paused: false,
+            event_count: 0,
             all_events: Vec::new(),
             last_log_area: Cell::new(Rect::default()),
-        };
-
-        for _ in 0..30 {
-            feed.push_event();
         }
-
-        feed
     }
 
-    fn push_event(&mut self) {
-        let event = generate_event(self.events_generated);
-        self.events_generated += 1;
+    /// Push a real GtEvent from the event tailer or status deltas.
+    pub fn push_real_event(&mut self, event: &GtEvent) {
+        let category = EventCategory::from_event_type(&event.event_type);
 
-        if self.filter.matches(event.event_type) {
-            let line = colorize_event(&event);
+        let ts = if event.timestamp.is_empty() {
+            String::new()
+        } else if event.timestamp.len() > 19 {
+            format!("{} ", &event.timestamp[11..19])
+        } else {
+            format!("{} ", &event.timestamp)
+        };
+
+        let actor = if event.actor.is_empty() {
+            String::new()
+        } else {
+            format!("{}: ", event.actor)
+        };
+
+        let formatted = format!(
+            "{}{} {}{}",
+            ts,
+            category.icon(),
+            actor,
+            event.message,
+        );
+
+        let line = Line::styled(formatted.clone(), Style::new().fg(category.color()));
+
+        if self.filter.matches(category) {
             self.viewer.push(line);
         }
-        self.all_events.push(event);
 
-        if self.all_events.len() > MAX_FEED_LINES {
-            self.all_events.remove(0);
-        }
-    }
-
-    /// Push a real GtEvent from the event tailer into the feed.
-    pub fn push_real_event(&mut self, event: &GtEvent) {
-        let color = match event.event_type.to_lowercase().as_str() {
-            "sling" | "dispatch" => theme::accent::SUCCESS,
-            "mail" | "nudge" => theme::accent::INFO,
-            "merge" | "close" => theme::accent::SUCCESS,
-            "error" | "fail" => theme::accent::ERROR,
-            "patrol" | "health" => theme::accent::WARNING,
-            _ => theme::fg::SECONDARY,
-        };
-        let formatted = format!(
-            "[{}] {} {}: {}",
-            &event.timestamp, event.event_type, event.actor, event.message,
-        );
-        let line = Line::styled(formatted.clone(), Style::new().fg(color));
-        self.viewer.push(line);
-
-        let feed_event = FeedEvent {
-            event_type: EventType::Status, // categorize as Status for filter
+        self.all_events.push(FeedEvent {
+            category,
             formatted,
-        };
-        self.all_events.push(feed_event);
+        });
+        self.event_count += 1;
+
         if self.all_events.len() > MAX_FEED_LINES {
             self.all_events.remove(0);
         }
@@ -326,8 +231,11 @@ impl EventFeedScreen {
         self.viewer_state = LogViewerState::default();
 
         for event in &self.all_events {
-            if self.filter.matches(event.event_type) {
-                let line = colorize_event(event);
+            if self.filter.matches(event.category) {
+                let line = Line::styled(
+                    event.formatted.clone(),
+                    Style::new().fg(event.category.color()),
+                );
                 self.viewer.push(line);
             }
         }
@@ -382,9 +290,6 @@ impl EventFeedScreen {
             }
             (KeyCode::Char('N'), Modifiers::NONE) => {
                 self.viewer.prev_match();
-            }
-            (KeyCode::Char(' '), Modifiers::NONE) => {
-                self.paused = !self.paused;
             }
             (KeyCode::Char('G'), Modifiers::NONE) => {
                 self.viewer.scroll_to_bottom();
@@ -468,7 +373,6 @@ impl EventFeedScreen {
         }
 
         let filter_label = self.filter.label();
-        let pause_label = if self.paused { "PAUSED" } else { "LIVE" };
 
         let match_info = if !self.last_search.is_empty() {
             if let Some((pos, total)) = self.viewer.search_info() {
@@ -481,8 +385,8 @@ impl EventFeedScreen {
         };
 
         let status = format!(
-            " filter: {} | {} | events: {}{}  [/]search [f]ilter [Space]pause",
-            filter_label, pause_label, self.events_generated, match_info,
+            " filter: {} | events: {}{}  [/]search [f]ilter [n/N]ext/prev",
+            filter_label, self.event_count, match_info,
         );
 
         let style = Style::new().fg(theme::fg::MUTED);
@@ -492,10 +396,6 @@ impl EventFeedScreen {
 
     pub fn tick(&mut self, tick_count: u64) {
         self.tick_count = tick_count;
-
-        if !self.paused && tick_count % EVENT_BURST_INTERVAL == 0 {
-            self.push_event();
-        }
     }
 
     pub fn view(&self, frame: &mut Frame, area: Rect) {
@@ -535,8 +435,14 @@ impl EventFeedScreen {
         let inner = block.inner(log_area);
         Widget::render(&block, log_area, frame);
 
-        let mut state = self.viewer_state.clone();
-        StatefulWidget::render(&self.viewer, inner, frame, &mut state);
+        if self.all_events.is_empty() {
+            Paragraph::new("Waiting for events... (status changes, mail, commands)")
+                .style(Style::new().fg(theme::fg::DISABLED))
+                .render(inner, frame);
+        } else {
+            let mut state = self.viewer_state.clone();
+            StatefulWidget::render(&self.viewer, inner, frame, &mut state);
+        }
 
         if search_active {
             let bar_sections = Flex::vertical()

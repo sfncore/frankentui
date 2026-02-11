@@ -1,6 +1,6 @@
 use ftui_core::event::{Event, KeyEvent, MouseEvent};
 
-use crate::data::{BeadsSnapshot, ConvoyItem, GtEvent, TownStatus};
+use crate::data::{BeadsSnapshot, ConvoyItem, GtEvent, MailMessage, TownStatus};
 use crate::screen::ActiveScreen;
 use crate::tmux::TmuxSnapshot;
 use crate::tmuxrs::TmuxrsConfig;
@@ -14,6 +14,7 @@ pub enum Msg {
     StatusRefresh(TownStatus),
     ConvoyRefresh(Vec<ConvoyItem>),
     BeadsRefresh(BeadsSnapshot),
+    MailRefresh(Vec<MailMessage>),
     NewEvent(GtEvent),
     SwitchScreen(ActiveScreen),
     CommandOutput(String, String),

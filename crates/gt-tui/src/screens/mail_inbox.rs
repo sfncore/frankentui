@@ -1,4 +1,6 @@
 //! Mail Inbox screen — message list with reading pane.
+//!
+//! Fetches real mail data from `gt mail inbox --json` via MailPoller.
 
 use std::cell::Cell;
 
@@ -17,118 +19,8 @@ use ftui_widgets::paragraph::Paragraph;
 use ftui_widgets::scrollbar::{Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ftui_widgets::{StatefulWidget, Widget};
 
+use crate::data;
 use crate::msg::Msg;
-
-// ---------------------------------------------------------------------------
-// Mail data model
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Priority {
-    Low,
-    Normal,
-    High,
-    Critical,
-}
-
-impl Priority {
-    fn icon(self) -> &'static str {
-        match self {
-            Priority::Low => " ",
-            Priority::Normal => " ",
-            Priority::High => "!",
-            Priority::Critical => "!!",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct MailMessage {
-    from: String,
-    subject: String,
-    body: String,
-    priority: Priority,
-    timestamp: String,
-    read: bool,
-}
-
-fn det_hash(seed: u64) -> u64 {
-    let mut h = seed;
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xff51afd7ed558ccd);
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xc4ceb9fe1a85ec53);
-    h ^= h >> 33;
-    h
-}
-
-fn generate_messages() -> Vec<MailMessage> {
-    let senders = [
-        "mayor", "witness", "refinery", "polecat/amber",
-        "polecat/jade", "polecat/onyx", "hq/dispatch", "hq/scheduler",
-    ];
-    let subjects = [
-        "Work assignment ready",
-        "Merge queue status update",
-        "Build failure on main",
-        "Context recovery needed",
-        "New molecule dispatched",
-        "Escalation: blocked task",
-        "Performance metrics report",
-        "Rig health check passed",
-        "Dependency conflict detected",
-        "Handoff notes attached",
-        "Test coverage report",
-        "Branch rebase required",
-        "Pipeline stalled - action needed",
-        "Sprint planning summary",
-        "Code review requested",
-    ];
-    let bodies = [
-        "Your work has been placed on the hook. Execute immediately per GUPP.\n\nMolecule: bd-wisp-tflm\nSteps remaining: 8\n\nRemember: Hook \u{2192} bd ready \u{2192} Execute \u{2192} gt done.",
-        "The merge queue has processed 3 branches successfully.\n\n  \u{2713} polecat/amber/bd-123 \u{2192} merged\n  \u{2713} polecat/jade/bd-456 \u{2192} merged\n  \u{2713} polecat/onyx/bd-789 \u{2192} merged\n\nNo conflicts detected. Pipeline green.",
-        "Build failed on commit e3c1baac.\n\nError: test_snapshot_determinism FAILED\n  Expected checksum: 0xABCD1234\n  Actual checksum:   0xDEADBEEF\n\nThis is a pre-existing failure on main. Filed as bd-xyz.",
-        "Your session context is approaching limits.\n\nRecommendation: Run gt handoff to cycle to a fresh session.\nCurrent usage: 87% of context window.\n\nAll progress has been committed.",
-        "New molecule bd-wisp-abc has been dispatched.\n\nFormula: mol-polecat-work (10 steps)\nAssigned to: obsidian\nPriority: P2\n\nBegin with: bd ready",
-        "Task bd-429p is blocked.\n\nBlocker: Missing API endpoint for mail fetch.\nSeverity: HIGH\n\nWitness has been notified. Awaiting resolution.",
-        "Performance metrics for the last 24 hours:\n\n  Render budget: 98.2% on target\n  Frame drops: 0\n  Memory usage: 42MB (stable)\n  GC pauses: none (Rust)\n\nAll systems nominal.",
-        "Rig health check completed successfully.\n\n  Polecats: 3/3 healthy\n  Refinery: operational\n  Witness: monitoring\n  Beads DB: synced\n\nNo action required.",
-        "Dependency conflict in Cargo.lock.\n\n  ftui-widgets 0.1.1 requires ftui-core >=0.1.0\n  ftui-extras 0.1.1 requires ftui-core >=0.1.1\n\nResolution: cargo update -p ftui-core",
-        "Handoff from previous session:\n\nIssue: bd-429p (Mail Inbox panel)\nStatus: Implementation in progress\nBranch: polecat/obsidian/bd-429p\n\nNext: Continue with mail_inbox.rs creation.",
-        "Test coverage summary:\n\n  ftui-core: 94.2%\n  ftui-widgets: 87.1%\n  ftui-extras: 76.8%\n  ftui-demo-showcase: 62.4%\n\nTarget: 80% across all crates.",
-        "Branch polecat/obsidian/bd-429p needs rebase.\n\nMain has advanced 5 commits since branch creation.\nConflicts likely in: app.rs, mod.rs\n\nRun: git fetch origin && git rebase origin/main",
-        "Pipeline stalled for 12 minutes.\n\nCause: polecat/jade session idle (Idle Polecat heresy)\nAction: Witness sending nudge.\n\nIf you are polecat/jade, run gt done NOW.",
-        "Sprint planning for next cycle:\n\n  1. Focus management refactor (bd-280t)\n  2. Command palette (bd-s8py)\n  3. Toast notifications (bd-1smd)\n  4. Snapshot tests (bd-nmg1)\n\nPrioritize in order.",
-        "Code review requested for PR #42.\n\nAuthor: polecat/amber\nBranch: polecat/amber/bd-s8py\nFiles changed: 4\nInsertions: +312\nDeletions: -8\n\nPlease review at your earliest convenience.",
-    ];
-
-    let mut messages = Vec::with_capacity(20);
-    for i in 0..20 {
-        let h = det_hash(i as u64 + 42);
-        let sender_idx = (h % senders.len() as u64) as usize;
-        let subject_idx = ((h >> 8) % subjects.len() as u64) as usize;
-        let body_idx = ((h >> 16) % bodies.len() as u64) as usize;
-        let priority = match (h >> 24) % 10 {
-            0 => Priority::Critical,
-            1..=2 => Priority::High,
-            3..=5 => Priority::Normal,
-            _ => Priority::Low,
-        };
-        let hour = ((h >> 32) % 24) as u8;
-        let minute = ((h >> 40) % 60) as u8;
-        let read = (h >> 48) % 3 == 0;
-
-        messages.push(MailMessage {
-            from: senders[sender_idx].to_string(),
-            subject: subjects[subject_idx].to_string(),
-            body: bodies[body_idx].to_string(),
-            priority,
-            timestamp: format!("{hour:02}:{minute:02}"),
-            read,
-        });
-    }
-    messages
-}
 
 // ---------------------------------------------------------------------------
 // Focus panels
@@ -154,7 +46,7 @@ impl Panel {
 // ---------------------------------------------------------------------------
 
 pub struct MailInboxScreen {
-    messages: Vec<MailMessage>,
+    messages: Vec<data::MailMessage>,
     selected: usize,
     list_scroll: usize,
     body_scroll: usize,
@@ -167,7 +59,7 @@ pub struct MailInboxScreen {
 impl MailInboxScreen {
     pub fn new() -> Self {
         Self {
-            messages: generate_messages(),
+            messages: Vec::new(),
             selected: 0,
             list_scroll: 0,
             body_scroll: 0,
@@ -178,20 +70,42 @@ impl MailInboxScreen {
         }
     }
 
+    /// Replace messages with fresh data from MailPoller.
+    pub fn set_messages(&mut self, messages: Vec<data::MailMessage>) {
+        let prev_id = self.messages.get(self.selected).map(|m| m.id.clone());
+        self.messages = messages;
+        // Try to preserve selection by ID
+        if let Some(id) = prev_id {
+            if let Some(idx) = self.messages.iter().position(|m| m.id == id) {
+                self.selected = idx;
+                return;
+            }
+        }
+        // Clamp selection
+        if !self.messages.is_empty() && self.selected >= self.messages.len() {
+            self.selected = self.messages.len() - 1;
+        }
+    }
+
     fn unread_count(&self) -> usize {
         self.messages.iter().filter(|m| !m.read).count()
     }
 
-    fn mark_selected_read(&mut self) {
-        if let Some(msg) = self.messages.get_mut(self.selected) {
-            msg.read = true;
-        }
-    }
-
-    fn toggle_selected_read(&mut self) {
-        if let Some(msg) = self.messages.get_mut(self.selected) {
-            msg.read = !msg.read;
-        }
+    fn mark_selected_read(&mut self) -> Cmd<Msg> {
+        let msg = match self.messages.get_mut(self.selected) {
+            Some(m) if !m.read => m,
+            _ => return Cmd::None,
+        };
+        msg.read = true;
+        let id = msg.id.clone();
+        // Fire async gt mail mark-read
+        Cmd::Task(
+            Default::default(),
+            Box::new(move || {
+                let output = data::run_cli_command(&format!("gt mail mark-read {}", id));
+                Msg::CommandOutput(format!("gt mail mark-read {}", id), output)
+            }),
+        )
     }
 
     fn select_up(&mut self) {
@@ -226,10 +140,28 @@ impl MailInboxScreen {
         }
     }
 
+    fn priority_icon(priority: &str) -> &'static str {
+        match priority {
+            "critical" => "!!",
+            "high" => "!",
+            "low" => " ",
+            _ => " ",
+        }
+    }
+
+    fn priority_label(priority: &str) -> &'static str {
+        match priority {
+            "critical" => "CRITICAL",
+            "high" => "HIGH",
+            "low" => "Low",
+            _ => "Normal",
+        }
+    }
+
     // -- Rendering helpers --
 
     fn render_message_list(&self, frame: &mut Frame, area: Rect) {
-        let inbox_title = format!("Inbox ({} unread)", self.unread_count());
+        let inbox_title = format!("Inbox ({} unread / {} total)", self.unread_count(), self.messages.len());
         let border_style = if self.focus == Panel::MessageList {
             Style::new().fg(theme::accent::PRIMARY)
         } else {
@@ -245,6 +177,13 @@ impl MailInboxScreen {
         block.render(area, frame);
 
         if inner.height == 0 || inner.width < 10 {
+            return;
+        }
+
+        if self.messages.is_empty() {
+            Paragraph::new("No mail messages. gt mail inbox is empty.")
+                .style(Style::new().fg(theme::fg::DISABLED))
+                .render(inner, frame);
             return;
         }
 
@@ -280,11 +219,17 @@ impl MailInboxScreen {
             let row_area = Rect::new(inner.x, row_y, inner.width, 1);
             let is_selected = scroll + i == self.selected;
 
-            let priority_icon = msg.priority.icon();
+            let priority_icon = Self::priority_icon(&msg.priority);
             let from_display = truncate_to_width(&msg.from, 16);
+            // Show just HH:MM from ISO timestamp
+            let time_display = if msg.timestamp.len() >= 16 {
+                &msg.timestamp[11..16]
+            } else {
+                &msg.timestamp
+            };
             let line = format!(
                 " {:<2} {:<16} {:<5} {}",
-                priority_icon, from_display, msg.timestamp, msg.subject
+                priority_icon, from_display, time_display, msg.subject
             );
             let line = truncate_to_width(&line, inner.width);
 
@@ -364,7 +309,7 @@ impl MailInboxScreen {
             ])
             .split(inner);
 
-        let from_line = format!("From: {}", msg.from);
+        let from_line = format!("From: {}  To: {}", msg.from, msg.to);
         Paragraph::new(truncate_to_width(&from_line, header_rows[0].width))
             .style(
                 Style::new()
@@ -374,14 +319,10 @@ impl MailInboxScreen {
             .render(header_rows[0], frame);
 
         let meta_line = format!(
-            "Priority: {} | Time: {} | Status: {}",
-            match msg.priority {
-                Priority::Critical => "CRITICAL",
-                Priority::High => "HIGH",
-                Priority::Normal => "Normal",
-                Priority::Low => "Low",
-            },
+            "Priority: {} | {} | ID: {} | {}",
+            Self::priority_label(&msg.priority),
             msg.timestamp,
+            msg.id,
             if msg.read { "Read" } else { "Unread" }
         );
         Paragraph::new(truncate_to_width(&meta_line, header_rows[1].width))
@@ -436,7 +377,7 @@ impl MailInboxScreen {
         );
 
         let status = format!(
-            " Message {}/{} | Unread: {} | Focus: {:?} | Enter=read  Tab=switch  r=toggle",
+            " Message {}/{} | Unread: {} | Focus: {:?} | Enter=mark-read  Tab=switch  j/k=navigate",
             if self.messages.is_empty() {
                 0
             } else {
@@ -465,10 +406,7 @@ impl MailInboxScreen {
                 Panel::ReadingPane => self.scroll_body_down(),
             },
             KeyCode::Enter => {
-                self.mark_selected_read();
-            }
-            KeyCode::Char('r') => {
-                self.toggle_selected_read();
+                return self.mark_selected_read();
             }
             KeyCode::Home | KeyCode::Char('g') => {
                 self.selected = 0;
