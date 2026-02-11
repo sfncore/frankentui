@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 ftui-core = { path = "../ftui-core", version = "0.1.1" }
 ftui-render = { path = "../ftui-render", version = "0.1.1" }
-ftui-runtime = { path = "../ftui-runtime", version = "0.1.1" }
+ftui-runtime = { path = "../ftui-runtime", version = "0.1.1", features = ["crossterm-compat"] }
 ftui-widgets = { path = "../ftui-widgets", version = "0.1.1" }
 ftui-style = { path = "../ftui-style", version = "0.1.1" }
 ftui-text = { path = "../ftui-text", version = "0.1.1" }

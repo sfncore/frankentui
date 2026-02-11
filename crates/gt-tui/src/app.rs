@@ -9,6 +9,8 @@ use ftui_layout::{Constraint, Flex};
 use ftui_render::cell::Cell;
 use ftui_render::frame::Frame;
 use ftui_runtime::{Cmd, Every, Model, Subscription};
+use ftui_widgets::focus::graph::{FocusId, FocusNode, NavDirection};
+use ftui_widgets::focus::manager::FocusManager;
 use ftui_widgets::list::ListState;
 use ftui_widgets::log_viewer::{LogViewer, LogViewerState};
 use ftui_widgets::spinner::SpinnerState;
@@ -19,37 +21,56 @@ use crate::data::{self, ConvoyItem, TownStatus};
 use crate::msg::Msg;
 use crate::panels;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Panel {
-    AgentTree,
-    Convoys,
-    EventFeed,
+// ---------------------------------------------------------------------------
+// Focus IDs for dashboard panels
+// ---------------------------------------------------------------------------
+
+pub const FOCUS_AGENT_TREE: FocusId = 1;
+pub const FOCUS_CONVOYS: FocusId = 2;
+pub const FOCUS_EVENT_FEED: FocusId = 3;
+
+/// Label for a focus ID.
+fn focus_label(id: FocusId) -> &'static str {
+    match id {
+        FOCUS_AGENT_TREE => "Agents",
+        FOCUS_CONVOYS => "Convoys",
+        FOCUS_EVENT_FEED => "Events",
+        _ => "Unknown",
+    }
 }
 
-impl Panel {
-    pub fn next(self) -> Self {
-        match self {
-            Panel::AgentTree => Panel::Convoys,
-            Panel::Convoys => Panel::EventFeed,
-            Panel::EventFeed => Panel::AgentTree,
-        }
-    }
+/// Build a FocusManager with panel nodes wired for Tab/BackTab cycling.
+fn build_focus_manager() -> FocusManager {
+    let mut mgr = FocusManager::new();
+    let graph = mgr.graph_mut();
 
-    pub fn prev(self) -> Self {
-        match self {
-            Panel::AgentTree => Panel::EventFeed,
-            Panel::Convoys => Panel::AgentTree,
-            Panel::EventFeed => Panel::Convoys,
-        }
-    }
+    // Insert nodes (bounds updated each frame during view)
+    graph.insert(FocusNode::new(FOCUS_AGENT_TREE, Rect::default()).with_tab_index(0));
+    graph.insert(FocusNode::new(FOCUS_CONVOYS, Rect::default()).with_tab_index(1));
+    graph.insert(FocusNode::new(FOCUS_EVENT_FEED, Rect::default()).with_tab_index(2));
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Panel::AgentTree => "Agents",
-            Panel::Convoys => "Convoys",
-            Panel::EventFeed => "Events",
-        }
-    }
+    // Wire Next/Prev cycle: AgentTree <-> Convoys <-> EventFeed <-> AgentTree
+    graph.connect(FOCUS_AGENT_TREE, NavDirection::Next, FOCUS_CONVOYS);
+    graph.connect(FOCUS_CONVOYS, NavDirection::Next, FOCUS_EVENT_FEED);
+    graph.connect(FOCUS_EVENT_FEED, NavDirection::Next, FOCUS_AGENT_TREE);
+
+    graph.connect(FOCUS_AGENT_TREE, NavDirection::Prev, FOCUS_EVENT_FEED);
+    graph.connect(FOCUS_CONVOYS, NavDirection::Prev, FOCUS_AGENT_TREE);
+    graph.connect(FOCUS_EVENT_FEED, NavDirection::Prev, FOCUS_CONVOYS);
+
+    // Spatial: Left/Right between sidebar and main panels
+    graph.connect(FOCUS_AGENT_TREE, NavDirection::Right, FOCUS_CONVOYS);
+    graph.connect(FOCUS_CONVOYS, NavDirection::Left, FOCUS_AGENT_TREE);
+    graph.connect(FOCUS_EVENT_FEED, NavDirection::Left, FOCUS_AGENT_TREE);
+
+    // Spatial: Up/Down between convoys and event feed
+    graph.connect(FOCUS_CONVOYS, NavDirection::Down, FOCUS_EVENT_FEED);
+    graph.connect(FOCUS_EVENT_FEED, NavDirection::Up, FOCUS_CONVOYS);
+
+    // Start with agent tree focused
+    mgr.focus(FOCUS_AGENT_TREE);
+
+    mgr
 }
 
 /// A flattened tree entry for selection-based navigation.
@@ -65,7 +86,7 @@ pub struct GtDashboard {
     pub convoys: Vec<ConvoyItem>,
     pub event_viewer: LogViewer,
     pub event_state: RefCell<LogViewerState>,
-    pub active_panel: Panel,
+    pub focus: FocusManager,
     pub spinner_state: SpinnerState,
     pub spinner_tick: u32,
     pub convoy_list_state: RefCell<ListState>,
@@ -83,6 +104,7 @@ impl GtDashboard {
         let mut event_viewer = LogViewer::new(5_000);
         event_viewer.push("Gas Town TUI starting...");
         event_viewer.push("Press Tab to switch panels, j/k to navigate, Enter to switch tmux");
+        event_viewer.push("Arrow keys for spatial navigation between panels");
         event_viewer.push("Click agent names to jump to their tmux session");
         event_viewer.push("");
 
@@ -94,7 +116,7 @@ impl GtDashboard {
             convoys: Vec::new(),
             event_viewer,
             event_state: RefCell::new(LogViewerState::default()),
-            active_panel: Panel::AgentTree,
+            focus: build_focus_manager(),
             spinner_state: SpinnerState::default(),
             spinner_tick: 0,
             convoy_list_state: RefCell::new(ListState::default()),
@@ -103,6 +125,11 @@ impl GtDashboard {
             tree_cursor: 0,
             tree_area: RefCell::new(Rect::default()),
         }
+    }
+
+    /// Which panel currently has focus.
+    fn active_panel_id(&self) -> FocusId {
+        self.focus.current().unwrap_or(FOCUS_AGENT_TREE)
     }
 
     /// Rebuild the flat tree entries from current status.
@@ -156,27 +183,44 @@ impl GtDashboard {
                 return Cmd::Quit;
             }
             KeyCode::Tab => {
-                self.active_panel = self.active_panel.next();
+                self.focus.navigate(NavDirection::Next);
                 self.event_viewer
-                    .push(format!("Panel: {}", self.active_panel.label()));
+                    .push(format!("Panel: {}", focus_label(self.active_panel_id())));
                 return Cmd::None;
             }
             KeyCode::BackTab => {
-                self.active_panel = self.active_panel.prev();
+                self.focus.navigate(NavDirection::Prev);
                 self.event_viewer
-                    .push(format!("Panel: {}", self.active_panel.label()));
+                    .push(format!("Panel: {}", focus_label(self.active_panel_id())));
+                return Cmd::None;
+            }
+            // Arrow keys for spatial navigation between panels
+            KeyCode::Left if key.modifiers.contains(Modifiers::ALT) => {
+                self.focus.navigate(NavDirection::Left);
+                return Cmd::None;
+            }
+            KeyCode::Right if key.modifiers.contains(Modifiers::ALT) => {
+                self.focus.navigate(NavDirection::Right);
+                return Cmd::None;
+            }
+            KeyCode::Up if key.modifiers.contains(Modifiers::ALT) => {
+                self.focus.navigate(NavDirection::Up);
+                return Cmd::None;
+            }
+            KeyCode::Down if key.modifiers.contains(Modifiers::ALT) => {
+                self.focus.navigate(NavDirection::Down);
                 return Cmd::None;
             }
             KeyCode::Char('1') => {
-                self.active_panel = Panel::AgentTree;
+                self.focus.focus(FOCUS_AGENT_TREE);
                 return Cmd::None;
             }
             KeyCode::Char('2') => {
-                self.active_panel = Panel::Convoys;
+                self.focus.focus(FOCUS_CONVOYS);
                 return Cmd::None;
             }
             KeyCode::Char('3') => {
-                self.active_panel = Panel::EventFeed;
+                self.focus.focus(FOCUS_EVENT_FEED);
                 return Cmd::None;
             }
             KeyCode::Char('r') => {
@@ -197,62 +241,59 @@ impl GtDashboard {
         }
 
         // Panel-specific keys
-        match self.active_panel {
-            Panel::AgentTree => {
-                match key.code {
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        if !self.tree_entries.is_empty() {
-                            self.tree_cursor =
-                                (self.tree_cursor + 1).min(self.tree_entries.len() - 1);
-                        }
+        let active = self.active_panel_id();
+        if active == FOCUS_AGENT_TREE {
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if !self.tree_entries.is_empty() {
+                        self.tree_cursor =
+                            (self.tree_cursor + 1).min(self.tree_entries.len() - 1);
                     }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        self.tree_cursor = self.tree_cursor.saturating_sub(1);
-                    }
-                    KeyCode::Enter => {
-                        self.switch_selected_tmux();
-                    }
-                    _ => {}
                 }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.tree_cursor = self.tree_cursor.saturating_sub(1);
+                }
+                KeyCode::Enter => {
+                    self.switch_selected_tmux();
+                }
+                _ => {}
             }
-            Panel::EventFeed => {
-                let viewport_h = self.event_state.borrow().last_viewport_height.max(1);
-                match key.code {
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        self.event_viewer.scroll_down(1);
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        self.event_viewer.scroll_up(1);
-                    }
-                    KeyCode::PageDown => {
-                        self.event_viewer.scroll_down(viewport_h as usize);
-                    }
-                    KeyCode::PageUp => {
-                        self.event_viewer.scroll_up(viewport_h as usize);
-                    }
-                    KeyCode::Char('G') => {
-                        self.event_viewer.scroll_to_bottom();
-                    }
-                    KeyCode::Char('g') => {
-                        self.event_viewer.scroll_to_top();
-                    }
-                    _ => {}
+        } else if active == FOCUS_EVENT_FEED {
+            let viewport_h = self.event_state.borrow().last_viewport_height.max(1);
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.event_viewer.scroll_down(1);
                 }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.event_viewer.scroll_up(1);
+                }
+                KeyCode::PageDown => {
+                    self.event_viewer.scroll_down(viewport_h as usize);
+                }
+                KeyCode::PageUp => {
+                    self.event_viewer.scroll_up(viewport_h as usize);
+                }
+                KeyCode::Char('G') => {
+                    self.event_viewer.scroll_to_bottom();
+                }
+                KeyCode::Char('g') => {
+                    self.event_viewer.scroll_to_top();
+                }
+                _ => {}
             }
-            Panel::Convoys => {
-                let mut state = self.convoy_list_state.borrow_mut();
-                match key.code {
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        let current = state.selected().unwrap_or(0);
-                        let max = self.convoys.len().saturating_sub(1);
-                        state.select(Some(current.saturating_add(1).min(max)));
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        let current = state.selected().unwrap_or(0);
-                        state.select(Some(current.saturating_sub(1)));
-                    }
-                    _ => {}
+        } else if active == FOCUS_CONVOYS {
+            let mut state = self.convoy_list_state.borrow_mut();
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    let current = state.selected().unwrap_or(0);
+                    let max = self.convoys.len().saturating_sub(1);
+                    state.select(Some(current.saturating_add(1).min(max)));
                 }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let current = state.selected().unwrap_or(0);
+                    state.select(Some(current.saturating_sub(1)));
+                }
+                _ => {}
             }
         }
 
@@ -277,7 +318,7 @@ impl GtDashboard {
             let row_in_panel = (mouse.y - tree_area.y).saturating_sub(1) as usize;
             if row_in_panel < self.tree_entries.len() {
                 self.tree_cursor = row_in_panel;
-                self.active_panel = Panel::AgentTree;
+                self.focus.focus(FOCUS_AGENT_TREE);
 
                 let entry = &self.tree_entries[row_in_panel];
                 if !entry.tmux_session.is_empty() {
@@ -396,12 +437,14 @@ impl Model for GtDashboard {
         // Save tree area for mouse hit detection
         *self.tree_area.borrow_mut() = content[0];
 
+        let active = self.focus.current().unwrap_or(FOCUS_AGENT_TREE);
+
         // Agent tree (left sidebar) — with cursor
         panels::agent_tree::render(
             frame,
             content[0],
             &self.status,
-            self.active_panel == Panel::AgentTree,
+            active == FOCUS_AGENT_TREE,
             &self.tree_entries,
             self.tree_cursor,
         );
@@ -420,7 +463,7 @@ impl Model for GtDashboard {
             frame,
             main_split[0],
             &self.convoys,
-            self.active_panel == Panel::Convoys,
+            active == FOCUS_CONVOYS,
             &mut convoy_state,
         );
         drop(convoy_state);
@@ -431,16 +474,17 @@ impl Model for GtDashboard {
             main_split[1],
             &self.event_viewer,
             &self.event_state,
-            self.active_panel == Panel::EventFeed,
+            active == FOCUS_EVENT_FEED,
         );
 
         // --- Keybind Help Line ---
-        let panel_label = format!("[{}]", self.active_panel.label());
+        let panel_label = format!("[{}]", focus_label(active));
         let keybind_bar = StatusLine::new()
             .style(crate::theme::status_bar_style())
             .separator("  ")
             .left(StatusItem::key_hint("Tab", "Panel"))
             .left(StatusItem::key_hint("1-3", "Jump"))
+            .left(StatusItem::key_hint("Alt+Arrows", "Spatial"))
             .left(StatusItem::key_hint("j/k", "Nav"))
             .left(StatusItem::key_hint("Enter", "Tmux"))
             .left(StatusItem::key_hint("Click", "Switch"))
