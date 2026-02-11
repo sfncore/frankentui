@@ -10,6 +10,7 @@ pub mod action_timeline;
 pub mod agent_detail;
 pub mod agent_tree;
 pub mod convoy_panel;
+pub mod mail_inbox;
 pub mod advanced_features;
 pub mod advanced_text_editor;
 pub mod async_tasks;
@@ -605,6 +606,16 @@ pub const SCREEN_REGISTRY: &[ScreenMeta] = &[
         category: ScreenCategory::Interaction,
         palette_tags: &["agent", "detail", "modal", "panel"],
         blurb: "Agent detail panel with info, events, and action buttons.",
+        default_hotkey: None,
+        tour_step_hint: None,
+    },
+    ScreenMeta {
+        id: ScreenId::MailInbox,
+        title: "Mail Inbox",
+        short_label: "Mail",
+        category: ScreenCategory::Systems,
+        palette_tags: &["mail", "inbox", "messages", "notifications"],
+        blurb: "Message list with reading pane, priority icons, and read/unread tracking.",
         default_hotkey: None,
         tour_step_hint: None,
     },
