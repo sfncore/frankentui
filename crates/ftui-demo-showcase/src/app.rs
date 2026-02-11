@@ -736,6 +736,8 @@ pub enum ScreenId {
     Notifications,
     /// Action timeline / event stream viewer.
     ActionTimeline,
+    /// Color-coded event feed with search and filtering (bd-emsl).
+    EventFeed,
     /// Content-aware layout examples (bd-2dow.7).
     IntrinsicSizing,
     /// Layout inspector (constraint solver visual, bd-iuvb.7).
@@ -837,6 +839,7 @@ impl ScreenId {
             Self::LogSearch => "LogSearch",
             Self::Notifications => "Notifications",
             Self::ActionTimeline => "ActionTimeline",
+            Self::EventFeed => "EventFeed",
             Self::IntrinsicSizing => "IntrinsicSizing",
             Self::LayoutInspector => "LayoutInspector",
             Self::AdvancedTextEditor => "AdvancedTextEditor",
@@ -962,6 +965,8 @@ pub struct ScreenStates {
     pub notifications: screens::notifications::Notifications,
     /// Action timeline / event stream viewer.
     pub action_timeline: screens::action_timeline::ActionTimeline,
+    /// Event feed screen state (bd-emsl).
+    pub event_feed: screens::event_feed::EventFeed,
     /// Intrinsic sizing demo screen state (bd-2dow.7).
     pub intrinsic_sizing: screens::intrinsic_sizing::IntrinsicSizingDemo,
     /// Layout inspector screen state (bd-iuvb.7).
@@ -1039,6 +1044,7 @@ impl Default for ScreenStates {
             log_search: Default::default(),
             notifications: Default::default(),
             action_timeline: Default::default(),
+            event_feed: Default::default(),
             intrinsic_sizing: Default::default(),
             layout_inspector: Default::default(),
             advanced_text_editor: Default::default(),
@@ -1239,6 +1245,9 @@ impl ScreenStates {
             ScreenId::ActionTimeline => {
                 self.action_timeline.update(event);
             }
+            ScreenId::EventFeed => {
+                self.event_feed.update(event);
+            }
             ScreenId::IntrinsicSizing => {
                 self.intrinsic_sizing.update(event);
             }
@@ -1319,6 +1328,7 @@ impl ScreenStates {
             ScreenId::AdvancedTextEditor => self.advanced_text_editor.consumes_text_input(),
             ScreenId::VirtualizedSearch => self.virtualized_search.consumes_text_input(),
             ScreenId::LogSearch => self.log_search.consumes_text_input(),
+            ScreenId::EventFeed => self.event_feed.consumes_text_input(),
             ScreenId::MarkdownLiveEditor => self.markdown_live_editor.consumes_text_input(),
             _ => false,
         }
@@ -1367,6 +1377,7 @@ impl ScreenStates {
             ScreenId::LogSearch => self.log_search.tick(tick_count),
             ScreenId::Notifications => self.notifications.tick(tick_count),
             ScreenId::ActionTimeline => self.action_timeline.tick(tick_count),
+            ScreenId::EventFeed => self.event_feed.tick(tick_count),
             ScreenId::IntrinsicSizing => self.intrinsic_sizing.tick(tick_count),
             ScreenId::LayoutInspector => self.layout_inspector.tick(tick_count),
             ScreenId::AdvancedTextEditor => self.advanced_text_editor.tick(tick_count),
@@ -1451,6 +1462,7 @@ impl ScreenStates {
                 ScreenId::LogSearch => self.log_search.view(frame, area),
                 ScreenId::Notifications => self.notifications.view(frame, area),
                 ScreenId::ActionTimeline => self.action_timeline.view(frame, area),
+                ScreenId::EventFeed => self.event_feed.view(frame, area),
                 ScreenId::IntrinsicSizing => self.intrinsic_sizing.view(frame, area),
                 ScreenId::LayoutInspector => self.layout_inspector.view(frame, area),
                 ScreenId::AdvancedTextEditor => self.advanced_text_editor.view(frame, area),
@@ -4041,6 +4053,7 @@ impl AppModel {
             ScreenId::LogSearch => self.screens.log_search.keybindings(),
             ScreenId::Notifications => self.screens.notifications.keybindings(),
             ScreenId::ActionTimeline => self.screens.action_timeline.keybindings(),
+            ScreenId::EventFeed => self.screens.event_feed.keybindings(),
             ScreenId::IntrinsicSizing => self.screens.intrinsic_sizing.keybindings(),
             ScreenId::LayoutInspector => self.screens.layout_inspector.keybindings(),
             ScreenId::AdvancedTextEditor => self.screens.advanced_text_editor.keybindings(),

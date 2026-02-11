@@ -275,6 +275,7 @@ pub mod screen_accent {
     pub const RESPONSIVE_DEMO: ColorToken = accent::ACCENT_9;
     pub const LOG_SEARCH: ColorToken = accent::ACCENT_3;
     pub const ACTION_TIMELINE: ColorToken = accent::ACCENT_2;
+    pub const EVENT_FEED: ColorToken = accent::ACCENT_6;
     pub const INTRINSIC_SIZING: ColorToken = accent::ACCENT_8;
     pub const PERFORMANCE_HUD: ColorToken = accent::ACCENT_9;
 }

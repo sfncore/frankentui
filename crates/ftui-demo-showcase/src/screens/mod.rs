@@ -18,6 +18,7 @@ pub mod dashboard;
 pub mod data_viz;
 pub mod determinism_lab;
 pub mod drag_drop;
+pub mod event_feed;
 pub mod explainability_cockpit;
 pub mod file_browser;
 pub mod form_validation;
@@ -353,6 +354,16 @@ pub const SCREEN_REGISTRY: &[ScreenMeta] = &[
         category: ScreenCategory::Systems,
         palette_tags: &["timeline", "events", "audit"],
         blurb: "Event stream and action timeline viewer.",
+        default_hotkey: None,
+        tour_step_hint: None,
+    },
+    ScreenMeta {
+        id: ScreenId::EventFeed,
+        title: "Event Feed",
+        short_label: "Events",
+        category: ScreenCategory::Systems,
+        palette_tags: &["events", "feed", "search", "filter"],
+        blurb: "Color-coded event feed with search and type filtering.",
         default_hotkey: None,
         tour_step_hint: None,
     },
