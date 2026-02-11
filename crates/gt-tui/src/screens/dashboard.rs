@@ -13,7 +13,7 @@ use ftui_widgets::log_viewer::{LogViewer, LogViewerState};
 use crate::data::{ConvoyItem, TownStatus};
 use crate::msg::Msg;
 use crate::panels;
-use crate::tmux_pane::{ActivateResult, TmuxPaneControl};
+use crate::tmux::{ActivateResult, TmuxPaneControl};
 
 // ---------------------------------------------------------------------------
 // Focus IDs for dashboard panels

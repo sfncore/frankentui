@@ -403,6 +403,59 @@ impl Subscription<Msg> for BeadsPoller {
     }
 }
 
+/// Polls tmux server state every 3 seconds.
+/// Only useful when on the TmuxCommander screen.
+pub struct TmuxPoller;
+
+impl Subscription<Msg> for TmuxPoller {
+    fn id(&self) -> SubId {
+        0x544D_5558 // "TMUX"
+    }
+
+    fn run(&self, sender: mpsc::Sender<Msg>, stop: StopSignal) {
+        loop {
+            let snapshot = crate::tmux::model::fetch_tmux_snapshot();
+            if sender.send(Msg::TmuxSnapshot(snapshot)).is_err() {
+                break;
+            }
+            if stop.wait_timeout(Duration::from_secs(3)) {
+                break;
+            }
+        }
+    }
+}
+
+/// Polls tmuxrs config directory every 10 seconds.
+/// Only useful when on the LayoutManager screen.
+pub struct TmuxrsConfigPoller;
+
+impl Subscription<Msg> for TmuxrsConfigPoller {
+    fn id(&self) -> SubId {
+        0x544D_5253 // "TMRS"
+    }
+
+    fn run(&self, sender: mpsc::Sender<Msg>, stop: StopSignal) {
+        loop {
+            let configs = crate::tmuxrs::cli::list_configs().unwrap_or_default();
+            if sender.send(Msg::TmuxrsConfigList(configs)).is_err() {
+                break;
+            }
+            // Also refresh live tmux session list
+            let sessions: Vec<String> = crate::tmux::client::list_sessions()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| s.name)
+                .collect();
+            if sender.send(Msg::TmuxSessionList(sessions)).is_err() {
+                break;
+            }
+            if stop.wait_timeout(Duration::from_secs(10)) {
+                break;
+            }
+        }
+    }
+}
+
 pub struct EventTailer;
 
 impl Subscription<Msg> for EventTailer {

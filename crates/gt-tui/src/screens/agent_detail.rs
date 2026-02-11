@@ -17,7 +17,7 @@ use ftui_widgets::Widget;
 
 use crate::data::AgentInfo;
 use crate::msg::Msg;
-use crate::tmux_pane::{ActivateResult, TmuxPaneControl};
+use crate::tmux::{ActivateResult, TmuxPaneControl};
 
 // ---------------------------------------------------------------------------
 // Helpers

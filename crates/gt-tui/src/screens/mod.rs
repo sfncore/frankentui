@@ -4,4 +4,6 @@ pub mod convoy_panel;
 pub mod dashboard;
 pub mod docs_browser;
 pub mod event_feed;
+pub mod layout_manager;
 pub mod mail_inbox;
+pub mod tmux_commander;

@@ -26,7 +26,9 @@ use crate::screens::convoy_panel::ConvoyPanelScreen;
 use crate::screens::docs_browser::DocsBrowserScreen;
 use crate::screens::dashboard::DashboardScreen;
 use crate::screens::event_feed::EventFeedScreen;
+use crate::screens::layout_manager::LayoutManagerScreen;
 use crate::screens::mail_inbox::MailInboxScreen;
+use crate::screens::tmux_commander::TmuxCommanderScreen;
 
 /// Build the Gas Town action items for the command palette.
 ///
@@ -62,6 +64,14 @@ fn gas_town_actions(cli_docs: &[CliCommand]) -> Vec<ActionItem> {
         ActionItem::new("screen-docs", "CLI Docs Browser")
             .with_description("Search and browse gt CLI reference (F7)")
             .with_tags(&["screen", "docs", "help", "reference", "commands"])
+            .with_category("Navigation"),
+        ActionItem::new("screen-tmux", "Tmux Commander")
+            .with_description("Full tmux session/window/pane control (F8)")
+            .with_tags(&["screen", "tmux", "sessions", "windows", "panes"])
+            .with_category("Navigation"),
+        ActionItem::new("screen-layouts", "Layout Manager")
+            .with_description("Manage tmuxrs layout configs (F9)")
+            .with_tags(&["screen", "layouts", "tmuxrs", "config"])
             .with_category("Navigation"),
     ];
 
@@ -105,6 +115,8 @@ pub struct GtApp {
     pub mail_screen: MailInboxScreen,
     pub beads_screen: BeadsOverviewScreen,
     pub docs_screen: DocsBrowserScreen,
+    pub tmux_commander: TmuxCommanderScreen,
+    pub layout_manager: LayoutManagerScreen,
     // Global UI
     pub spinner_state: SpinnerState,
     pub spinner_tick: u32,
@@ -118,7 +130,7 @@ impl GtApp {
         let mut event_viewer = LogViewer::new(5_000);
         event_viewer.push("Gas Town TUI starting...");
         event_viewer.push("F1-F6 to switch screens, Tab to switch panels");
-        event_viewer.push("Ctrl+P or : to open command palette");
+        event_viewer.push("Ctrl+K / Ctrl+P or : to open command palette");
         event_viewer.push("Click agent names to jump to their tmux session");
         event_viewer.push("");
 
@@ -126,6 +138,9 @@ impl GtApp {
 
         let mut palette = CommandPalette::new().with_max_visible(9);
         palette.replace_actions(gas_town_actions(&cli_docs));
+
+        let mut layout_manager = LayoutManagerScreen::new();
+        layout_manager.tmuxrs_available = crate::tmuxrs::tmuxrs_available();
 
         Self {
             active_screen: ActiveScreen::Dashboard,
@@ -145,6 +160,8 @@ impl GtApp {
             mail_screen: MailInboxScreen::new(),
             beads_screen: BeadsOverviewScreen::new(),
             docs_screen: DocsBrowserScreen::new(cli_docs),
+            tmux_commander: TmuxCommanderScreen::new(),
+            layout_manager,
             spinner_state: SpinnerState::default(),
             spinner_tick: 0,
             last_refresh: Instant::now(),
@@ -164,6 +181,8 @@ impl GtApp {
             "screen-mail" => Some(ActiveScreen::Mail),
             "screen-beads" => Some(ActiveScreen::Beads),
             "screen-docs" => Some(ActiveScreen::Docs),
+            "screen-tmux" => Some(ActiveScreen::TmuxCommander),
+            "screen-layouts" => Some(ActiveScreen::LayoutManager),
             _ => None,
         };
         if let Some(s) = screen {
@@ -251,6 +270,8 @@ impl GtApp {
         match self.active_screen {
             ActiveScreen::EventFeed => self.event_feed_screen.consumes_text_input(),
             ActiveScreen::Docs => self.docs_screen.consumes_text_input(),
+            ActiveScreen::TmuxCommander => self.tmux_commander.consumes_text_input(),
+            ActiveScreen::LayoutManager => self.layout_manager.consumes_text_input(),
             _ => false,
         }
     }
@@ -294,7 +315,9 @@ impl GtApp {
             {
                 return Cmd::Quit;
             }
-            KeyCode::Char('p') if key.modifiers.contains(Modifiers::CTRL) => {
+            KeyCode::Char('p') | KeyCode::Char('k')
+                if key.modifiers.contains(Modifiers::CTRL) =>
+            {
                 self.palette.open();
                 return Cmd::None;
             }
@@ -321,7 +344,7 @@ impl GtApp {
                 return Cmd::None;
             }
             // Number keys 1-6 — direct screen access (suppressed during text input)
-            KeyCode::Char(ch @ '1'..='7') if !text_input && key.modifiers == Modifiers::NONE => {
+            KeyCode::Char(ch @ '1'..='9') if !text_input && key.modifiers == Modifiers::NONE => {
                 if let Some(screen) = ActiveScreen::from_number_key(ch) {
                     self.active_screen = screen;
                     self.event_viewer
@@ -368,6 +391,8 @@ impl GtApp {
             ActiveScreen::Mail => self.mail_screen.handle_key(&key),
             ActiveScreen::Beads => self.beads_screen.handle_key(&key, &self.beads),
             ActiveScreen::Docs => self.docs_screen.handle_key(&key),
+            ActiveScreen::TmuxCommander => self.tmux_commander.handle_key(&key),
+            ActiveScreen::LayoutManager => self.layout_manager.handle_key(&key),
         }
     }
 
@@ -434,6 +459,8 @@ impl GtApp {
             ActiveScreen::Mail => self.mail_screen.handle_mouse(&mouse),
             ActiveScreen::Beads => Cmd::None,
             ActiveScreen::Docs => Cmd::None,
+            ActiveScreen::TmuxCommander => self.tmux_commander.handle_mouse(&mouse),
+            ActiveScreen::LayoutManager => self.layout_manager.handle_mouse(&mouse),
         }
     }
 
@@ -502,6 +529,7 @@ impl Model for GtApp {
                 self.last_refresh = Instant::now();
                 self.dashboard.rebuild_tree_entries(&self.status);
                 self.agent_screen.rescan_tmux();
+                self.layout_manager.set_agents(self.all_agents.clone());
                 Cmd::None
             }
             Msg::ConvoyRefresh(convoys) => {
@@ -536,6 +564,40 @@ impl Model for GtApp {
                     .push(format!("Screen: {}", screen.label()));
                 Cmd::None
             }
+            Msg::TmuxSnapshot(snapshot) => {
+                self.tmux_commander.set_snapshot(snapshot);
+                Cmd::None
+            }
+            Msg::TmuxActionResult(action, result) => {
+                match result {
+                    Ok(()) => self.event_viewer.push(format!("tmux: {action} ok")),
+                    Err(ref e) => self.event_viewer.push(format!("tmux: {action} failed: {e}")),
+                }
+                // Trigger refresh after action
+                crate::tmux::actions::fetch_snapshot()
+            }
+            Msg::TmuxSessionList(sessions) => {
+                self.layout_manager.set_tmux_sessions(sessions);
+                Cmd::None
+            }
+            Msg::TmuxrsConfigList(configs) => {
+                self.layout_manager.set_configs(configs);
+                Cmd::None
+            }
+            Msg::TmuxrsActionResult(action, result) => {
+                match &result {
+                    Ok(msg) => self.event_viewer.push(format!("tmuxrs: {msg}")),
+                    Err(e) => self.event_viewer.push(format!("tmuxrs: {action} failed: {e}")),
+                }
+                // Refresh config list after action
+                Cmd::Task(
+                    Default::default(),
+                    Box::new(|| {
+                        let configs = crate::tmuxrs::cli::list_configs().unwrap_or_default();
+                        Msg::TmuxrsConfigList(configs)
+                    }),
+                )
+            }
             Msg::Tick => {
                 self.spinner_state.tick();
                 self.spinner_tick = self.spinner_tick.wrapping_add(1);
@@ -546,6 +608,8 @@ impl Model for GtApp {
                 self.mail_screen.tick(tick);
                 self.beads_screen.tick(tick);
                 self.docs_screen.tick(tick);
+                self.tmux_commander.tick(tick);
+                self.layout_manager.tick(tick);
                 Cmd::None
             }
             Msg::Noop => Cmd::None,
@@ -609,6 +673,12 @@ impl Model for GtApp {
             ActiveScreen::Docs => {
                 self.docs_screen.view(frame, outer[2]);
             }
+            ActiveScreen::TmuxCommander => {
+                self.tmux_commander.view(frame, outer[2]);
+            }
+            ActiveScreen::LayoutManager => {
+                self.layout_manager.view(frame, outer[2]);
+            }
         }
 
         // --- Keybind Help Line ---
@@ -625,8 +695,8 @@ impl Model for GtApp {
         let keybind_bar = StatusLine::new()
             .style(crate::theme::status_bar_style())
             .separator("  ")
-            .left(StatusItem::key_hint("1-7/F1-F7", "Screen"))
-            .left(StatusItem::key_hint("Ctrl+P", "Palette"))
+            .left(StatusItem::key_hint("1-9/F1-F9", "Screen"))
+            .left(StatusItem::key_hint("Ctrl+K", "Palette"))
             .center(StatusItem::text(&screen_label))
             .right(StatusItem::key_hint("r", "Refresh"))
             .right(StatusItem::key_hint("q", "Quit"));
@@ -656,12 +726,22 @@ impl Model for GtApp {
     }
 
     fn subscriptions(&self) -> Vec<Box<dyn Subscription<Self::Message>>> {
-        vec![
+        let mut subs: Vec<Box<dyn Subscription<Self::Message>>> = vec![
             Box::new(Every::new(Duration::from_millis(100), || Msg::Tick)),
             Box::new(data::StatusPoller),
             Box::new(data::ConvoyPoller),
             Box::new(data::BeadsPoller),
             Box::new(data::EventTailer),
-        ]
+        ];
+
+        // Conditional pollers — only active on their screens
+        if self.active_screen == ActiveScreen::TmuxCommander {
+            subs.push(Box::new(data::TmuxPoller));
+        }
+        if self.active_screen == ActiveScreen::LayoutManager {
+            subs.push(Box::new(data::TmuxrsConfigPoller));
+        }
+
+        subs
     }
 }

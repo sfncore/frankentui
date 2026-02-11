@@ -2,6 +2,8 @@ use ftui_core::event::{Event, KeyEvent, MouseEvent};
 
 use crate::data::{BeadsSnapshot, ConvoyItem, GtEvent, TownStatus};
 use crate::screen::ActiveScreen;
+use crate::tmux::TmuxSnapshot;
+use crate::tmuxrs::TmuxrsConfig;
 
 #[derive(Debug)]
 pub enum Msg {
@@ -15,6 +17,16 @@ pub enum Msg {
     NewEvent(GtEvent),
     SwitchScreen(ActiveScreen),
     CommandOutput(String, String),
+    /// Full tmux server snapshot (sessions -> windows -> panes).
+    TmuxSnapshot(TmuxSnapshot),
+    /// Result of a tmux action (action_name, result).
+    TmuxActionResult(String, Result<(), String>),
+    /// List of tmuxrs configs from ~/.config/tmuxrs/.
+    TmuxrsConfigList(Vec<TmuxrsConfig>),
+    /// Result of a tmuxrs action (action_name, result).
+    TmuxrsActionResult(String, Result<String, String>),
+    /// Live tmux session names for layout manager.
+    TmuxSessionList(Vec<String>),
     Tick,
     Noop,
 }

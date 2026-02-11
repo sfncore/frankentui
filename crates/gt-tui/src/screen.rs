@@ -8,6 +8,8 @@ pub enum ActiveScreen {
     Mail,
     Beads,
     Docs,
+    TmuxCommander,
+    LayoutManager,
 }
 
 impl ActiveScreen {
@@ -19,6 +21,8 @@ impl ActiveScreen {
         Self::Mail,
         Self::Beads,
         Self::Docs,
+        Self::TmuxCommander,
+        Self::LayoutManager,
     ];
 
     pub fn label(self) -> &'static str {
@@ -30,6 +34,8 @@ impl ActiveScreen {
             Self::Mail => "Mail",
             Self::Beads => "Beads",
             Self::Docs => "Docs",
+            Self::TmuxCommander => "Tmux",
+            Self::LayoutManager => "Layouts",
         }
     }
 
@@ -42,6 +48,8 @@ impl ActiveScreen {
             Self::Mail => 5,
             Self::Beads => 6,
             Self::Docs => 7,
+            Self::TmuxCommander => 8,
+            Self::LayoutManager => 9,
         }
     }
 
@@ -54,6 +62,8 @@ impl ActiveScreen {
             5 => Some(Self::Mail),
             6 => Some(Self::Beads),
             7 => Some(Self::Docs),
+            8 => Some(Self::TmuxCommander),
+            9 => Some(Self::LayoutManager),
             _ => None,
         }
     }
@@ -67,6 +77,8 @@ impl ActiveScreen {
             '5' => Some(Self::Mail),
             '6' => Some(Self::Beads),
             '7' => Some(Self::Docs),
+            '8' => Some(Self::TmuxCommander),
+            '9' => Some(Self::LayoutManager),
             _ => None,
         }
     }
@@ -79,19 +91,23 @@ impl ActiveScreen {
             Self::Agents => Self::Mail,
             Self::Mail => Self::Beads,
             Self::Beads => Self::Docs,
-            Self::Docs => Self::Dashboard,
+            Self::Docs => Self::TmuxCommander,
+            Self::TmuxCommander => Self::LayoutManager,
+            Self::LayoutManager => Self::Dashboard,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Dashboard => Self::Docs,
+            Self::Dashboard => Self::LayoutManager,
             Self::EventFeed => Self::Dashboard,
             Self::Convoys => Self::EventFeed,
             Self::Agents => Self::Convoys,
             Self::Mail => Self::Agents,
             Self::Beads => Self::Mail,
             Self::Docs => Self::Beads,
+            Self::TmuxCommander => Self::Docs,
+            Self::LayoutManager => Self::TmuxCommander,
         }
     }
 }

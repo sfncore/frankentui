@@ -8,7 +8,8 @@ mod screen;
 mod screens;
 #[allow(dead_code)]
 mod theme;
-mod tmux_pane;
+mod tmux;
+mod tmuxrs;
 
 use ftui_runtime::{Program, ProgramConfig, ScreenMode};
 
