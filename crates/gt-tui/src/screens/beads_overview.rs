@@ -121,6 +121,17 @@ impl BeadsOverviewScreen {
         items
             .iter()
             .map(|item| {
+                let assignee_display = if item.assignee.is_empty() {
+                    "-"
+                } else {
+                    &item.assignee
+                };
+                let assignee_color = if item.assignee.is_empty() {
+                    theme::fg::DISABLED
+                } else {
+                    theme::accent::ACCENT_5
+                };
+
                 let mut cells = vec![
                     Text::from(Line::from_spans([Span::styled(
                         item.id.clone(),
@@ -132,6 +143,10 @@ impl BeadsOverviewScreen {
                         priority_style(item.priority),
                     )])),
                     Text::raw(&item.issue_type),
+                    Text::from(Line::from_spans([Span::styled(
+                        assignee_display,
+                        Style::new().fg(assignee_color),
+                    )])),
                 ];
                 if show_blockers {
                     let blockers = item.blocked_by.join(", ");
@@ -157,12 +172,14 @@ impl BeadsOverviewScreen {
             Constraint::Fill,
             Constraint::Fixed(4),
             Constraint::Fixed(10),
+            Constraint::Fixed(16),
         ];
         let mut header_cells = vec![
             Text::raw("ID"),
             Text::raw("Title"),
             Text::raw("Pri"),
             Text::raw("Type"),
+            Text::raw("Assignee"),
         ];
         if show_blockers {
             widths.push(Constraint::Fixed(24));
@@ -258,6 +275,18 @@ impl BeadsOverviewScreen {
                     format!("  Active: {}", self.active_section.label()),
                     Style::new().fg(theme::fg::MUTED),
                 ),
+            ]),
+            Line::from_spans([
+                Span::styled("j/k", Style::new().fg(theme::accent::PRIMARY).bold()),
+                Span::styled(" navigate  ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("Tab", Style::new().fg(theme::accent::PRIMARY).bold()),
+                Span::styled("/", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("S-Tab", Style::new().fg(theme::accent::PRIMARY).bold()),
+                Span::styled(" switch section  ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("Home", Style::new().fg(theme::accent::PRIMARY).bold()),
+                Span::styled("/", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("End", Style::new().fg(theme::accent::PRIMARY).bold()),
+                Span::styled(" jump", Style::new().fg(theme::fg::MUTED)),
             ]),
         ];
 

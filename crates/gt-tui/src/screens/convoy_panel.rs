@@ -341,12 +341,19 @@ impl ConvoyPanelScreen {
     pub fn view(&self, frame: &mut Frame, area: Rect, convoys: &[ConvoyItem]) {
         let has_detail = self.selected_detail.is_some();
 
+        // Reserve 1 row for keybinding hints
+        let outer = Flex::vertical()
+            .constraints([Constraint::Fill, Constraint::Fixed(1)])
+            .split(area);
+        let content_area = outer[0];
+        let hints_area = outer[1];
+
         let chunks = if has_detail {
             Flex::vertical()
                 .constraints([Constraint::Fill, Constraint::Fixed(9)])
-                .split(area)
+                .split(content_area)
         } else {
-            vec![area]
+            vec![content_area]
         };
 
         let table_area = chunks[0];
@@ -361,5 +368,18 @@ impl ConvoyPanelScreen {
         if has_detail && chunks.len() > 1 {
             self.render_detail(frame, chunks[1], convoys);
         }
+
+        // Keybinding hints
+        let hints = Line::from_spans([
+            Span::styled(" j/k", Style::new().fg(theme::accent::PRIMARY).bold()),
+            Span::styled(" navigate  ", Style::new().fg(theme::fg::MUTED)),
+            Span::styled("Enter", Style::new().fg(theme::accent::PRIMARY).bold()),
+            Span::styled(" detail  ", Style::new().fg(theme::fg::MUTED)),
+            Span::styled("Esc", Style::new().fg(theme::accent::PRIMARY).bold()),
+            Span::styled(" close  ", Style::new().fg(theme::fg::MUTED)),
+            Span::styled("Home/End", Style::new().fg(theme::accent::PRIMARY).bold()),
+            Span::styled(" jump", Style::new().fg(theme::fg::MUTED)),
+        ]);
+        Paragraph::new(hints).render(hints_area, frame);
     }
 }

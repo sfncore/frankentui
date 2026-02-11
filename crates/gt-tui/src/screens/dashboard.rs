@@ -2,13 +2,18 @@ use std::cell::RefCell;
 
 use ftui_core::event::{KeyCode, KeyEvent, Modifiers, MouseButton, MouseEventKind};
 use ftui_core::geometry::Rect;
+use ftui_extras::theme;
 use ftui_layout::{Constraint, Flex};
 use ftui_render::frame::Frame;
 use ftui_runtime::Cmd;
+use ftui_style::Style;
+use ftui_text::{Line, Span};
 use ftui_widgets::focus::graph::{FocusId, FocusNode, NavDirection};
 use ftui_widgets::focus::manager::FocusManager;
 use ftui_widgets::list::ListState;
 use ftui_widgets::log_viewer::{LogViewer, LogViewerState};
+use ftui_widgets::paragraph::Paragraph;
+use ftui_widgets::Widget;
 
 use crate::data::{ConvoyItem, TownStatus};
 use crate::msg::Msg;
@@ -371,13 +376,38 @@ impl DashboardScreen {
         event_viewer: &LogViewer,
         event_state: &RefCell<LogViewerState>,
     ) {
+        // Reserve 1 row for hints
+        let outer = Flex::vertical()
+            .constraints([Constraint::Fill, Constraint::Fixed(1)])
+            .split(area);
+        let main_area = outer[0];
+        let hints_area = outer[1];
+
+        // Render hints
+        let active_label = focus_label(self.active_panel_id());
+        let hints = Line::from_spans([
+            Span::styled(" Tab", Style::new().fg(theme::accent::PRIMARY).bold()),
+            Span::styled(" panels  ", Style::new().fg(theme::fg::MUTED)),
+            Span::styled("j/k", Style::new().fg(theme::accent::PRIMARY).bold()),
+            Span::styled(" scroll  ", Style::new().fg(theme::fg::MUTED)),
+            Span::styled("Enter", Style::new().fg(theme::accent::PRIMARY).bold()),
+            Span::styled(" link  ", Style::new().fg(theme::fg::MUTED)),
+            Span::styled("s", Style::new().fg(theme::accent::PRIMARY).bold()),
+            Span::styled(" switch  ", Style::new().fg(theme::fg::MUTED)),
+            Span::styled(
+                format!("Active: {}", active_label),
+                Style::new().fg(theme::fg::DISABLED),
+            ),
+        ]);
+        Paragraph::new(hints).render(hints_area, frame);
+
         // Content: sidebar (30%) + main (70%)
         let content = Flex::horizontal()
             .constraints([
                 Constraint::Percentage(30.0), // Agent tree
                 Constraint::Min(20),          // Main content
             ])
-            .split(area);
+            .split(main_area);
 
         // Save tree area for mouse hit detection
         *self.tree_area.borrow_mut() = content[0];
