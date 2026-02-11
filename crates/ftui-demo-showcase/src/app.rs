@@ -28,13 +28,16 @@ use ftui_core::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, Modifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ftui_core::geometry::Rect;
+#[cfg(feature = "screen-mermaid")]
 use ftui_extras::mermaid::MermaidConfig;
 use ftui_layout::{Constraint, Flex};
 use ftui_render::cell::Cell as RenderCell;
 use ftui_render::frame::{Frame, HitGrid, HitId};
+#[cfg(not(target_arch = "wasm32"))]
+use ftui_runtime::Every;
 use ftui_runtime::render_trace::checksum_buffer;
 use ftui_runtime::undo::HistoryManager;
-use ftui_runtime::{Cmd, Every, FrameTiming, FrameTimingSink, Model, Subscription};
+use ftui_runtime::{Cmd, FrameTiming, FrameTimingSink, Model, Subscription};
 use ftui_style::Style;
 use ftui_text::{Line, Span, Text, WrapMode};
 use ftui_widgets::Widget;
@@ -967,8 +970,10 @@ pub struct ScreenStates {
     /// Markdown and rich text screen state.
     pub markdown_rich_text: screens::markdown_rich_text::MarkdownRichText,
     /// Mermaid showcase screen state.
+    #[cfg(feature = "screen-mermaid")]
     pub mermaid_showcase: screens::mermaid_showcase::MermaidShowcaseScreen,
     /// Mermaid mega showcase screen state (bd-3oaig.3).
+    #[cfg(feature = "screen-mermaid")]
     pub mermaid_mega_showcase: screens::mermaid_mega_showcase::MermaidMegaShowcaseScreen,
     /// Visual effects screen state (lazy init).
     visual_effects: LazyScreen<screens::visual_effects::VisualEffectsScreen>,
@@ -1062,7 +1067,9 @@ impl Default for ScreenStates {
             macro_recorder: Default::default(),
             performance: Default::default(),
             markdown_rich_text: Default::default(),
+            #[cfg(feature = "screen-mermaid")]
             mermaid_showcase: Default::default(),
+            #[cfg(feature = "screen-mermaid")]
             mermaid_mega_showcase: Default::default(),
             visual_effects: LazyScreen::new(),
             responsive_demo: Default::default(),
@@ -1254,12 +1261,18 @@ impl ScreenStates {
             ScreenId::MarkdownRichText => {
                 self.markdown_rich_text.update(event);
             }
+            #[cfg(feature = "screen-mermaid")]
             ScreenId::MermaidShowcase => {
                 self.mermaid_showcase.update(event);
             }
+            #[cfg(not(feature = "screen-mermaid"))]
+            ScreenId::MermaidShowcase => {}
+            #[cfg(feature = "screen-mermaid")]
             ScreenId::MermaidMegaShowcase => {
                 self.mermaid_mega_showcase.update(event);
             }
+            #[cfg(not(feature = "screen-mermaid"))]
+            ScreenId::MermaidMegaShowcase => {}
             ScreenId::VisualEffects => {
                 self.visual_effects_mut(|screen| screen.update(event));
             }
@@ -1415,8 +1428,14 @@ impl ScreenStates {
             ScreenId::MacroRecorder => self.macro_recorder.tick(tick_count),
             ScreenId::Performance => self.performance.tick(tick_count),
             ScreenId::MarkdownRichText => self.markdown_rich_text.tick(tick_count),
+            #[cfg(feature = "screen-mermaid")]
             ScreenId::MermaidShowcase => self.mermaid_showcase.tick(tick_count),
+            #[cfg(not(feature = "screen-mermaid"))]
+            ScreenId::MermaidShowcase => {}
+            #[cfg(feature = "screen-mermaid")]
             ScreenId::MermaidMegaShowcase => self.mermaid_mega_showcase.tick(tick_count),
+            #[cfg(not(feature = "screen-mermaid"))]
+            ScreenId::MermaidMegaShowcase => {}
             ScreenId::VisualEffects => self.visual_effects_mut(|screen| screen.tick(tick_count)),
             ScreenId::ResponsiveDemo => self.responsive_demo.tick(tick_count),
             ScreenId::LogSearch => self.log_search.tick(tick_count),
@@ -1503,8 +1522,14 @@ impl ScreenStates {
                 ScreenId::MacroRecorder => self.macro_recorder.view(frame, area),
                 ScreenId::Performance => self.performance.view(frame, area),
                 ScreenId::MarkdownRichText => self.markdown_rich_text.view(frame, area),
+                #[cfg(feature = "screen-mermaid")]
                 ScreenId::MermaidShowcase => self.mermaid_showcase.view(frame, area),
+                #[cfg(not(feature = "screen-mermaid"))]
+                ScreenId::MermaidShowcase => {}
+                #[cfg(feature = "screen-mermaid")]
                 ScreenId::MermaidMegaShowcase => self.mermaid_mega_showcase.view(frame, area),
+                #[cfg(not(feature = "screen-mermaid"))]
+                ScreenId::MermaidMegaShowcase => {}
                 ScreenId::VisualEffects => {
                     self.visual_effects_mut(|screen| screen.view(frame, area))
                 }
@@ -1627,11 +1652,14 @@ enum EventSource {
 
 impl From<Event> for AppMsg {
     fn from(event: Event) -> Self {
-        if let Event::Resize { width, height } = event {
-            return Self::Resize { width, height };
+        match event {
+            Event::Resize { width, height } => Self::Resize { width, height },
+            #[cfg(target_arch = "wasm32")]
+            Event::Tick => Self::Tick,
+            #[cfg(not(target_arch = "wasm32"))]
+            Event::Tick => Self::ScreenEvent(Event::Tick),
+            other => Self::ScreenEvent(other),
         }
-
-        Self::ScreenEvent(event)
     }
 }
 
@@ -2271,6 +2299,7 @@ impl Model for VfxHarnessModel {
 // Mermaid Harness (E2E deterministic sample runner — bd-1k26f)
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "screen-mermaid")]
 /// Configuration for the Mermaid E2E harness.
 pub struct MermaidHarnessConfig {
     pub cols: u16,
@@ -2282,18 +2311,21 @@ pub struct MermaidHarnessConfig {
     pub tick_ms: u64,
 }
 
+#[cfg(feature = "screen-mermaid")]
 /// Messages for [`MermaidHarnessModel`].
 pub enum MermaidHarnessMsg {
     Event(Event),
     Quit,
 }
 
+#[cfg(feature = "screen-mermaid")]
 impl From<Event> for MermaidHarnessMsg {
     fn from(event: Event) -> Self {
         Self::Event(event)
     }
 }
 
+#[cfg(feature = "screen-mermaid")]
 /// Deterministic harness that cycles through every Mermaid sample, renders
 /// each one, computes a frame hash, emits JSONL, and exits.
 pub struct MermaidHarnessModel {
@@ -2312,9 +2344,12 @@ pub struct MermaidHarnessModel {
     seed: u64,
 }
 
+#[cfg(feature = "screen-mermaid")]
 const MERMAID_HARNESS_SEED: u64 = 42;
+#[cfg(feature = "screen-mermaid")]
 const MERMAID_HARNESS_DEFAULT_JSONL: &str = "mermaid_harness.jsonl";
 
+#[cfg(feature = "screen-mermaid")]
 impl MermaidHarnessModel {
     pub fn new(config: MermaidHarnessConfig) -> std::io::Result<Self> {
         let mut screen = screens::mermaid_showcase::MermaidShowcaseScreen::new();
@@ -2470,6 +2505,7 @@ impl MermaidHarnessModel {
     }
 }
 
+#[cfg(feature = "screen-mermaid")]
 impl Model for MermaidHarnessModel {
     type Message = MermaidHarnessMsg;
 
@@ -3898,10 +3934,10 @@ impl Model for AppModel {
             let ticks = (self.exit_after_ms + tick_ms.saturating_sub(1)) / tick_ms;
             self.exit_after_ticks = Some(ticks.max(1));
         }
-        if self.exit_after_ticks.is_some() {
-            return Cmd::None;
-        }
-        if self.exit_after_ms > 0 {
+
+        let base_cmd = if self.exit_after_ticks.is_some() {
+            Cmd::None
+        } else if self.exit_after_ms > 0 {
             let ms = self.exit_after_ms;
             Cmd::task_named("demo_exit_after", move || {
                 std::thread::sleep(Duration::from_millis(ms));
@@ -3909,11 +3945,33 @@ impl Model for AppModel {
             })
         } else {
             Cmd::None
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            // WASM uses `StepProgram`, which does not evaluate `subscriptions()`.
+            // Schedule ticks via `Cmd::Tick` so animations and periodic logic run.
+            let tick_ms = self.tick_interval_ms().max(1);
+            Cmd::batch(vec![base_cmd, Cmd::Tick(Duration::from_millis(tick_ms))])
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            base_cmd
         }
     }
 
     fn update(&mut self, msg: Self::Message) -> Cmd<Self::Message> {
-        self.handle_msg(msg, EventSource::User)
+        let cmd = self.handle_msg(msg, EventSource::User);
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Keep tick rate in sync with the current screen/mode (tour/vfx/etc).
+            let tick_ms = self.tick_interval_ms().max(1);
+            Cmd::batch(vec![cmd, Cmd::Tick(Duration::from_millis(tick_ms))])
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            cmd
+        }
     }
 
     fn view(&self, frame: &mut Frame) {
@@ -4039,10 +4097,17 @@ impl Model for AppModel {
     }
 
     fn subscriptions(&self) -> Vec<Box<dyn Subscription<Self::Message>>> {
-        let tick_ms = self.tick_interval_ms();
-        vec![Box::new(Every::new(Duration::from_millis(tick_ms), || {
-            AppMsg::Tick
-        }))]
+        #[cfg(target_arch = "wasm32")]
+        {
+            Vec::new()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let tick_ms = self.tick_interval_ms();
+            vec![Box::new(Every::new(Duration::from_millis(tick_ms), || {
+                AppMsg::Tick
+            }))]
+        }
     }
 }
 
@@ -4099,8 +4164,14 @@ impl AppModel {
             ScreenId::MacroRecorder => self.screens.macro_recorder.keybindings(),
             ScreenId::Performance => self.screens.performance.keybindings(),
             ScreenId::MarkdownRichText => self.screens.markdown_rich_text.keybindings(),
+            #[cfg(feature = "screen-mermaid")]
             ScreenId::MermaidShowcase => self.screens.mermaid_showcase.keybindings(),
+            #[cfg(not(feature = "screen-mermaid"))]
+            ScreenId::MermaidShowcase => vec![],
+            #[cfg(feature = "screen-mermaid")]
             ScreenId::MermaidMegaShowcase => self.screens.mermaid_mega_showcase.keybindings(),
+            #[cfg(not(feature = "screen-mermaid"))]
+            ScreenId::MermaidMegaShowcase => vec![],
             ScreenId::VisualEffects => self
                 .screens
                 .visual_effects_mut(|screen| screen.keybindings()),
@@ -5239,7 +5310,10 @@ impl AppModel {
         let debug_inner = debug_block.inner(overlay_area);
         debug_block.render(overlay_area, frame);
 
+        #[cfg(feature = "screen-mermaid")]
         let mermaid_summary = MermaidConfig::from_env().summary_short();
+        #[cfg(not(feature = "screen-mermaid"))]
+        let mermaid_summary = String::new();
         let debug_text = format!(
             "Tick: {}\nFrame: {}\nScreen: {:?}\nSize: {}x{}\n{}",
             self.tick_count,

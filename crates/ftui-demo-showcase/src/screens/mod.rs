@@ -39,7 +39,9 @@ pub mod log_search;
 pub mod macro_recorder;
 pub mod markdown_live_editor;
 pub mod markdown_rich_text;
+#[cfg(feature = "screen-mermaid")]
 pub mod mermaid_mega_showcase;
+#[cfg(feature = "screen-mermaid")]
 pub mod mermaid_showcase;
 pub mod mouse_playground;
 pub mod notifications;
@@ -654,15 +656,38 @@ pub const SCREEN_REGISTRY: &[ScreenMeta] = &[
     },
 ];
 
-/// Return the full registry (ordered).
+/// Return the filtered registry (ordered), excluding feature-gated screens.
 pub fn screen_registry() -> &'static [ScreenMeta] {
-    SCREEN_REGISTRY
+    // When all screen features are enabled, use the full const array directly.
+    #[cfg(feature = "screen-mermaid")]
+    {
+        SCREEN_REGISTRY
+    }
+    // Otherwise, lazily build a filtered registry that omits unavailable screens.
+    #[cfg(not(feature = "screen-mermaid"))]
+    {
+        static FILTERED: OnceLock<Vec<ScreenMeta>> = OnceLock::new();
+        FILTERED
+            .get_or_init(|| {
+                SCREEN_REGISTRY
+                    .iter()
+                    .filter(|meta| {
+                        !matches!(
+                            meta.id,
+                            ScreenId::MermaidShowcase | ScreenId::MermaidMegaShowcase
+                        )
+                    })
+                    .copied()
+                    .collect()
+            })
+            .as_slice()
+    }
 }
 
-/// Lazily computed ordered screen IDs (derived from the registry).
+/// Lazily computed ordered screen IDs (derived from the filtered registry).
 pub fn screen_ids() -> &'static [ScreenId] {
     static IDS: OnceLock<Vec<ScreenId>> = OnceLock::new();
-    IDS.get_or_init(|| SCREEN_REGISTRY.iter().map(|meta| meta.id).collect())
+    IDS.get_or_init(|| screen_registry().iter().map(|meta| meta.id).collect())
 }
 
 /// Lookup a screen by ID in the registry.
@@ -688,9 +713,9 @@ pub fn screen_tab_label(id: ScreenId) -> &'static str {
     screen_meta(id).short_label
 }
 
-/// Index of a screen in the registry.
+/// Index of a screen in the filtered registry.
 pub fn screen_index(id: ScreenId) -> usize {
-    SCREEN_REGISTRY
+    screen_registry()
         .iter()
         .position(|meta| meta.id == id)
         .unwrap_or(0)
@@ -698,7 +723,7 @@ pub fn screen_index(id: ScreenId) -> usize {
 
 /// Iterate screens in a given category, preserving registry order.
 pub fn screens_in_category(category: ScreenCategory) -> impl Iterator<Item = &'static ScreenMeta> {
-    SCREEN_REGISTRY
+    screen_registry()
         .iter()
         .filter(move |meta| meta.category == category)
 }
@@ -883,7 +908,7 @@ mod tests {
     #[test]
     fn registry_order_matches_ids() {
         let ids = screen_ids();
-        let expected: Vec<ScreenId> = SCREEN_REGISTRY.iter().map(|meta| meta.id).collect();
+        let expected: Vec<ScreenId> = screen_registry().iter().map(|meta| meta.id).collect();
         assert_eq!(
             ids,
             expected.as_slice(),
@@ -915,7 +940,7 @@ mod tests {
 
     #[test]
     fn screen_index_matches_registry_position() {
-        for (idx, meta) in SCREEN_REGISTRY.iter().enumerate() {
+        for (idx, meta) in screen_registry().iter().enumerate() {
             let actual = screen_index(meta.id);
             assert_eq!(
                 actual, idx,
@@ -963,11 +988,12 @@ mod tests {
 
     #[test]
     fn registry_matches_screen_list() {
-        assert_eq!(SCREEN_REGISTRY.len(), screen_ids().len());
-        assert_eq!(screen_ids().len(), SCREEN_REGISTRY.len());
+        let registry = screen_registry();
+        assert_eq!(registry.len(), screen_ids().len());
+        assert_eq!(screen_ids().len(), registry.len());
         for &id in screen_ids() {
             assert!(
-                SCREEN_REGISTRY.iter().any(|meta| meta.id == id),
+                registry.iter().any(|meta| meta.id == id),
                 "missing screen in registry: {id:?}"
             );
         }

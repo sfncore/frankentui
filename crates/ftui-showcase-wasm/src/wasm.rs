@@ -72,6 +72,24 @@ impl ShowcaseRunner {
         }
     }
 
+    /// Provide the Shakespeare text blob for the `Shakespeare` screen.
+    ///
+    /// For WASM builds we avoid embedding multi-megabyte strings in the module.
+    /// The host should call this once during startup (or early in the session).
+    #[wasm_bindgen(js_name = setShakespeareText)]
+    pub fn set_shakespeare_text(&mut self, text: String) -> bool {
+        ftui_demo_showcase::assets::set_shakespeare_text(text)
+    }
+
+    /// Provide the SQLite amalgamation source for the `CodeExplorer` screen.
+    ///
+    /// For WASM builds we avoid embedding multi-megabyte strings in the module.
+    /// The host should call this once during startup (or early in the session).
+    #[wasm_bindgen(js_name = setSqliteSource)]
+    pub fn set_sqlite_source(&mut self, text: String) -> bool {
+        ftui_demo_showcase::assets::set_sqlite_source(text)
+    }
+
     /// Initialize the model and render the first frame. Call exactly once.
     pub fn init(&mut self) {
         self.inner.init();
@@ -123,15 +141,60 @@ impl ShowcaseRunner {
 
     /// Take flat patch batch for GPU upload.
     /// Returns `{ cells: Uint32Array, spans: Uint32Array }`.
+    ///
+    /// Uses reusable internal buffers to avoid per-frame Vec allocation.
     #[wasm_bindgen(js_name = takeFlatPatches)]
     pub fn take_flat_patches(&mut self) -> JsValue {
-        let flat = self.inner.take_flat_patches();
-        let cells = Uint32Array::from(flat.cells.as_slice());
-        let spans = Uint32Array::from(flat.spans.as_slice());
+        self.inner.prepare_flat_patches();
+        let cells = Uint32Array::from(self.inner.flat_cells());
+        let spans = Uint32Array::from(self.inner.flat_spans());
         let obj = Object::new();
         let _ = Reflect::set(&obj, &"cells".into(), &cells.into());
         let _ = Reflect::set(&obj, &"spans".into(), &spans.into());
         obj.into()
+    }
+
+    /// Prepare flat patch buffers in reusable Rust-owned storage.
+    ///
+    /// Pair this with `flatCellsPtr/flatCellsLen/flatSpansPtr/flatSpansLen`
+    /// for a zero-copy JS view over WASM memory.
+    #[wasm_bindgen(js_name = prepareFlatPatches)]
+    pub fn prepare_flat_patches(&mut self) {
+        self.inner.prepare_flat_patches();
+    }
+
+    /// Byte-offset pointer to the prepared flat cell payload (`u32` words).
+    #[wasm_bindgen(js_name = flatCellsPtr)]
+    pub fn flat_cells_ptr(&self) -> u32 {
+        let cells = self.inner.flat_cells();
+        if cells.is_empty() {
+            0
+        } else {
+            cells.as_ptr() as usize as u32
+        }
+    }
+
+    /// Length (in `u32` words) of the prepared flat cell payload.
+    #[wasm_bindgen(js_name = flatCellsLen)]
+    pub fn flat_cells_len(&self) -> u32 {
+        self.inner.flat_cells().len().min(u32::MAX as usize) as u32
+    }
+
+    /// Byte-offset pointer to the prepared flat span payload (`u32` words).
+    #[wasm_bindgen(js_name = flatSpansPtr)]
+    pub fn flat_spans_ptr(&self) -> u32 {
+        let spans = self.inner.flat_spans();
+        if spans.is_empty() {
+            0
+        } else {
+            spans.as_ptr() as usize as u32
+        }
+    }
+
+    /// Length (in `u32` words) of the prepared flat span payload.
+    #[wasm_bindgen(js_name = flatSpansLen)]
+    pub fn flat_spans_len(&self) -> u32 {
+        self.inner.flat_spans().len().min(u32::MAX as usize) as u32
     }
 
     /// Drain accumulated log lines. Returns `Array<string>`.
@@ -147,7 +210,7 @@ impl ShowcaseRunner {
 
     /// FNV-1a hash of the last patch batch, or `null`.
     #[wasm_bindgen(js_name = patchHash)]
-    pub fn patch_hash(&self) -> Option<String> {
+    pub fn patch_hash(&mut self) -> Option<String> {
         self.inner.patch_hash()
     }
 

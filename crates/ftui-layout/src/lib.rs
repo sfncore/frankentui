@@ -43,6 +43,7 @@ pub mod cache;
 pub mod debug;
 pub mod direction;
 pub mod grid;
+pub mod pane;
 #[cfg(test)]
 mod repro_max_constraint;
 #[cfg(test)]
@@ -55,6 +56,17 @@ pub use cache::{CoherenceCache, CoherenceId, LayoutCache, LayoutCacheKey, Layout
 pub use direction::{FlowDirection, LogicalAlignment, LogicalSides, mirror_rects_horizontal};
 pub use ftui_core::geometry::{Rect, Sides, Size};
 pub use grid::{Grid, GridArea, GridLayout};
+pub use pane::{
+    PANE_SEMANTIC_INPUT_EVENT_SCHEMA_VERSION, PANE_TREE_SCHEMA_VERSION, PaneCancelReason,
+    PaneConstraints, PaneId, PaneIdAllocator, PaneInvariantCode, PaneInvariantIssue,
+    PaneInvariantReport, PaneInvariantSeverity, PaneLayout, PaneLeaf, PaneModelError,
+    PaneModifierSnapshot, PaneNodeKind, PaneNodeRecord, PaneOperation, PaneOperationError,
+    PaneOperationFailure, PaneOperationJournalEntry, PaneOperationJournalResult, PaneOperationKind,
+    PaneOperationOutcome, PanePlacement, PanePointerButton, PanePointerPosition, PaneRepairAction,
+    PaneRepairError, PaneRepairFailure, PaneRepairOutcome, PaneResizeDirection, PaneResizeTarget,
+    PaneSemanticInputEvent, PaneSemanticInputEventError, PaneSemanticInputEventKind, PaneSplit,
+    PaneSplitRatio, PaneTransaction, PaneTransactionOutcome, PaneTree, PaneTreeSnapshot, SplitAxis,
+};
 pub use responsive::Responsive;
 pub use responsive_layout::{ResponsiveLayout, ResponsiveSplit};
 use std::cmp::min;

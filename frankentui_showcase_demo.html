@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>FrankenTUI — Showcase Demo</title>
 <link rel="preload" href="./fonts/pragmasevka-nf-subset.woff2" as="font" type="font/woff2" crossorigin>
 <style>
@@ -14,7 +14,7 @@
 	    font-display: block;
 	  }
 	  * { margin: 0; padding: 0; box-sizing: border-box; }
-	  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a0a; }
+	  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a0a; overscroll-behavior: none; }
 	  #container {
 	    width: 100%; height: 100%;
     display: flex; flex-direction: column;
@@ -24,6 +24,10 @@
     display: block;
     width: 100%; height: 100%;
     image-rendering: pixelated;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 	  #status {
 	    position: fixed; bottom: 8px; right: 12px;
@@ -38,43 +42,122 @@
 	    padding: 32px; overflow: auto; z-index: 20;
 	  }
 	  #error-overlay.visible { display: block; }
+	  /* ── Loading overlay ─────────────────────────────────────────────── */
+	  #loading-overlay {
+	    position: fixed; inset: 0;
+	    background: #0a0a0a;
+	    display: flex; flex-direction: column;
+	    align-items: center; justify-content: center;
+	    z-index: 30; transition: opacity 0.3s;
+	  }
+	  #loading-overlay.hidden { opacity: 0; pointer-events: none; }
+	  #loading-label {
+	    color: #888; font: 14px/1.4 "Pragmasevka NF", monospace;
+	    margin-bottom: 16px;
+	  }
+	  #loading-bar-container {
+	    width: 320px; max-width: 80vw; height: 4px;
+	    background: #222; border-radius: 2px; overflow: hidden;
+	  }
+	  #loading-bar {
+	    height: 100%; width: 0%;
+	    background: #4a9; border-radius: 2px;
+	    transition: width 0.15s ease-out;
+	  }
+	  #loading-bar.indeterminate {
+	    width: 30%;
+	    animation: indeterminate 1.2s ease-in-out infinite;
+	  }
+	  @keyframes indeterminate {
+	    0%   { transform: translateX(-100%); }
+	    100% { transform: translateX(400%); }
+	  }
+	  @supports (height: 100dvh) {
+	    #container { height: 100dvh; }
+	  }
+	  /* Touch zoom controls — only visible on coarse-pointer (touch) devices */
+	  #touch-zoom {
+	    display: none;
+	    position: fixed; top: 8px; right: 8px;
+	    z-index: 15; gap: 6px;
+	  }
+	  #touch-zoom button {
+	    width: 40px; height: 40px;
+	    border: 1px solid #444; border-radius: 6px;
+	    background: rgba(30,30,30,0.85);
+	    color: #ccc; font: 18px/1 "Pragmasevka NF", monospace;
+	    cursor: pointer;
+	    -webkit-tap-highlight-color: transparent;
+	  }
+	  #touch-zoom button:active { background: rgba(80,80,80,0.85); }
+	  @media (pointer: coarse) {
+	    #touch-zoom { display: flex; }
+	  }
 </style>
 </head>
 <body>
 <div id="container">
   <canvas id="terminal-canvas" tabindex="0"></canvas>
 </div>
-<div id="status">Loading WASM…</div>
+<div id="touch-zoom">
+  <button id="zoom-out">&minus;</button>
+  <button id="zoom-reset">1:1</button>
+  <button id="zoom-in">+</button>
+</div>
+<div id="loading-overlay">
+  <div id="loading-label">Loading WASM...</div>
+  <div id="loading-bar-container"><div id="loading-bar"></div></div>
+</div>
+<div id="status">Loading WASM...</div>
 <div id="error-overlay"></div>
 
 <script type="module">
-// ── Configuration ──────────────────────────────────────────────────────
-const INITIAL_COLS = 80;
-const INITIAL_ROWS = 24;
-const CELL_WIDTH   = 8;
-const CELL_HEIGHT  = 16;
-const LOG_JSONL    = true;   // Emit JSONL evidence to console
-const LOG_PERF     = false;  // Per-frame timing in console
+// ── URL Settings ──────────────────────────────────────────────────────
+const params = new URLSearchParams(window.location.search);
+const INITIAL_COLS    = parseInt(params.get("cols"), 10) || 80;
+const INITIAL_ROWS    = parseInt(params.get("rows"), 10) || 24;
+const CELL_WIDTH      = parseInt(params.get("cellWidth"), 10) || 8;
+const CELL_HEIGHT     = parseInt(params.get("cellHeight"), 10) || 16;
+const START_SCREEN    = parseInt(params.get("screen"), 10) || 0;
+const URL_ZOOM        = parseFloat(params.get("zoom")) || 0;
+// Console JSONL is extremely expensive at 60fps; enable only when debugging.
+const LOG_JSONL       = params.get("jsonl") === "1";
+const LOG_PERF        = false;  // Per-frame timing in console
 // Bump when deploying to bypass Cloudflare/browser caches for JS/WASM artifacts.
-const ASSET_VERSION = "2026-02-10.5";
+const ASSET_VERSION = "2026-02-10.7";
 
 // ── DOM refs ───────────────────────────────────────────────────────────
-const canvas   = document.getElementById("terminal-canvas");
-const status   = document.getElementById("status");
-const errorDiv = document.getElementById("error-overlay");
+const canvas         = document.getElementById("terminal-canvas");
+const status         = document.getElementById("status");
+const errorDiv       = document.getElementById("error-overlay");
+const loadingOverlay = document.getElementById("loading-overlay");
+const loadingLabel   = document.getElementById("loading-label");
+const loadingBar     = document.getElementById("loading-bar");
 
 function showError(msg) {
   errorDiv.textContent = msg;
   errorDiv.classList.add("visible");
+  loadingOverlay.classList.add("hidden");
   status.textContent = "Error";
   console.error("[ShowcaseDemo]", msg);
+}
+
+function setProgress(pct, label) {
+  loadingLabel.textContent = label;
+  if (pct < 0) {
+    // Indeterminate mode.
+    loadingBar.classList.add("indeterminate");
+    loadingBar.style.width = "";
+  } else {
+    loadingBar.classList.remove("indeterminate");
+    loadingBar.style.width = Math.min(100, Math.round(pct)) + "%";
+  }
 }
 
 // ── Font loading (must happen before first glyph rasterization) ───────────
 const fontsReady = (async () => {
   if (!("fonts" in document) || !document.fonts?.load) return;
   try {
-    status.textContent = "Loading fonts…";
     await document.fonts.load('16px "Pragmasevka NF"');
     await document.fonts.ready;
   } catch (e) {
@@ -82,30 +165,61 @@ const fontsReady = (async () => {
   }
 })();
 
+// ── Large text assets (loaded out-of-band to keep WASM small) ────────────
+// These blobs are huge (multiple MB). Embedding them in WASM bloats downloads
+// and, worse, slows instantiation due to large data-segment memcpy.
+const largeAssetsPromise = (async () => {
+  try {
+    const shakespeareUrl = `./crates/ftui-demo-showcase/data/shakespeare.txt?v=${ASSET_VERSION}`;
+    const sqliteUrl      = `./crates/ftui-demo-showcase/data/sqlite3.c?v=${ASSET_VERSION}`;
+    const [shakespeare, sqlite] = await Promise.all([
+      fetch(shakespeareUrl).then((r) => {
+        if (!r.ok) throw new Error(`GET ${shakespeareUrl} -> ${r.status}`);
+        return r.text();
+      }),
+      fetch(sqliteUrl).then((r) => {
+        if (!r.ok) throw new Error(`GET ${sqliteUrl} -> ${r.status}`);
+        return r.text();
+      }),
+    ]);
+    return { shakespeare, sqlite };
+  } catch (e) {
+    console.warn("[ShowcaseDemo] Failed to fetch large assets; some screens may be unavailable.", e);
+    return null;
+  }
+})();
+
 // ── WASM module loading ────────────────────────────────────────────────
-// wasm-pack builds produce an ES module with an `default` init function
-// and the exported classes. Adjust paths to match your wasm-pack output.
 let termMod, runnerMod;
+let runnerWasmExports = null;
 try {
-  status.textContent = "Loading WASM modules…";
+  // 1a. Download JS glue modules.
+  setProgress(0, "Downloading JS modules...");
   const termJsUrl = `./pkg/FrankenTerm.js?v=${ASSET_VERSION}`;
   const runnerJsUrl = `./pkg/ftui_showcase_wasm.js?v=${ASSET_VERSION}`;
   [termMod, runnerMod] = await Promise.all([
     import(termJsUrl),
     import(runnerJsUrl),
   ]);
-  // Initialize both WASM modules (fetches .wasm files).
-  await Promise.all([
-    termMod.default(new URL(`./pkg/FrankenTerm_bg.wasm?v=${ASSET_VERSION}`, import.meta.url)),
-    runnerMod.default(new URL(`./pkg/ftui_showcase_wasm_bg.wasm?v=${ASSET_VERSION}`, import.meta.url)),
+
+  // 1b. Initialize WASM modules directly from URLs.
+  // Let wasm-bindgen use the browser's streaming compilation path instead of
+  // buffering + copying full ArrayBuffers in JS first.
+  setProgress(-1, "Initializing WASM modules...");
+  const termWasmUrl = `./pkg/FrankenTerm_bg.wasm?v=${ASSET_VERSION}`;
+  const runnerWasmUrl = `./pkg/ftui_showcase_wasm_bg.wasm?v=${ASSET_VERSION}`;
+
+  [, runnerWasmExports] = await Promise.all([
+    termMod.default(termWasmUrl),
+    runnerMod.default(runnerWasmUrl),
   ]);
+  setProgress(95, "Starting WebGPU...");
 } catch (e) {
   showError(
     `Failed to load WASM modules.\n\n` +
     `Expected wasm-pack output at ./pkg/FrankenTerm.js and ./pkg/ftui_showcase_wasm.js\n\n` +
     `Build with:\n` +
-    `  wasm-pack build crates/frankenterm-web --target web --out-dir ../../pkg --out-name FrankenTerm\n` +
-    `  wasm-pack build crates/ftui-showcase-wasm --target web --out-dir ../../pkg\n\n` +
+    `  ./build-wasm.sh\n\n` +
     `Error: ${e.message || e}`
   );
   throw e;
@@ -120,7 +234,7 @@ const dpr    = window.devicePixelRatio || 1.0;
 
 try {
   await fontsReady;
-  status.textContent = "Initializing WebGPU terminal…";
+  setProgress(96, "Initializing WebGPU terminal...");
   await term.init(canvas, {
     cols: INITIAL_COLS,
     rows: INITIAL_ROWS,
@@ -134,36 +248,191 @@ try {
   throw e;
 }
 
+// ── User zoom (Ctrl+/- font sizing) ──────────────────────────────────
+let userZoom = URL_ZOOM || parseFloat(localStorage.getItem("ftui-zoom")) || 1.0;
+
+function applyZoom() {
+  if (typeof term.setZoom === "function") {
+    term.setZoom(userZoom);
+  }
+  const newDpr = window.devicePixelRatio || 1.0;
+  const geo = term.fitToContainer(container.clientWidth, container.clientHeight, newDpr);
+  if (geo.cols !== currentCols || geo.rows !== currentRows) {
+    currentCols = geo.cols;
+    currentRows = geo.rows;
+    runner.resize(currentCols, currentRows);
+  }
+  // Always update status to reflect current zoom (even if grid size didn't change).
+  if (Math.abs(userZoom - 1.0) > 0.01) {
+    status.textContent = `${currentCols}\u00d7${currentRows} \u2014 zoom ${Math.round(userZoom * 100)}%`;
+  } else {
+    status.textContent = `${currentCols}\u00d7${currentRows} \u2014 running`;
+  }
+  localStorage.setItem("ftui-zoom", String(userZoom));
+  // Update URL without reload.
+  const url = new URL(window.location);
+  if (Math.abs(userZoom - 1.0) > 0.01) {
+    url.searchParams.set("zoom", userZoom.toFixed(2));
+  } else {
+    url.searchParams.delete("zoom");
+  }
+  history.replaceState(null, "", url);
+}
+
+// Auto-zoom on narrow touch devices if user has no saved preference.
+const isTouchDevice = matchMedia("(pointer: coarse)").matches;
+if (isTouchDevice && !URL_ZOOM && !localStorage.getItem("ftui-zoom")) {
+  const vw = document.documentElement.clientWidth;
+  const TARGET_COLS = 40;
+  const autoZoom = vw / (TARGET_COLS * CELL_WIDTH);
+  if (autoZoom > 1.05) {
+    userZoom = Math.round(autoZoom * 20) / 20; // snap to 0.05 increments
+  }
+}
+
+// Apply initial zoom if set.
+if (userZoom !== 1.0 && typeof term.setZoom === "function") {
+  term.setZoom(userZoom);
+}
+
 // Fit to actual container size and get real cols/rows.
 const container = document.getElementById("container");
 const geo = term.fitToContainer(container.clientWidth, container.clientHeight, dpr);
-const cols = geo.cols;
-const rows = geo.rows;
+let currentCols = geo.cols;
+let currentRows = geo.rows;
 
-const runner = new ShowcaseRunner(cols, rows);
+const runner = new ShowcaseRunner(currentCols, currentRows);
 runner.init();
+
+function resolveWasmMemory(mod) {
+  if (!mod) return null;
+  const direct = mod.memory;
+  if (direct instanceof WebAssembly.Memory) return direct;
+  if (typeof direct === "function") {
+    const maybe = direct();
+    if (maybe instanceof WebAssembly.Memory) return maybe;
+  }
+  return null;
+}
+
+const runnerWasmMemory =
+  resolveWasmMemory(runnerWasmExports) ||
+  resolveWasmMemory(runnerMod);
+const canUseZeroCopyPatches = Boolean(
+  runnerWasmMemory &&
+  typeof runner.prepareFlatPatches === "function" &&
+  typeof runner.flatCellsPtr === "function" &&
+  typeof runner.flatCellsLen === "function" &&
+  typeof runner.flatSpansPtr === "function" &&
+  typeof runner.flatSpansLen === "function"
+);
+const EMPTY_PATCH_U32 = new Uint32Array(0);
+let cachedCellsView = EMPTY_PATCH_U32;
+let cachedCellsPtr = -1;
+let cachedCellsLen = -1;
+let cachedCellsBuffer = null;
+let cachedSpansView = EMPTY_PATCH_U32;
+let cachedSpansPtr = -1;
+let cachedSpansLen = -1;
+let cachedSpansBuffer = null;
+
+function patchViewU32(ptr, len, isCells) {
+  if (len === 0) return EMPTY_PATCH_U32;
+  const buffer = runnerWasmMemory.buffer;
+  if (isCells) {
+    if (cachedCellsPtr === ptr && cachedCellsLen === len && cachedCellsBuffer === buffer) {
+      return cachedCellsView;
+    }
+    cachedCellsPtr = ptr;
+    cachedCellsLen = len;
+    cachedCellsBuffer = buffer;
+    cachedCellsView = new Uint32Array(buffer, ptr, len);
+    return cachedCellsView;
+  }
+  if (cachedSpansPtr === ptr && cachedSpansLen === len && cachedSpansBuffer === buffer) {
+    return cachedSpansView;
+  }
+  cachedSpansPtr = ptr;
+  cachedSpansLen = len;
+  cachedSpansBuffer = buffer;
+  cachedSpansView = new Uint32Array(buffer, ptr, len);
+  return cachedSpansView;
+}
+
+function takeRunnerPatches() {
+  if (!canUseZeroCopyPatches) {
+    return runner.takeFlatPatches();
+  }
+  runner.prepareFlatPatches();
+  const cellsLen = runner.flatCellsLen();
+  const spansLen = runner.flatSpansLen();
+  if (cellsLen === 0 || spansLen === 0) {
+    return { cells: EMPTY_PATCH_U32, spans: EMPTY_PATCH_U32 };
+  }
+  const cellsPtr = runner.flatCellsPtr();
+  const spansPtr = runner.flatSpansPtr();
+  return {
+    cells: patchViewU32(cellsPtr, cellsLen, true),
+    spans: patchViewU32(spansPtr, spansLen, false),
+  };
+}
+
+// Navigate to a specific screen if requested via URL.
+if (START_SCREEN > 0) {
+  const screenIdx = START_SCREEN - 1;
+  // Send number key press to navigate: '1'-'9' for screens 1-9, '0' for 10.
+  // For screens > 10, we send repeated Tab presses.
+  if (screenIdx < 10) {
+    const key = screenIdx === 9 ? "0" : String(screenIdx + 1);
+    runner.pushEncodedInput(JSON.stringify({ kind: "key", phase: "down", key, code: `Digit${key}`, mods: 0, repeat: false }));
+  } else {
+    // Navigate with Tab presses.
+    for (let i = 0; i < screenIdx; i++) {
+      runner.pushEncodedInput(JSON.stringify({ kind: "key", phase: "down", key: "Tab", code: "Tab", mods: 0, repeat: false }));
+    }
+  }
+}
 
 // `ShowcaseRunner.init()` renders frame 1 and produces a full repaint patch batch.
 // If we don't apply it immediately, the first `step()` often returns `rendered=false`
 // and the initial frame never becomes visible (or later diffs apply against an empty buffer).
-const initPatches = runner.takeFlatPatches();
+const initPatches = takeRunnerPatches();
 if (initPatches.cells.length > 0) {
   term.applyPatchBatchFlat(initPatches.spans, initPatches.cells);
 }
 term.render();
-status.textContent = `${cols}×${rows} — running`;
+
+// Hide loading overlay, show status.
+setProgress(100, "Ready");
+loadingOverlay.classList.add("hidden");
+status.textContent = `${currentCols}\u00d7${currentRows} \u2014 running`;
+
+// Inject large text assets after first frame so startup work is not blocked.
+largeAssetsPromise.then((assets) => {
+  if (!assets) return;
+  try {
+    const okA = runner.setShakespeareText(assets.shakespeare);
+    const okB = runner.setSqliteSource(assets.sqlite);
+    jsonl({
+      event: "assets_loaded",
+      shakespeare_bytes: assets.shakespeare.length,
+      sqlite_bytes: assets.sqlite.length,
+      ok: Boolean(okA && okB),
+      ts: Date.now(),
+    });
+  } catch (e) {
+    console.warn("[ShowcaseDemo] Failed to inject large assets into WASM runner.", e);
+  }
+});
 
 // ── JSONL logger ───────────────────────────────────────────────────────
 function jsonl(obj) {
   if (LOG_JSONL) console.log(JSON.stringify(obj));
 }
 
-jsonl({ event: "init", cols, rows, dpr, ts: Date.now() });
+jsonl({ event: "init", cols: currentCols, rows: currentRows, dpr, zoom: userZoom, ts: Date.now() });
 
 // ── Resize handling ────────────────────────────────────────────────────
-let currentCols = cols;
-let currentRows = rows;
-
 const resizeObserver = new ResizeObserver(() => {
   const newDpr = window.devicePixelRatio || 1.0;
   const geo = term.fitToContainer(container.clientWidth, container.clientHeight, newDpr);
@@ -172,24 +441,37 @@ const resizeObserver = new ResizeObserver(() => {
     currentRows = geo.rows;
     runner.resize(currentCols, currentRows);
     jsonl({ event: "resize", cols: currentCols, rows: currentRows, ts: Date.now() });
-    status.textContent = `${currentCols}×${currentRows} — running`;
+    status.textContent = `${currentCols}\u00d7${currentRows} \u2014 running`;
   }
 });
 resizeObserver.observe(container);
 
-// Also handle DPR changes (e.g., moving window between monitors).
-window.matchMedia(`(resolution: ${dpr}dppx)`).addEventListener("change", () => {
-  const newDpr = window.devicePixelRatio || 1.0;
-  const geo = term.fitToContainer(container.clientWidth, container.clientHeight, newDpr);
-  if (geo.cols !== currentCols || geo.rows !== currentRows) {
-    currentCols = geo.cols;
-    currentRows = geo.rows;
-    runner.resize(currentCols, currentRows);
-  }
-});
+// Handle DPR changes via visualViewport API (more reliable than matchMedia).
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", () => {
+    const newDpr = window.devicePixelRatio || 1.0;
+    const geo = term.fitToContainer(container.clientWidth, container.clientHeight, newDpr);
+    if (geo.cols !== currentCols || geo.rows !== currentRows) {
+      currentCols = geo.cols;
+      currentRows = geo.rows;
+      runner.resize(currentCols, currentRows);
+    }
+  });
+} else {
+  // Fallback: matchMedia for DPR changes (only fires once per threshold).
+  window.matchMedia(`(resolution: ${dpr}dppx)`).addEventListener("change", () => {
+    const newDpr = window.devicePixelRatio || 1.0;
+    const geo = term.fitToContainer(container.clientWidth, container.clientHeight, newDpr);
+    if (geo.cols !== currentCols || geo.rows !== currentRows) {
+      currentCols = geo.cols;
+      currentRows = geo.rows;
+      runner.resize(currentCols, currentRows);
+    }
+  });
+}
 
 // ── Input forwarding ───────────────────────────────────────────────────
-// DOM events → FrankenTermWeb.input() → drainEncodedInputs() → runner
+// DOM events -> FrankenTermWeb.input() -> drainEncodedInputs() -> runner
 
 function safeTermInput(ev) {
   try {
@@ -250,8 +532,35 @@ function shouldForwardKeyEvent(e) {
   return !(e.isComposing || e.key === "Process");
 }
 
+// Intercept Ctrl+/- (or Cmd+/- on Mac) for zoom, forward everything else.
 window.addEventListener("keydown", (e) => {
   if (!shouldForwardKeyEvent(e)) return;
+
+  // Zoom modifier: Ctrl on Windows/Linux, Cmd (Meta) on macOS.
+  const zoomMod = e.ctrlKey || e.metaKey;
+
+  // Zoom in: Ctrl/Cmd + Plus or Equal.
+  if (zoomMod && (e.key === "+" || e.key === "=")) {
+    e.preventDefault();
+    userZoom = Math.min(3.0, userZoom * 1.1);
+    applyZoom();
+    return;
+  }
+  // Zoom out: Ctrl/Cmd + Minus.
+  if (zoomMod && e.key === "-") {
+    e.preventDefault();
+    userZoom = Math.max(0.3, userZoom / 1.1);
+    applyZoom();
+    return;
+  }
+  // Reset zoom: Ctrl/Cmd + 0.
+  if (zoomMod && e.key === "0") {
+    e.preventDefault();
+    userZoom = 1.0;
+    applyZoom();
+    return;
+  }
+
   e.preventDefault();
   safeTermInput(domKeyToInput(e, "down"));
 }, { capture: true });
@@ -262,16 +571,39 @@ window.addEventListener("keyup", (e) => {
   safeTermInput(domKeyToInput(e, "up"));
 }, { capture: true });
 
+// Track mouse button state for drag detection.
+// `e.button` is always 0 during mousemove, so we must remember which button
+// initiated the drag from the mousedown event.
+let mouseButtonsDown = 0;
+let dragButton = 0;
+
 canvas.addEventListener("mousedown", (e) => {
+  e.preventDefault();
   canvas.focus();
+  mouseButtonsDown = e.buttons;
+  dragButton = e.button;
   safeTermInput(domMouseToInput(e, "down"));
 });
 canvas.addEventListener("mouseup", (e) => {
+  e.preventDefault();
+  mouseButtonsDown = e.buttons;
   safeTermInput(domMouseToInput(e, "up"));
 });
 canvas.addEventListener("mousemove", (e) => {
-  safeTermInput(domMouseToInput(e, "move"));
+  mouseButtonsDown = e.buttons;
+  if (mouseButtonsDown) {
+    // Drag: use the button from the original mousedown (e.button is always 0 on mousemove).
+    const ev = domMouseToInput(e, "drag");
+    ev.button = dragButton;
+    safeTermInput(ev);
+  } else {
+    safeTermInput(domMouseToInput(e, "move"));
+  }
 });
+window.addEventListener("mouseup", () => { mouseButtonsDown = 0; });
+window.addEventListener("blur", () => { mouseButtonsDown = 0; });
+// Suppress context menu on canvas (right-click is forwarded to terminal).
+canvas.addEventListener("contextmenu", (e) => { e.preventDefault(); });
 canvas.addEventListener("wheel", (e) => {
   e.preventDefault();
   safeTermInput(domWheelToInput(e));
@@ -300,6 +632,193 @@ canvas.addEventListener("compositionend", (e) => {
   safeTermInput({ kind: "composition", phase: "end", data: e.data || "" });
 });
 
+// ── Touch zoom buttons ──────────────────────────────────────────────────
+document.getElementById("zoom-in").addEventListener("click", () => {
+  userZoom = Math.min(3.0, userZoom * 1.15);
+  applyZoom();
+  canvas.focus();
+});
+document.getElementById("zoom-out").addEventListener("click", () => {
+  userZoom = Math.max(0.3, userZoom / 1.15);
+  applyZoom();
+  canvas.focus();
+});
+document.getElementById("zoom-reset").addEventListener("click", () => {
+  userZoom = 1.0;
+  applyZoom();
+  canvas.focus();
+});
+
+// ── Orientation change + visual viewport scroll pinning ──────────────
+let orientationTimer = 0;
+window.addEventListener("orientationchange", () => {
+  clearTimeout(orientationTimer);
+  orientationTimer = setTimeout(() => {
+    const newDpr = window.devicePixelRatio || 1.0;
+    const geo = term.fitToContainer(container.clientWidth, container.clientHeight, newDpr);
+    if (geo.cols !== currentCols || geo.rows !== currentRows) {
+      currentCols = geo.cols;
+      currentRows = geo.rows;
+      runner.resize(currentCols, currentRows);
+      status.textContent = `${currentCols}\u00d7${currentRows} \u2014 running`;
+    }
+  }, 150);
+});
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("scroll", () => {
+    window.scrollTo(0, 0);
+  });
+}
+
+// ── Touch state machine ─────────────────────────────────────────────────
+// Translates touch gestures to mouse/wheel events for the Rust showcase runner.
+// States: IDLE → TRACKING → SCROLLING or PINCHING
+const TOUCH_IDLE = 0, TOUCH_TRACKING = 1, TOUCH_SCROLLING = 2, TOUCH_PINCHING = 3;
+let touchState = TOUCH_IDLE;
+let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+let touchLastX = 0, touchLastY = 0;
+let touchScrollAccX = 0, touchScrollAccY = 0;
+let pinchStartDist = 0, pinchStartZoom = 1.0;
+const TAP_MAX_DIST = 10;   // px
+const TAP_MAX_TIME = 300;  // ms
+
+function touchScrollStepsPx() {
+  const rect = canvas.getBoundingClientRect();
+  const rawX = currentCols > 0 ? rect.width / currentCols : CELL_WIDTH;
+  const rawY = currentRows > 0 ? rect.height / currentRows : CELL_HEIGHT;
+  return {
+    x: Math.max(4, Math.round(rawX || CELL_WIDTH)),
+    y: Math.max(4, Math.round(rawY || CELL_HEIGHT)),
+  };
+}
+
+function touchCellCoords(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const cellW = rect.width / currentCols;
+  const cellH = rect.height / currentRows;
+  return {
+    x: Math.max(0, Math.min(Math.floor((clientX - rect.left) / cellW), currentCols - 1)),
+    y: Math.max(0, Math.min(Math.floor((clientY - rect.top) / cellH), currentRows - 1)),
+  };
+}
+
+function pinchDistance(t0, t1) {
+  const dx = t1.clientX - t0.clientX;
+  const dy = t1.clientY - t0.clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+canvas.addEventListener("touchstart", (e) => {
+  e.preventDefault();
+  canvas.focus();
+  const touches = e.touches;
+  if (touches.length === 1) {
+    touchState = TOUCH_TRACKING;
+    touchStartX = touchLastX = touches[0].clientX;
+    touchStartY = touchLastY = touches[0].clientY;
+    touchStartTime = Date.now();
+    touchScrollAccX = 0;
+    touchScrollAccY = 0;
+  } else if (touches.length === 2) {
+    touchState = TOUCH_PINCHING;
+    pinchStartDist = pinchDistance(touches[0], touches[1]);
+    pinchStartZoom = userZoom;
+  }
+}, { passive: false });
+
+canvas.addEventListener("touchmove", (e) => {
+  e.preventDefault();
+  const touches = e.touches;
+
+  if (touches.length === 2 && touchState !== TOUCH_IDLE) {
+    // Two fingers always means pinch, even if we started as single-finger tracking.
+    if (touchState !== TOUCH_PINCHING) {
+      touchState = TOUCH_PINCHING;
+      pinchStartDist = pinchDistance(touches[0], touches[1]);
+      pinchStartZoom = userZoom;
+      return;
+    }
+    const dist = pinchDistance(touches[0], touches[1]);
+    if (pinchStartDist > 0) {
+      const scale = dist / pinchStartDist;
+      userZoom = Math.max(0.3, Math.min(3.0, pinchStartZoom * scale));
+      applyZoom();
+    }
+    return;
+  }
+
+  if (touches.length === 1 && (touchState === TOUCH_TRACKING || touchState === TOUCH_SCROLLING)) {
+    const cx = touches[0].clientX;
+    const cy = touches[0].clientY;
+    const dx = cx - touchLastX;
+    const dy = cy - touchLastY;
+    touchLastX = cx;
+    touchLastY = cy;
+
+    // Once movement exceeds tap threshold, switch to scrolling.
+    if (touchState === TOUCH_TRACKING) {
+      const totalDx = cx - touchStartX;
+      const totalDy = cy - touchStartY;
+      if (Math.abs(totalDx) > TAP_MAX_DIST || Math.abs(totalDy) > TAP_MAX_DIST) {
+        touchState = TOUCH_SCROLLING;
+      } else {
+        return;
+      }
+    }
+
+    // Accumulate movement and emit wheel events at cell-sized intervals.
+    // Natural scrolling: finger-down → content follows finger down → sees earlier
+    // content → equivalent to "scroll up" → negative wheel dy.
+    touchScrollAccX += dx;
+    touchScrollAccY += dy;
+    const scrollStep = touchScrollStepsPx();
+    const cell = touchCellCoords(cx, cy);
+    while (Math.abs(touchScrollAccY) >= scrollStep.y) {
+      const sign = touchScrollAccY > 0 ? -1 : 1;
+      safeTermInput({ kind: "wheel", x: cell.x, y: cell.y, dx: 0, dy: sign, mods: 0 });
+      touchScrollAccY -= (touchScrollAccY > 0 ? scrollStep.y : -scrollStep.y);
+    }
+    while (Math.abs(touchScrollAccX) >= scrollStep.x) {
+      const sign = touchScrollAccX > 0 ? -1 : 1;
+      safeTermInput({ kind: "wheel", x: cell.x, y: cell.y, dx: sign, dy: 0, mods: 0 });
+      touchScrollAccX -= (touchScrollAccX > 0 ? scrollStep.x : -scrollStep.x);
+    }
+  }
+}, { passive: false });
+
+canvas.addEventListener("touchend", (e) => {
+  e.preventDefault();
+  // If we were tracking a single finger and it ended quickly without much movement, it's a tap.
+  if (touchState === TOUCH_TRACKING && e.changedTouches.length > 0) {
+    const elapsed = Date.now() - touchStartTime;
+    const t = e.changedTouches[0];
+    const dist = Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY);
+    if (elapsed < TAP_MAX_TIME && dist < TAP_MAX_DIST) {
+      const cell = touchCellCoords(t.clientX, t.clientY);
+      safeTermInput({ kind: "mouse", phase: "down", button: 0, x: cell.x, y: cell.y, mods: 0 });
+      safeTermInput({ kind: "mouse", phase: "up",   button: 0, x: cell.x, y: cell.y, mods: 0 });
+    }
+  }
+  // If all fingers lifted, reset state.
+  if (e.touches.length === 0) {
+    touchState = TOUCH_IDLE;
+  } else if (e.touches.length === 1 && touchState === TOUCH_PINCHING) {
+    // Went from two fingers to one — restart tracking from current position.
+    touchState = TOUCH_TRACKING;
+    touchStartX = touchLastX = e.touches[0].clientX;
+    touchStartY = touchLastY = e.touches[0].clientY;
+    touchStartTime = Date.now();
+    touchScrollAccX = 0;
+    touchScrollAccY = 0;
+  }
+}, { passive: false });
+
+canvas.addEventListener("touchcancel", (e) => {
+  e.preventDefault();
+  touchState = TOUCH_IDLE;
+}, { passive: false });
+
 // ── Host frame loop ────────────────────────────────────────────────────
 let lastTs = 0;
 let totalFrames = 0;
@@ -311,7 +830,7 @@ function frame(timestamp) {
   // 1. Advance deterministic clock.
   runner.advanceTime(dt);
 
-  // 2. Drain normalized inputs from FrankenTermWeb → push to runner.
+  // 2. Drain normalized inputs from FrankenTermWeb -> push to runner.
   const inputs = term.drainEncodedInputs();
   for (let i = 0; i < inputs.length; i++) {
     runner.pushEncodedInput(inputs[i]);
@@ -322,7 +841,7 @@ function frame(timestamp) {
 
   // 4. If a frame was rendered, apply patches and present.
   if (result.rendered) {
-    const patches = runner.takeFlatPatches();
+    const patches = takeRunnerPatches();
     if (patches.cells.length > 0) {
       term.applyPatchBatchFlat(patches.spans, patches.cells);
     }
@@ -353,7 +872,7 @@ function frame(timestamp) {
   if (result.running) {
     requestAnimationFrame(frame);
   } else {
-    status.textContent = `${currentCols}×${currentRows} — stopped (${totalFrames} frames)`;
+    status.textContent = `${currentCols}\u00d7${currentRows} \u2014 stopped (${totalFrames} frames)`;
     jsonl({ event: "quit", total_frames: totalFrames, ts: Date.now() });
     runner.destroy();
   }
