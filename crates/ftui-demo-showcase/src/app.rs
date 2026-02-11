@@ -792,6 +792,8 @@ pub enum ScreenId {
     CommandPalette,
     /// Toast event notifications (bd-1smd).
     ToastEvents,
+    /// Beads overview dashboard (bd-4fhg).
+    BeadsOverview,
 }
 
 impl ScreenId {
@@ -875,6 +877,7 @@ impl ScreenId {
             Self::MailInbox => "MailInbox",
             Self::CommandPalette => "CommandPalette",
             Self::ToastEvents => "ToastEvents",
+            Self::BeadsOverview => "BeadsOverview",
         }
     }
 
@@ -1033,6 +1036,8 @@ pub struct ScreenStates {
     pub command_palette: screens::command_palette::CommandPaletteScreen,
     /// Toast events screen state (bd-1smd).
     pub toast_events: screens::toast_events::ToastEventsScreen,
+    /// Beads overview screen state (bd-4fhg).
+    pub beads_overview: screens::beads_overview::BeadsOverview,
     /// Tracks whether each screen has errored during rendering.
     /// Indexed by `ScreenId::index()`.
     screen_errors: Vec<Option<String>>,
@@ -1092,6 +1097,7 @@ impl Default for ScreenStates {
             mail_inbox: Default::default(),
             command_palette: Default::default(),
             toast_events: Default::default(),
+            beads_overview: Default::default(),
             screen_errors: vec![None; screens::screen_registry().len()],
             visual_effects_deterministic_tick_ms: None,
         }
@@ -1353,6 +1359,9 @@ impl ScreenStates {
             ScreenId::ToastEvents => {
                 self.toast_events.update(event);
             }
+            ScreenId::BeadsOverview => {
+                self.beads_overview.update(event);
+            }
         }
     }
 
@@ -1441,6 +1450,7 @@ impl ScreenStates {
             ScreenId::MailInbox => self.mail_inbox.tick(tick_count),
             ScreenId::CommandPalette => self.command_palette.tick(tick_count),
             ScreenId::ToastEvents => self.toast_events.tick(tick_count),
+            ScreenId::BeadsOverview => self.beads_overview.tick(tick_count),
         }
     }
 
@@ -1532,6 +1542,7 @@ impl ScreenStates {
                 ScreenId::MailInbox => self.mail_inbox.view(frame, area),
                 ScreenId::CommandPalette => self.command_palette.view(frame, area),
                 ScreenId::ToastEvents => self.toast_events.view(frame, area),
+                ScreenId::BeadsOverview => self.beads_overview.view(frame, area),
             }
         }));
 
@@ -4127,6 +4138,7 @@ impl AppModel {
             ScreenId::MailInbox => self.screens.mail_inbox.keybindings(),
             ScreenId::CommandPalette => self.screens.command_palette.keybindings(),
             ScreenId::ToastEvents => self.screens.toast_events.keybindings(),
+            ScreenId::BeadsOverview => self.screens.beads_overview.keybindings(),
         };
         if self.tour.is_active() {
             entries.push(screens::HelpEntry {

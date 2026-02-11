@@ -9,6 +9,7 @@ pub mod accessibility_panel;
 pub mod action_timeline;
 pub mod agent_detail;
 pub mod agent_tree;
+pub mod beads_overview;
 pub mod command_palette;
 pub mod convoy_panel;
 pub mod mail_inbox;
@@ -638,6 +639,16 @@ pub const SCREEN_REGISTRY: &[ScreenMeta] = &[
         category: ScreenCategory::Systems,
         palette_tags: &["toast", "notifications", "events", "alerts"],
         blurb: "Toast notification overlays for Gas Town event alerts.",
+        default_hotkey: None,
+        tour_step_hint: None,
+    },
+    ScreenMeta {
+        id: ScreenId::BeadsOverview,
+        title: "Beads Overview",
+        short_label: "Beads",
+        category: ScreenCategory::Systems,
+        palette_tags: &["beads", "issues", "ready", "blocked", "dashboard"],
+        blurb: "Ready/blocked/in-progress beads dashboard with close rate sparkline.",
         default_hotkey: None,
         tour_step_hint: None,
     },
