@@ -232,6 +232,42 @@ fn run_gt(args: &[&str]) -> Option<String> {
     }
 }
 
+/// Run a CLI command string like "gt status" or "bd ready".
+/// Returns the output (stdout, or stderr on failure, or error message).
+pub fn run_cli_command(cmd: &str) -> String {
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    if parts.is_empty() {
+        return "(empty command)".to_string();
+    }
+    let (program, args) = if parts[0] == "bd" {
+        // bd commands need --no-db
+        ("bd", {
+            let mut a = vec!["--no-db"];
+            a.extend_from_slice(&parts[1..]);
+            a
+        })
+    } else {
+        (parts[0], parts[1..].to_vec())
+    };
+
+    match Command::new(program).args(&args).output() {
+        Ok(result) => {
+            let stdout = String::from_utf8_lossy(&result.stdout);
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            if !stdout.trim().is_empty() {
+                stdout.to_string()
+            } else if !stderr.trim().is_empty() {
+                stderr.to_string()
+            } else if result.status.success() {
+                "(no output)".to_string()
+            } else {
+                format!("exit code: {}", result.status.code().unwrap_or(-1))
+            }
+        }
+        Err(e) => format!("error: {e}"),
+    }
+}
+
 pub fn fetch_status() -> TownStatus {
     if let Some(output) = run_gt(&["status", "--json"]) {
         // Skip warning lines (start with WARNING or whitespace before JSON)

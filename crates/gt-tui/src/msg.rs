@@ -14,6 +14,7 @@ pub enum Msg {
     BeadsRefresh(BeadsSnapshot),
     NewEvent(GtEvent),
     SwitchScreen(ActiveScreen),
+    CommandOutput(String, String),
     Tick,
     Noop,
 }

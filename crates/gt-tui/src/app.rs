@@ -16,7 +16,7 @@ use ftui_widgets::spinner::SpinnerState;
 use ftui_widgets::status_line::{StatusItem, StatusLine};
 use ftui_widgets::Widget;
 
-use crate::data::{self, AgentInfo, BeadsSnapshot, ConvoyItem, TownStatus};
+use crate::data::{self, AgentInfo, BeadsSnapshot, CliCommand, ConvoyItem, TownStatus};
 use crate::msg::Msg;
 use crate::panels;
 use crate::screen::ActiveScreen;
@@ -29,9 +29,12 @@ use crate::screens::event_feed::EventFeedScreen;
 use crate::screens::mail_inbox::MailInboxScreen;
 
 /// Build the Gas Town action items for the command palette.
-fn gas_town_actions() -> Vec<ActionItem> {
-    vec![
-        // Navigation
+///
+/// Screen navigation items come first, then all runnable (leaf) CLI commands
+/// from the docs index.
+fn gas_town_actions(cli_docs: &[CliCommand]) -> Vec<ActionItem> {
+    let mut items = vec![
+        // Navigation — always present
         ActionItem::new("screen-dashboard", "Dashboard")
             .with_description("Switch to Dashboard (F1)")
             .with_tags(&["screen", "dashboard", "home", "overview"])
@@ -60,44 +63,29 @@ fn gas_town_actions() -> Vec<ActionItem> {
             .with_description("Search and browse gt CLI reference (F7)")
             .with_tags(&["screen", "docs", "help", "reference", "commands"])
             .with_category("Navigation"),
-        // System
-        ActionItem::new("gt-status", "Refresh Status")
-            .with_description("Refresh rig status (gt status)")
-            .with_tags(&["refresh", "status", "update"])
-            .with_category("System"),
-        ActionItem::new("gt-sling", "Sling Work")
-            .with_description("Assign work to a polecat (gt sling)")
-            .with_tags(&["work", "assign", "dispatch"])
-            .with_category("Work"),
-        ActionItem::new("gt-nudge", "Nudge Agent")
-            .with_description("Send a nudge to a stuck agent (gt nudge)")
-            .with_tags(&["agent", "nudge", "unstick"])
-            .with_category("Agent"),
-        ActionItem::new("gt-mail-send", "Send Mail")
-            .with_description("Send mail to an agent or role (gt mail send)")
-            .with_tags(&["mail", "send", "message"])
-            .with_category("Mail"),
-        ActionItem::new("gt-convoy-create", "Create Convoy")
-            .with_description("Create a new convoy (gt convoy create)")
-            .with_tags(&["convoy", "create", "group"])
-            .with_category("Convoy"),
-        ActionItem::new("gt-polecat-list", "Polecat List")
-            .with_description("List all polecats in the rig")
-            .with_tags(&["polecat", "list", "workers"])
-            .with_category("System"),
-        ActionItem::new("gt-rig-list", "Rig List")
-            .with_description("List all rigs in Gas Town")
-            .with_tags(&["rig", "list", "town"])
-            .with_category("System"),
-        ActionItem::new("bd-ready", "Beads Ready")
-            .with_description("Show ready work with no blockers (bd ready)")
-            .with_tags(&["beads", "ready", "work"])
-            .with_category("Beads"),
-        ActionItem::new("bd-stats", "Beads Stats")
-            .with_description("Show beads statistics and counts (bd stats)")
-            .with_tags(&["beads", "stats", "metrics"])
-            .with_category("Beads"),
-    ]
+    ];
+
+    // Add all runnable CLI commands from docs
+    for cmd in cli_docs {
+        if cmd.is_parent || cmd.cmd.is_empty() {
+            continue;
+        }
+
+        // Derive category from second word: "gt mail send" → "mail"
+        let category = cmd.cmd.split_whitespace().nth(1).unwrap_or("gt");
+
+        // Use all words as tags for fuzzy matching
+        let words: Vec<&str> = cmd.cmd.split_whitespace().collect();
+
+        items.push(
+            ActionItem::new(&cmd.cmd, &cmd.cmd)
+                .with_description(&cmd.short)
+                .with_tags(&words)
+                .with_category(category),
+        );
+    }
+
+    items
 }
 
 pub struct GtApp {
@@ -134,8 +122,10 @@ impl GtApp {
         event_viewer.push("Click agent names to jump to their tmux session");
         event_viewer.push("");
 
+        let cli_docs = data::load_cli_docs();
+
         let mut palette = CommandPalette::new().with_max_visible(9);
-        palette.replace_actions(gas_town_actions());
+        palette.replace_actions(gas_town_actions(&cli_docs));
 
         Self {
             active_screen: ActiveScreen::Dashboard,
@@ -154,7 +144,7 @@ impl GtApp {
             agent_screen: AgentDetailScreen::new(),
             mail_screen: MailInboxScreen::new(),
             beads_screen: BeadsOverviewScreen::new(),
-            docs_screen: DocsBrowserScreen::new(data::load_cli_docs()),
+            docs_screen: DocsBrowserScreen::new(cli_docs),
             spinner_state: SpinnerState::default(),
             spinner_tick: 0,
             last_refresh: Instant::now(),
@@ -183,27 +173,38 @@ impl GtApp {
             return Cmd::None;
         }
 
-        match id {
-            "gt-status" => {
-                self.last_refresh = Instant::now();
-                self.event_viewer.push("Refreshing status...");
-                Cmd::Batch(vec![
-                    Cmd::Task(
-                        Default::default(),
-                        Box::new(|| Msg::StatusRefresh(data::fetch_status())),
-                    ),
-                    Cmd::Task(
-                        Default::default(),
-                        Box::new(|| Msg::ConvoyRefresh(data::fetch_convoys())),
-                    ),
-                ])
-            }
-            other => {
-                self.event_viewer
-                    .push(format!("Action: {other} (not yet wired)"));
-                Cmd::None
-            }
+        // Special: gt status triggers the full refresh cycle
+        if id == "gt status" {
+            self.last_refresh = Instant::now();
+            self.event_viewer.push("Refreshing status...");
+            return Cmd::Batch(vec![
+                Cmd::Task(
+                    Default::default(),
+                    Box::new(|| Msg::StatusRefresh(data::fetch_status())),
+                ),
+                Cmd::Task(
+                    Default::default(),
+                    Box::new(|| Msg::ConvoyRefresh(data::fetch_convoys())),
+                ),
+            ]);
         }
+
+        // Run any gt/bd command asynchronously
+        if id.starts_with("gt ") || id.starts_with("bd ") {
+            let cmd_str = id.to_string();
+            self.event_viewer.push(format!("$ {cmd_str}"));
+            return Cmd::Task(
+                Default::default(),
+                Box::new(move || {
+                    let output = data::run_cli_command(&cmd_str);
+                    Msg::CommandOutput(cmd_str, output)
+                }),
+            );
+        }
+
+        self.event_viewer
+            .push(format!("Unknown action: {id}"));
+        Cmd::None
     }
 
     /// Collect all agents from top-level and per-rig into a flat list.
@@ -475,6 +476,19 @@ impl Model for GtApp {
             Msg::NewEvent(event) => {
                 panels::event_feed::push_event(&mut self.event_viewer, &event);
                 self.event_feed_screen.push_real_event(&event);
+                Cmd::None
+            }
+            Msg::CommandOutput(cmd, output) => {
+                // Push each line of output to the event viewer
+                for line in output.lines().take(50) {
+                    self.event_viewer.push(line);
+                }
+                if output.lines().count() > 50 {
+                    self.event_viewer
+                        .push(format!("... ({} lines total)", output.lines().count()));
+                }
+                self.event_viewer
+                    .push(format!("--- {} done ---", cmd));
                 Cmd::None
             }
             Msg::SwitchScreen(screen) => {
