@@ -7,9 +7,10 @@ pub enum ActiveScreen {
     Agents,
     Mail,
     Beads,
-    Docs,
+    Rigs,
     TmuxCommander,
-    LayoutManager,
+    Formulas,
+    Docs,
 }
 
 impl ActiveScreen {
@@ -20,9 +21,10 @@ impl ActiveScreen {
         Self::Agents,
         Self::Mail,
         Self::Beads,
-        Self::Docs,
+        Self::Rigs,
         Self::TmuxCommander,
-        Self::LayoutManager,
+        Self::Formulas,
+        Self::Docs,
     ];
 
     pub fn label(self) -> &'static str {
@@ -33,9 +35,10 @@ impl ActiveScreen {
             Self::Agents => "Agents",
             Self::Mail => "Mail",
             Self::Beads => "Beads",
-            Self::Docs => "Docs",
+            Self::Rigs => "Rigs",
             Self::TmuxCommander => "Tmux",
-            Self::LayoutManager => "Layouts",
+            Self::Formulas => "Formulas",
+            Self::Docs => "Docs",
         }
     }
 
@@ -47,9 +50,10 @@ impl ActiveScreen {
             Self::Agents => 4,
             Self::Mail => 5,
             Self::Beads => 6,
-            Self::Docs => 7,
+            Self::Rigs => 7,
             Self::TmuxCommander => 8,
-            Self::LayoutManager => 9,
+            Self::Formulas => 9,
+            Self::Docs => 10,
         }
     }
 
@@ -61,9 +65,10 @@ impl ActiveScreen {
             4 => Some(Self::Agents),
             5 => Some(Self::Mail),
             6 => Some(Self::Beads),
-            7 => Some(Self::Docs),
+            7 => Some(Self::Rigs),
             8 => Some(Self::TmuxCommander),
-            9 => Some(Self::LayoutManager),
+            9 => Some(Self::Formulas),
+            10 => Some(Self::Docs),
             _ => None,
         }
     }
@@ -76,9 +81,10 @@ impl ActiveScreen {
             '4' => Some(Self::Agents),
             '5' => Some(Self::Mail),
             '6' => Some(Self::Beads),
-            '7' => Some(Self::Docs),
+            '7' => Some(Self::Rigs),
             '8' => Some(Self::TmuxCommander),
-            '9' => Some(Self::LayoutManager),
+            '9' => Some(Self::Formulas),
+            '0' => Some(Self::Docs),
             _ => None,
         }
     }
@@ -90,24 +96,26 @@ impl ActiveScreen {
             Self::Convoys => Self::Agents,
             Self::Agents => Self::Mail,
             Self::Mail => Self::Beads,
-            Self::Beads => Self::Docs,
-            Self::Docs => Self::TmuxCommander,
-            Self::TmuxCommander => Self::LayoutManager,
-            Self::LayoutManager => Self::Dashboard,
+            Self::Beads => Self::Rigs,
+            Self::Rigs => Self::TmuxCommander,
+            Self::TmuxCommander => Self::Formulas,
+            Self::Formulas => Self::Docs,
+            Self::Docs => Self::Dashboard,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Dashboard => Self::LayoutManager,
+            Self::Dashboard => Self::Docs,
             Self::EventFeed => Self::Dashboard,
             Self::Convoys => Self::EventFeed,
             Self::Agents => Self::Convoys,
             Self::Mail => Self::Agents,
             Self::Beads => Self::Mail,
-            Self::Docs => Self::Beads,
-            Self::TmuxCommander => Self::Docs,
-            Self::LayoutManager => Self::TmuxCommander,
+            Self::Rigs => Self::Beads,
+            Self::TmuxCommander => Self::Rigs,
+            Self::Formulas => Self::TmuxCommander,
+            Self::Docs => Self::Formulas,
         }
     }
 }

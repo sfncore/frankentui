@@ -1,7 +1,9 @@
-//! F9 — Layout Manager screen.
+//! F9 — Formulas screen.
 //!
-//! Visual layout builder: pick a tmux layout preset, fill boxes with
-//! sessions/agents, hit Go to create the tmux session.
+//! Formulas are tmuxrs layout configs (~/.config/tmuxrs/*.yml).
+//! Visual layout builder: pick a formula, preview its geometry, fill slots
+//! with sessions/agents, hit Go to create the tmux session.
+//! Supports: create, delete, duplicate, apply.
 
 use ftui_core::event::{KeyCode, KeyEvent, MouseEvent};
 use ftui_core::geometry::Rect;
@@ -20,7 +22,7 @@ use crate::data::AgentInfo;
 use crate::msg::Msg;
 use crate::tmux::client as tmux_client;
 use crate::tmuxrs;
-use crate::tmuxrs::model::TmuxrsConfig;
+use crate::tmuxrs::model::{Layout, PaneConfig, TmuxrsConfig};
 
 // ---------------------------------------------------------------------------
 // Layout presets
@@ -168,8 +170,8 @@ struct Slot {
     session: Option<String>,
     /// GT address for `gt session start`.
     gt_address: Option<String>,
-    /// Pane commands from config (for non-session slots).
-    pane_commands: Vec<String>,
+    /// Pane configs from template (commands, session links, etc.).
+    pane_configs: Vec<PaneConfig>,
 }
 
 /// Merged entry from agents + live tmux sessions.
@@ -217,8 +219,8 @@ impl LayoutManagerScreen {
             selected_config: 0,
             preset: LayoutPreset::Tiled,
             slots: vec![
-                Slot { label: "slot 1".into(), session: None, gt_address: None, pane_commands: Vec::new() },
-                Slot { label: "slot 2".into(), session: None, gt_address: None, pane_commands: Vec::new() },
+                Slot { label: "slot 1".into(), session: None, gt_address: None, pane_configs: Vec::new() },
+                Slot { label: "slot 2".into(), session: None, gt_address: None, pane_configs: Vec::new() },
             ],
             selected_slot: 0,
             root_override: None,
@@ -253,39 +255,50 @@ impl LayoutManagerScreen {
     }
 
     /// Load a config template into the visual layout.
+    /// Converts the raw TmuxrsConfig into a pure-geometry Layout, stripping
+    /// session references. Sessions are assigned at runtime via the UI.
     fn load_config(&mut self, idx: usize) {
         let config = match self.configs.get(idx) {
             Some(c) => c,
             None => return,
         };
 
-        // Set preset from first window's layout (or tiled)
-        self.preset = config
-            .windows
+        // Convert to pure-geometry layout
+        let layout = Layout::from_config(config);
+
+        // Set preset from first slot (or tiled)
+        self.preset = layout
+            .slots
             .first()
-            .and_then(|w| w.layout.as_deref())
+            .and_then(|s| s.preset.as_deref())
             .map(LayoutPreset::from_str)
             .unwrap_or(LayoutPreset::Tiled);
 
-        // Build slots from windows
+        // Build slots from layout geometry
         let old_slots = std::mem::take(&mut self.slots);
-        self.slots = config
-            .windows
+        self.slots = layout
+            .slots
             .iter()
-            .map(|win| {
-                let prev = old_slots.iter().find(|s| s.label == win.name);
+            .map(|ls| {
+                let prev = old_slots.iter().find(|s| s.label == ls.label);
+                // Build pane configs from default commands (pure geometry, no sessions)
+                let pane_configs: Vec<PaneConfig> = if !ls.default_commands.is_empty() {
+                    ls.default_commands.iter().map(|c| PaneConfig::from_command(c)).collect()
+                } else {
+                    (0..ls.pane_count).map(|_| PaneConfig::default()).collect()
+                };
                 Slot {
-                    label: win.name.clone(),
+                    label: ls.label.clone(),
                     session: prev.and_then(|s| s.session.clone()),
                     gt_address: prev.and_then(|s| s.gt_address.clone()),
-                    pane_commands: win.panes.clone(),
+                    pane_configs,
                 }
             })
             .collect();
 
-        self.root_override = config.root.clone();
+        self.root_override = layout.root;
         self.selected_slot = 0;
-        self.set_feedback(format!("Loaded: {}", config.name));
+        self.set_feedback(format!("Loaded: {}", layout.name));
     }
 
     fn assignable_sessions(&self) -> Vec<AssignableSession> {
@@ -369,6 +382,9 @@ impl LayoutManagerScreen {
             KeyCode::Char('d') => {
                 return self.delete_selected_config();
             }
+            KeyCode::Char('D') => {
+                return self.duplicate_selected_config();
+            }
             _ => {}
         }
         Cmd::None
@@ -411,7 +427,7 @@ impl LayoutManagerScreen {
                     label: format!("slot {n}"),
                     session: None,
                     gt_address: None,
-                    pane_commands: Vec::new(),
+                    pane_configs: Vec::new(),
                 });
                 self.selected_slot = self.slots.len() - 1;
             }
@@ -438,6 +454,14 @@ impl LayoutManagerScreen {
                     slot.gt_address = None;
                     self.set_feedback(format!("{name}: cleared"));
                 }
+            }
+            // Start session in selected slot
+            KeyCode::Char('s') => {
+                return self.start_slot_session();
+            }
+            // Stop session in selected slot
+            KeyCode::Char('S') => {
+                return self.stop_slot_session();
             }
             // Root override
             KeyCode::Char('R') => {
@@ -652,6 +676,106 @@ impl LayoutManagerScreen {
         Cmd::None
     }
 
+    fn start_slot_session(&mut self) -> Cmd<Msg> {
+        let slot = match self.slots.get(self.selected_slot) {
+            Some(s) => s,
+            None => return Cmd::None,
+        };
+        let address = match &slot.gt_address {
+            Some(a) => a.clone(),
+            None => {
+                self.set_feedback("No GT address for this slot");
+                return Cmd::None;
+            }
+        };
+        let label = slot.label.clone();
+        self.set_feedback(format!("Starting: {address}"));
+        Cmd::Task(
+            Default::default(),
+            Box::new(move || {
+                match gt_session_start(&address) {
+                    Ok(_) => Msg::TmuxrsActionResult(
+                        format!("start {label}"),
+                        Ok(format!("Started: {address}")),
+                    ),
+                    Err(e) => Msg::TmuxrsActionResult(
+                        format!("start {label}"),
+                        Err(e),
+                    ),
+                }
+            }),
+        )
+    }
+
+    fn stop_slot_session(&mut self) -> Cmd<Msg> {
+        let slot = match self.slots.get(self.selected_slot) {
+            Some(s) => s,
+            None => return Cmd::None,
+        };
+        let session = match &slot.session {
+            Some(s) => s.clone(),
+            None => {
+                self.set_feedback("No session assigned");
+                return Cmd::None;
+            }
+        };
+        let label = slot.label.clone();
+        self.set_feedback(format!("Stopping: {session}"));
+        Cmd::Task(
+            Default::default(),
+            Box::new(move || {
+                match tmux_client::kill_session(&session) {
+                    Ok(_) => Msg::TmuxrsActionResult(
+                        format!("stop {label}"),
+                        Ok(format!("Stopped: {session}")),
+                    ),
+                    Err(e) => Msg::TmuxrsActionResult(
+                        format!("stop {label}"),
+                        Err(format!("stop {session}: {e}")),
+                    ),
+                }
+            }),
+        )
+    }
+
+    fn duplicate_selected_config(&mut self) -> Cmd<Msg> {
+        let config = match self.configs.get(self.selected_config) {
+            Some(c) => c,
+            None => return Cmd::None,
+        };
+        let src_name = config.name.clone();
+        let new_name = format!("{}-copy", src_name);
+        // Read the source config, write it with a new name
+        let new_name_clone = new_name.clone();
+        let src_name_clone = src_name.clone();
+        Cmd::Task(
+            Default::default(),
+            Box::new(move || {
+                match tmuxrs::cli::read_config(&src_name_clone) {
+                    Ok(content) => {
+                        // Replace the name line
+                        let new_content = content.replacen(
+                            &format!("name: {src_name_clone}"),
+                            &format!("name: {new_name_clone}"),
+                            1,
+                        );
+                        match tmuxrs::cli::write_config(&new_name_clone, &new_content) {
+                            Ok(_) => Msg::TmuxrsActionResult(
+                                "duplicate".into(),
+                                Ok(format!("Duplicated: {src_name_clone} → {new_name_clone}")),
+                            ),
+                            Err(e) => Msg::TmuxrsActionResult("duplicate".into(), Err(e)),
+                        }
+                    }
+                    Err(e) => Msg::TmuxrsActionResult(
+                        "duplicate".into(),
+                        Err(format!("read {src_name_clone}: {e}")),
+                    ),
+                }
+            }),
+        )
+    }
+
     pub fn handle_mouse(&mut self, _mouse: &MouseEvent) -> Cmd<Msg> {
         Cmd::None
     }
@@ -702,7 +826,7 @@ impl LayoutManagerScreen {
         };
 
         let block = Block::new()
-            .title(" Templates ")
+            .title(" Formulas ")
             .title_alignment(Alignment::Center)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -752,12 +876,37 @@ impl LayoutManagerScreen {
                 Span::styled("[n]", Style::new().fg(theme::accent::PRIMARY).bold()),
                 Span::styled("ew ", Style::new().fg(theme::fg::MUTED)),
                 Span::styled("[d]", Style::new().fg(theme::accent::PRIMARY).bold()),
-                Span::styled("el", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("el ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("[D]", Style::new().fg(theme::accent::PRIMARY).bold()),
+                Span::styled("up", Style::new().fg(theme::fg::MUTED)),
             ]));
             lines.push(Line::from_spans([
                 Span::styled("Enter", Style::new().fg(theme::accent::PRIMARY).bold()),
                 Span::styled(" load", Style::new().fg(theme::fg::MUTED)),
             ]));
+        }
+
+        // Geometry preview of selected config
+        if let Some(config) = self.configs.get(self.selected_config) {
+            lines.push(Line::raw(""));
+            lines.push(Line::styled(
+                "Windows:",
+                Style::new().fg(theme::fg::SECONDARY).bold(),
+            ));
+            for win in &config.windows {
+                let layout_hint = win.layout.as_deref().unwrap_or("tiled");
+                let pane_count = win.panes.len();
+                lines.push(Line::from_spans([
+                    Span::styled(
+                        format!("  {} ", win.name),
+                        Style::new().fg(theme::accent::INFO),
+                    ),
+                    Span::styled(
+                        format!("{}p {layout_hint}", pane_count),
+                        Style::new().fg(theme::fg::MUTED),
+                    ),
+                ]));
+            }
         }
 
         // Feedback
@@ -901,19 +1050,21 @@ impl LayoutManagerScreen {
                         }
                     }
                     None => {
-                        if slot.pane_commands.iter().any(|c| !c.is_empty()) {
-                            for cmd in &slot.pane_commands {
-                                if !cmd.is_empty() {
-                                    let display = if cmd.len() > slot_inner.width as usize - 1 {
-                                        format!("{}...", &cmd[..slot_inner.width as usize - 4])
-                                    } else {
-                                        cmd.clone()
-                                    };
-                                    lines.push(Line::styled(
-                                        display,
-                                        Style::new().fg(theme::fg::SECONDARY),
-                                    ));
-                                }
+                        let labels: Vec<String> = slot.pane_configs.iter()
+                            .map(|p| p.label())
+                            .filter(|l| l != "(empty)" && l != "(shell)")
+                            .collect();
+                        if !labels.is_empty() {
+                            for lbl in &labels {
+                                let display = if lbl.len() > slot_inner.width as usize - 1 {
+                                    format!("{}...", &lbl[..slot_inner.width as usize - 4])
+                                } else {
+                                    lbl.clone()
+                                };
+                                lines.push(Line::styled(
+                                    display,
+                                    Style::new().fg(theme::fg::SECONDARY),
+                                ));
                             }
                         } else {
                             lines.push(Line::styled(
@@ -946,6 +1097,10 @@ impl LayoutManagerScreen {
                 Span::styled("rm ", Style::new().fg(theme::fg::MUTED)),
                 Span::styled("[L]", Style::new().fg(theme::accent::PRIMARY).bold()),
                 Span::styled("ayout ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("[s]", Style::new().fg(theme::accent::PRIMARY).bold()),
+                Span::styled("tart ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled("[S]", Style::new().fg(theme::accent::PRIMARY).bold()),
+                Span::styled("top ", Style::new().fg(theme::fg::MUTED)),
                 Span::styled("[R]", Style::new().fg(theme::accent::PRIMARY).bold()),
                 Span::styled("oot ", Style::new().fg(theme::fg::MUTED)),
                 Span::styled("[G]", Style::new().fg(theme::accent::PRIMARY).bold()),
@@ -1001,6 +1156,9 @@ fn do_apply_layout(
         }
     });
 
+    // Nesting detection: warn if we're already inside tmux
+    let nested = std::env::var("TMUX").is_ok();
+
     // Kill existing session
     if tmux_client::has_session(session_name) {
         tmux_client::kill_session(session_name)
@@ -1017,6 +1175,7 @@ fn do_apply_layout(
 
     let mut linked_count = 0u32;
     let mut window_count = 0u32;
+    let mut errors: Vec<String> = Vec::new();
 
     for (i, slot) in slots.iter().enumerate() {
         if i > 0 {
@@ -1028,16 +1187,22 @@ fn do_apply_layout(
                     .map_err(|e| format!("new-window {}: {e}", slot.label))?;
             }
         } else {
+            // Rename the initial window (always index 0 for fresh sessions)
             let target = format!("{session_name}:0");
             let _ = tmux_client::rename_window(&target, &slot.label);
         }
         window_count += 1;
 
+        // Find the actual window index we just created (don't assume sequential)
+        let win_target = find_window_by_name(session_name, &slot.label)
+            .unwrap_or_else(|| format!("{session_name}:{i}"));
+
         if let Some(ref src_session) = slot.session {
-            // Start if needed
+            // Start the session if it's not running
             if !tmux_client::has_session(src_session) {
                 if let Some(ref address) = slot.gt_address {
                     let _ = gt_session_start(address);
+                    // Wait up to 10s for session to appear
                     for _ in 0..20 {
                         if tmux_client::has_session(src_session) {
                             break;
@@ -1047,52 +1212,73 @@ fn do_apply_layout(
                 }
             }
 
-            // Link
+            // Link the session's window into our layout
             if tmux_client::has_session(src_session) {
+                if nested {
+                    errors.push(format!("{src_session}: nested tmux, link may fail"));
+                }
                 let source = format!("{src_session}:0");
                 match tmux_client::link_window(&source, session_name) {
                     Ok(idx) => {
-                        let target = format!("{session_name}:{idx}");
-                        let _ = tmux_client::rename_window(&target, src_session);
+                        let linked_target = format!("{session_name}:{idx}");
+                        let _ = tmux_client::rename_window(&linked_target, src_session);
+                        // Kill the placeholder window we created
+                        let _ = tmux_client::kill_window(&win_target);
                         linked_count += 1;
                     }
                     Err(e) => {
-                        let target = format!("{session_name}:{i}");
-                        let _ = tmux_client::send_keys(
-                            &target,
-                            &format!("echo 'Failed to link {src_session}: {e}'"),
-                        );
+                        errors.push(format!("link {src_session}: {e}"));
                     }
                 }
             } else {
-                let target = format!("{session_name}:{i}");
                 let msg = if slot.gt_address.is_some() {
-                    format!("echo 'Failed to start: {src_session}'")
+                    format!("Failed to start: {src_session}")
                 } else {
-                    format!("echo 'Not found: {src_session}'")
+                    format!("Not found: {src_session}")
                 };
-                let _ = tmux_client::send_keys(&target, &msg);
+                errors.push(msg);
             }
         } else {
-            // Plain window — run pane commands
-            let target = format!("{session_name}:{i}");
-            let _ = tmux_client::select_layout(&target, preset.label());
+            // Plain window — apply layout preset and run pane commands
+            let _ = tmux_client::select_layout(&win_target, preset.label());
 
-            for (p, cmd) in slot.pane_commands.iter().enumerate() {
+            for (p, pane) in slot.pane_configs.iter().enumerate() {
                 if p > 0 {
-                    let _ = tmux_client::split_pane(&target, false);
-                    let _ = tmux_client::select_layout(&target, preset.label());
+                    let horizontal = pane.direction.as_deref() == Some("horizontal");
+                    let _ = tmux_client::split_pane(&win_target, horizontal);
+                    let _ = tmux_client::select_layout(&win_target, preset.label());
                 }
-                if !cmd.is_empty() {
-                    let _ = tmux_client::send_keys(&target, cmd);
+                if let Some(ref cmd) = pane.command {
+                    if !cmd.is_empty() {
+                        let _ = tmux_client::send_keys(&win_target, cmd);
+                    }
                 }
             }
         }
     }
 
-    Ok(format!(
+    let mut summary = format!(
         "Created '{session_name}': {window_count} windows, {linked_count} linked"
-    ))
+    );
+    if nested {
+        summary.push_str(" (nested tmux)");
+    }
+    if !errors.is_empty() {
+        summary.push_str(&format!("\nWarnings: {}", errors.join("; ")));
+    }
+    Ok(summary)
+}
+
+/// Find a window by name, returning its proper target string.
+fn find_window_by_name(session: &str, name: &str) -> Option<String> {
+    if let Ok(windows) = tmux_client::list_windows(session) {
+        for win in &windows {
+            if win.name == name {
+                return Some(format!("{session}:{}", win.index));
+            }
+        }
+    }
+    None
 }
 
 fn new_session_with_dir(name: &str, dir: &str) -> Result<(), String> {

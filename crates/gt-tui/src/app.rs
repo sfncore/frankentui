@@ -28,6 +28,7 @@ use crate::screens::dashboard::DashboardScreen;
 use crate::screens::event_feed::EventFeedScreen;
 use crate::screens::layout_manager::LayoutManagerScreen;
 use crate::screens::mail_inbox::MailInboxScreen;
+use crate::screens::rigs::RigsScreen;
 use crate::screens::tmux_commander::TmuxCommanderScreen;
 
 /// Build the Gas Town action items for the command palette.
@@ -61,19 +62,49 @@ fn gas_town_actions(cli_docs: &[CliCommand]) -> Vec<ActionItem> {
             .with_description("Switch to Beads Overview (F6)")
             .with_tags(&["screen", "beads", "issues"])
             .with_category("Navigation"),
-        ActionItem::new("screen-docs", "CLI Docs Browser")
-            .with_description("Search and browse gt CLI reference (F7)")
-            .with_tags(&["screen", "docs", "help", "reference", "commands"])
+        ActionItem::new("screen-rigs", "Rigs Management")
+            .with_description("Manage rigs: start/stop witness/refinery (F7)")
+            .with_tags(&["screen", "rigs", "management", "witness", "refinery"])
             .with_category("Navigation"),
         ActionItem::new("screen-tmux", "Tmux Commander")
             .with_description("Full tmux session/window/pane control (F8)")
             .with_tags(&["screen", "tmux", "sessions", "windows", "panes"])
             .with_category("Navigation"),
-        ActionItem::new("screen-layouts", "Layout Manager")
-            .with_description("Manage tmuxrs layout configs (F9)")
-            .with_tags(&["screen", "layouts", "tmuxrs", "config"])
+        ActionItem::new("screen-formulas", "Formulas")
+            .with_description("Manage tmuxrs layout formulas (F9)")
+            .with_tags(&["screen", "formulas", "layouts", "tmuxrs", "config"])
+            .with_category("Navigation"),
+        ActionItem::new("screen-docs", "CLI Docs Browser")
+            .with_description("Search and browse gt CLI reference (F10/0)")
+            .with_tags(&["screen", "docs", "help", "reference", "commands"])
             .with_category("Navigation"),
     ];
+
+    // Quick-action commands — pre-built entries for common GT operations.
+    // These pre-fill the palette with the command prefix so users can add args.
+    let quick_actions = [
+        ("gt sling", "Sling work to a polecat", &["sling", "dispatch", "polecat", "work"][..], "Quick Actions"),
+        ("gt crew start", "Start a crew member", &["crew", "start", "agent"], "Quick Actions"),
+        ("gt crew stop", "Stop a crew member", &["crew", "stop", "agent"], "Quick Actions"),
+        ("gt polecat nuke", "Kill polecat session + remove worktree", &["polecat", "nuke", "kill"], "Quick Actions"),
+        ("gt nudge", "Send message to agent session", &["nudge", "message", "agent"], "Quick Actions"),
+        ("gt mail send", "Send mail to an agent", &["mail", "send", "message"], "Quick Actions"),
+        ("bd create --title=", "Create a new bead/issue", &["bead", "create", "issue", "task"], "Quick Actions"),
+        ("bd close", "Close a bead/issue", &["bead", "close", "done"], "Quick Actions"),
+        ("bd ready", "Show issues ready to work", &["bead", "ready", "available"], "Quick Actions"),
+        ("bd list --status=open", "List all open issues", &["bead", "list", "open"], "Quick Actions"),
+        ("gt status", "Refresh town status", &["status", "refresh", "overview"], "Quick Actions"),
+        ("gt rig list", "List all rigs", &["rig", "list"], "Quick Actions"),
+        ("gt convoy list", "List active convoys", &["convoy", "list", "batch"], "Quick Actions"),
+    ];
+    for (cmd, desc, tags, category) in quick_actions {
+        items.push(
+            ActionItem::new(cmd, cmd)
+                .with_description(desc)
+                .with_tags(tags)
+                .with_category(category),
+        );
+    }
 
     // Add all runnable CLI commands from docs
     for cmd in cli_docs {
@@ -115,6 +146,7 @@ pub struct GtApp {
     pub mail_screen: MailInboxScreen,
     pub beads_screen: BeadsOverviewScreen,
     pub docs_screen: DocsBrowserScreen,
+    pub rigs_screen: RigsScreen,
     pub tmux_commander: TmuxCommanderScreen,
     pub layout_manager: LayoutManagerScreen,
     // Global UI
@@ -160,6 +192,7 @@ impl GtApp {
             mail_screen: MailInboxScreen::new(),
             beads_screen: BeadsOverviewScreen::new(),
             docs_screen: DocsBrowserScreen::new(cli_docs),
+            rigs_screen: RigsScreen::new(),
             tmux_commander: TmuxCommanderScreen::new(),
             layout_manager,
             spinner_state: SpinnerState::default(),
@@ -180,9 +213,10 @@ impl GtApp {
             "screen-agents" => Some(ActiveScreen::Agents),
             "screen-mail" => Some(ActiveScreen::Mail),
             "screen-beads" => Some(ActiveScreen::Beads),
-            "screen-docs" => Some(ActiveScreen::Docs),
+            "screen-rigs" => Some(ActiveScreen::Rigs),
             "screen-tmux" => Some(ActiveScreen::TmuxCommander),
-            "screen-layouts" => Some(ActiveScreen::LayoutManager),
+            "screen-formulas" => Some(ActiveScreen::Formulas),
+            "screen-docs" => Some(ActiveScreen::Docs),
             _ => None,
         };
         if let Some(s) = screen {
@@ -271,7 +305,7 @@ impl GtApp {
             ActiveScreen::EventFeed => self.event_feed_screen.consumes_text_input(),
             ActiveScreen::Docs => self.docs_screen.consumes_text_input(),
             ActiveScreen::TmuxCommander => self.tmux_commander.consumes_text_input(),
-            ActiveScreen::LayoutManager => self.layout_manager.consumes_text_input(),
+            ActiveScreen::Formulas => self.layout_manager.consumes_text_input(),
             _ => false,
         }
     }
@@ -390,9 +424,10 @@ impl GtApp {
             ActiveScreen::Agents => self.agent_screen.handle_key(&key, &self.all_agents),
             ActiveScreen::Mail => self.mail_screen.handle_key(&key),
             ActiveScreen::Beads => self.beads_screen.handle_key(&key, &self.beads),
-            ActiveScreen::Docs => self.docs_screen.handle_key(&key),
+            ActiveScreen::Rigs => self.rigs_screen.handle_key(&key, &self.status),
             ActiveScreen::TmuxCommander => self.tmux_commander.handle_key(&key),
-            ActiveScreen::LayoutManager => self.layout_manager.handle_key(&key),
+            ActiveScreen::Formulas => self.layout_manager.handle_key(&key),
+            ActiveScreen::Docs => self.docs_screen.handle_key(&key),
         }
     }
 
@@ -458,9 +493,10 @@ impl GtApp {
             ActiveScreen::Agents => self.agent_screen.handle_mouse(&mouse, &self.all_agents),
             ActiveScreen::Mail => self.mail_screen.handle_mouse(&mouse),
             ActiveScreen::Beads => Cmd::None,
-            ActiveScreen::Docs => Cmd::None,
+            ActiveScreen::Rigs => self.rigs_screen.handle_mouse(&mouse),
             ActiveScreen::TmuxCommander => self.tmux_commander.handle_mouse(&mouse),
-            ActiveScreen::LayoutManager => self.layout_manager.handle_mouse(&mouse),
+            ActiveScreen::Formulas => self.layout_manager.handle_mouse(&mouse),
+            ActiveScreen::Docs => Cmd::None,
         }
     }
 
@@ -471,7 +507,9 @@ impl GtApp {
         let mut x = area.x;
         for screen in ActiveScreen::ALL {
             let n = screen.f_key();
-            let label = format!(" {}/F{}\u{00b7}{} ", n, n, screen.label());
+            // Use 0 for F10 (Docs) in the number key display
+            let num_key = if n == 10 { 0 } else { n };
+            let label = format!(" {}/F{}\u{00b7}{} ", num_key, n, screen.label());
             let is_active = *screen == self.active_screen;
             let fg = if is_active {
                 theme::bg::DEEP.into()
@@ -589,7 +627,7 @@ impl Model for GtApp {
                     Ok(msg) => self.event_viewer.push(format!("tmuxrs: {msg}")),
                     Err(e) => self.event_viewer.push(format!("tmuxrs: {action} failed: {e}")),
                 }
-                // Refresh config list after action
+                // Refresh config list + session list after action
                 Cmd::Task(
                     Default::default(),
                     Box::new(|| {
@@ -608,6 +646,7 @@ impl Model for GtApp {
                 self.mail_screen.tick(tick);
                 self.beads_screen.tick(tick);
                 self.docs_screen.tick(tick);
+                self.rigs_screen.tick(tick);
                 self.tmux_commander.tick(tick);
                 self.layout_manager.tick(tick);
                 Cmd::None
@@ -670,14 +709,17 @@ impl Model for GtApp {
             ActiveScreen::Beads => {
                 self.beads_screen.view(frame, outer[2], &self.beads);
             }
-            ActiveScreen::Docs => {
-                self.docs_screen.view(frame, outer[2]);
+            ActiveScreen::Rigs => {
+                self.rigs_screen.view(frame, outer[2], &self.status);
             }
             ActiveScreen::TmuxCommander => {
                 self.tmux_commander.view(frame, outer[2]);
             }
-            ActiveScreen::LayoutManager => {
+            ActiveScreen::Formulas => {
                 self.layout_manager.view(frame, outer[2]);
+            }
+            ActiveScreen::Docs => {
+                self.docs_screen.view(frame, outer[2]);
             }
         }
 
@@ -695,7 +737,7 @@ impl Model for GtApp {
         let keybind_bar = StatusLine::new()
             .style(crate::theme::status_bar_style())
             .separator("  ")
-            .left(StatusItem::key_hint("1-9/F1-F9", "Screen"))
+            .left(StatusItem::key_hint("0-9/F1-F10", "Screen"))
             .left(StatusItem::key_hint("Ctrl+K", "Palette"))
             .center(StatusItem::text(&screen_label))
             .right(StatusItem::key_hint("r", "Refresh"))
@@ -738,7 +780,7 @@ impl Model for GtApp {
         if self.active_screen == ActiveScreen::TmuxCommander {
             subs.push(Box::new(data::TmuxPoller));
         }
-        if self.active_screen == ActiveScreen::LayoutManager {
+        if self.active_screen == ActiveScreen::Formulas {
             subs.push(Box::new(data::TmuxrsConfigPoller));
         }
 

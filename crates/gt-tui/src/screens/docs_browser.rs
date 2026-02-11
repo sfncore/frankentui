@@ -89,6 +89,7 @@ fn fuzzy_score(query: &str, haystack: &str) -> Option<u32> {
 enum Focus {
     Search,
     Results,
+    ArgsInput,
 }
 
 pub struct DocsBrowserScreen {
@@ -99,6 +100,10 @@ pub struct DocsBrowserScreen {
     table_state: RefCell<TableState>,
     selected_detail: Option<usize>, // index into filtered
     last_run_output: Option<String>,
+    /// Pre-filled command for args input mode.
+    args_command: String,
+    /// User-typed arguments in args input mode.
+    args_input: String,
     tick_count: u64,
 }
 
@@ -113,6 +118,8 @@ impl DocsBrowserScreen {
             table_state: RefCell::new(TableState::default()),
             selected_detail: None,
             last_run_output: None,
+            args_command: String::new(),
+            args_input: String::new(),
             tick_count: 0,
         };
         s.refilter();
@@ -174,24 +181,32 @@ impl DocsBrowserScreen {
         self.all_commands.get(cmd_idx)
     }
 
-    fn run_selected_command(&mut self) {
+    /// Enter args input mode for the selected command.
+    fn enter_args_mode(&mut self) {
         let cmd = match self.selected_command() {
             Some(c) => c.clone(),
             None => return,
         };
+        if cmd.is_parent {
+            // For parent commands, just show help
+            self.run_command_with_args(&cmd.cmd, "--help");
+            return;
+        }
+        self.args_command = cmd.cmd.clone();
+        self.args_input.clear();
+        self.focus = Focus::ArgsInput;
+    }
 
-        // Parse the command path: "gt mail send" -> ["gt", "mail", "send"]
-        let parts: Vec<&str> = cmd.cmd.split_whitespace().collect();
+    /// Execute a command with the given args string.
+    fn run_command_with_args(&mut self, base_cmd: &str, args_str: &str) {
+        let parts: Vec<&str> = base_cmd.split_whitespace().collect();
         if parts.is_empty() {
             return;
         }
 
-        // For parent commands, append --help
         let mut args: Vec<&str> = parts[1..].to_vec();
-        if cmd.is_parent || args.is_empty() {
-            args.push("--help");
-        } else {
-            args.push("--help");
+        for arg in args_str.split_whitespace() {
+            args.push(arg);
         }
 
         let result = ProcessCommand::new(parts[0])
@@ -202,27 +217,34 @@ impl DocsBrowserScreen {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                let combined = if stdout.is_empty() {
-                    stderr.to_string()
-                } else {
-                    stdout.to_string()
-                };
+                let mut combined = stdout.to_string();
+                if !stderr.is_empty() {
+                    if !combined.is_empty() {
+                        combined.push('\n');
+                    }
+                    combined.push_str(&stderr);
+                }
+                if combined.is_empty() {
+                    combined = "(no output)".to_string();
+                }
                 self.last_run_output = Some(combined);
             }
             Err(e) => {
                 self.last_run_output = Some(format!("Error: {}", e));
             }
         }
+        self.focus = Focus::Results;
     }
 
     pub fn consumes_text_input(&self) -> bool {
-        self.focus == Focus::Search
+        matches!(self.focus, Focus::Search | Focus::ArgsInput)
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> Cmd<Msg> {
         match self.focus {
             Focus::Search => self.handle_search_key(key),
             Focus::Results => self.handle_results_key(key),
+            Focus::ArgsInput => self.handle_args_key(key),
         }
         Cmd::None
     }
@@ -294,10 +316,33 @@ impl DocsBrowserScreen {
                 }
             }
             (KeyCode::Enter, _) => {
-                self.run_selected_command();
+                self.enter_args_mode();
             }
             (KeyCode::Char('/'), _) => {
                 self.focus = Focus::Search;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_args_key(&mut self, key: &KeyEvent) {
+        match (key.code, key.modifiers) {
+            (KeyCode::Escape, _) => {
+                self.focus = Focus::Results;
+            }
+            (KeyCode::Enter, _) => {
+                let cmd = self.args_command.clone();
+                let args = self.args_input.clone();
+                self.run_command_with_args(&cmd, &args);
+            }
+            (KeyCode::Backspace, _) => {
+                self.args_input.pop();
+            }
+            (KeyCode::Char('c'), m) if m.contains(Modifiers::CTRL) => {
+                // Let global handler deal with Ctrl+C
+            }
+            (KeyCode::Char(c), _) => {
+                self.args_input.push(c);
             }
             _ => {}
         }
@@ -587,7 +632,7 @@ impl DocsBrowserScreen {
                 Style::new().fg(theme::accent::PRIMARY).bold(),
             ),
             Span::styled(
-                "run --help",
+                "run with args",
                 Style::new().fg(theme::fg::MUTED),
             ),
             Span::styled(
@@ -621,12 +666,21 @@ impl DocsBrowserScreen {
             return;
         }
 
-        let main = Flex::vertical()
-            .constraints([
+        let has_args_bar = self.focus == Focus::ArgsInput;
+        let constraints = if has_args_bar {
+            vec![
                 Constraint::Fixed(3),  // Search bar
                 Constraint::Fill,      // Content
-            ])
-            .split(area);
+                Constraint::Fixed(3),  // Args input bar
+            ]
+        } else {
+            vec![
+                Constraint::Fixed(3),  // Search bar
+                Constraint::Fill,      // Content
+            ]
+        };
+
+        let main = Flex::vertical().constraints(constraints).split(area);
 
         self.render_search_bar(frame, main[0]);
 
@@ -639,5 +693,31 @@ impl DocsBrowserScreen {
 
         self.render_results_table(frame, content[0]);
         self.render_detail(frame, content[1]);
+
+        if has_args_bar && main.len() > 2 {
+            self.render_args_bar(frame, main[2]);
+        }
+    }
+
+    fn render_args_bar(&self, frame: &mut Frame, area: Rect) {
+        let title = format!(" {} ", self.args_command);
+        let block = Block::new()
+            .title(title.as_str())
+            .title_alignment(Alignment::Left)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .style(Style::new().fg(theme::accent::PRIMARY));
+
+        let inner = block.inner(area);
+        block.render(area, frame);
+
+        if inner.is_empty() {
+            return;
+        }
+
+        let display = format!("{}\u{2588}", self.args_input);
+        Paragraph::new(display.as_str())
+            .style(Style::new().fg(theme::fg::PRIMARY).bold())
+            .render(inner, frame);
     }
 }
