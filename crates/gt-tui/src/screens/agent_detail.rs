@@ -95,9 +95,9 @@ impl AgentDetailScreen {
             self.action_feedback_ttl = 30;
             return;
         }
-        match self.tmux_pane.activate_session(&agent.session) {
-            ActivateResult::Switched => {
-                self.last_action = Some(format!("\u{2192} {}", agent.session));
+        match self.tmux_pane.link_session(&agent.session) {
+            ActivateResult::Linked | ActivateResult::AlreadyLinked => {
+                self.last_action = Some(format!("linked: {}", agent.session));
                 self.action_feedback_ttl = 40;
             }
             ActivateResult::SameSession => {
@@ -112,6 +112,7 @@ impl AgentDetailScreen {
                 self.last_action = Some(format!("{} not found", agent.session));
                 self.action_feedback_ttl = 30;
             }
+            _ => {}
         }
     }
 
@@ -312,14 +313,27 @@ impl AgentDetailScreen {
 
         lines.push(Line::raw(""));
 
-        // Last switched session
-        if let Some(last) = self.tmux_pane.active_session_name() {
+        // Linked windows count
+        let n = self.tmux_pane.linked_count();
+        if n > 0 {
             lines.push(Line::from_spans([
-                Span::styled("    Last: ", Style::new().fg(theme::fg::MUTED)),
-                Span::styled(last, Style::new().fg(theme::accent::INFO)),
+                Span::styled("  Linked: ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled(
+                    format!("{} window{}", n, if n == 1 { "" } else { "s" }),
+                    Style::new().fg(theme::accent::SUCCESS),
+                ),
             ]));
-            lines.push(Line::raw(""));
         }
+
+        // Peek indicator
+        if let Some(peek) = self.tmux_pane.peek_session_name() {
+            lines.push(Line::from_spans([
+                Span::styled("    Peek: ", Style::new().fg(theme::fg::MUTED)),
+                Span::styled(peek, Style::new().fg(theme::accent::INFO)),
+            ]));
+        }
+
+        lines.push(Line::raw(""));
 
         // Selected agent hint
         if !agents.is_empty() {
@@ -332,28 +346,20 @@ impl AgentDetailScreen {
                     Style::new().fg(theme::fg::DISABLED),
                 ));
             } else {
+                let linked = self.tmux_pane.is_linked(&agent.session);
+                let status = if linked { " (linked)" } else { "" };
                 lines.push(Line::from_spans([
                     Span::styled(
-                        "  Enter/a ",
+                        "  Enter ",
                         Style::new().fg(theme::accent::PRIMARY).bold(),
                     ),
                     Span::styled(
-                        format!("switch \u{2192} "),
+                        format!("link{status} \u{2192} "),
                         Style::new().fg(theme::fg::SECONDARY),
                     ),
                     Span::styled(
                         &agent.session,
                         Style::new().fg(theme::accent::INFO),
-                    ),
-                ]));
-                lines.push(Line::from_spans([
-                    Span::styled(
-                        "          ",
-                        Style::new().fg(theme::fg::MUTED),
-                    ),
-                    Span::styled(
-                        "switch-client -l to return",
-                        Style::new().fg(theme::fg::DISABLED),
                     ),
                 ]));
             }

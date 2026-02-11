@@ -13,7 +13,7 @@ use ftui_widgets::log_viewer::{LogViewer, LogViewerState};
 use crate::data::{ConvoyItem, TownStatus};
 use crate::msg::Msg;
 use crate::panels;
-use crate::tmux_pane::TmuxPaneControl;
+use crate::tmux_pane::{ActivateResult, TmuxPaneControl};
 
 // ---------------------------------------------------------------------------
 // Focus IDs for dashboard panels
@@ -202,12 +202,17 @@ impl DashboardScreen {
                         self.tree_cursor =
                             (self.tree_cursor + 1).min(self.tree_entries.len() - 1);
                     }
+                    self.peek_selected(event_viewer);
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.tree_cursor = self.tree_cursor.saturating_sub(1);
+                    self.peek_selected(event_viewer);
                 }
                 KeyCode::Enter => {
-                    self.switch_selected_tmux(event_viewer);
+                    self.link_selected(event_viewer);
+                }
+                KeyCode::Char('s') => {
+                    self.switch_selected(event_viewer);
                 }
                 _ => {}
             }
@@ -276,7 +281,7 @@ impl DashboardScreen {
                 self.tree_cursor = row_in_panel;
                 self.focus.focus(FOCUS_AGENT_TREE);
 
-                self.switch_selected_tmux(event_viewer);
+                self.peek_selected(event_viewer);
             }
 
             return Cmd::None;
@@ -285,28 +290,75 @@ impl DashboardScreen {
         Cmd::None
     }
 
-    /// Switch tmux client to view the selected agent's session.
-    fn switch_selected_tmux(&mut self, event_viewer: &mut LogViewer) {
-        if let Some(entry) = self.tree_entries.get(self.tree_cursor) {
-            if !entry.running || entry.tmux_session.is_empty() {
-                event_viewer.push(format!("{} is offline", entry.label));
-            } else {
-                let session = entry.tmux_session.clone();
-                match self.tmux_pane.activate_session(&session) {
-                    crate::tmux_pane::ActivateResult::Switched => {
-                        event_viewer.push(format!("→ {session}"));
-                    }
-                    crate::tmux_pane::ActivateResult::SameSession => {
-                        event_viewer.push(format!("{session} (this session)"));
-                    }
-                    crate::tmux_pane::ActivateResult::NoTmux => {
-                        event_viewer.push("Not in tmux".to_string());
-                    }
-                    crate::tmux_pane::ActivateResult::SessionNotFound => {
-                        event_viewer.push(format!("{session} not found"));
-                    }
-                }
+    /// Peek: temp-link the selected agent's window (replaced on next cursor move).
+    fn peek_selected(&mut self, event_viewer: &mut LogViewer) {
+        let entry = match self.tree_entries.get(self.tree_cursor) {
+            Some(e) if e.running && !e.tmux_session.is_empty() => e.clone(),
+            _ => return,
+        };
+        match self.tmux_pane.peek_session(&entry.tmux_session) {
+            ActivateResult::Peeked => {
+                event_viewer.push(format!("peek: {}", entry.tmux_session));
             }
+            ActivateResult::AlreadyPeeked | ActivateResult::AlreadyLinked => {}
+            ActivateResult::SameSession => {
+                event_viewer.push(format!("{} (this session)", entry.tmux_session));
+            }
+            ActivateResult::SessionNotFound => {
+                event_viewer.push(format!("{} not found", entry.tmux_session));
+            }
+            _ => {}
+        }
+    }
+
+    /// Link: permanently keep the selected agent's window in our session.
+    fn link_selected(&mut self, event_viewer: &mut LogViewer) {
+        let entry = match self.tree_entries.get(self.tree_cursor) {
+            Some(e) => e.clone(),
+            None => return,
+        };
+        if !entry.running || entry.tmux_session.is_empty() {
+            event_viewer.push(format!("{} is offline", entry.label));
+            return;
+        }
+        match self.tmux_pane.link_session(&entry.tmux_session) {
+            ActivateResult::Linked => {
+                event_viewer.push(format!("linked: {}", entry.tmux_session));
+            }
+            ActivateResult::AlreadyLinked => {
+                event_viewer.push(format!("already linked: {}", entry.tmux_session));
+            }
+            ActivateResult::SameSession => {
+                event_viewer.push(format!("{} (this session)", entry.tmux_session));
+            }
+            ActivateResult::SessionNotFound => {
+                event_viewer.push(format!("{} not found", entry.tmux_session));
+            }
+            _ => {}
+        }
+    }
+
+    /// Switch: jump into the agent's session entirely.
+    fn switch_selected(&mut self, event_viewer: &mut LogViewer) {
+        let entry = match self.tree_entries.get(self.tree_cursor) {
+            Some(e) => e.clone(),
+            None => return,
+        };
+        if !entry.running || entry.tmux_session.is_empty() {
+            event_viewer.push(format!("{} is offline", entry.label));
+            return;
+        }
+        match self.tmux_pane.switch_session(&entry.tmux_session) {
+            ActivateResult::Switched => {
+                event_viewer.push(format!("→ {}", entry.tmux_session));
+            }
+            ActivateResult::SameSession => {
+                event_viewer.push(format!("{} (this session)", entry.tmux_session));
+            }
+            ActivateResult::SessionNotFound => {
+                event_viewer.push(format!("{} not found", entry.tmux_session));
+            }
+            _ => {}
         }
     }
 
