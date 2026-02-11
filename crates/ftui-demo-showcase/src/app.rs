@@ -788,6 +788,8 @@ pub enum ScreenId {
     AgentDetail,
     /// Mail inbox with message list and reading pane (bd-429p).
     MailInbox,
+    /// Command palette with fuzzy search (bd-s8py).
+    CommandPalette,
 }
 
 impl ScreenId {
@@ -869,6 +871,7 @@ impl ScreenId {
             Self::ConvoyPanel => "ConvoyPanel",
             Self::AgentDetail => "AgentDetail",
             Self::MailInbox => "MailInbox",
+            Self::CommandPalette => "CommandPalette",
         }
     }
 
@@ -1023,6 +1026,8 @@ pub struct ScreenStates {
     pub agent_detail: screens::agent_detail::AgentDetail,
     /// Mail inbox screen state (bd-429p).
     pub mail_inbox: screens::mail_inbox::MailInbox,
+    /// Command palette screen state (bd-s8py).
+    pub command_palette: screens::command_palette::CommandPaletteScreen,
     /// Tracks whether each screen has errored during rendering.
     /// Indexed by `ScreenId::index()`.
     screen_errors: Vec<Option<String>>,
@@ -1080,6 +1085,7 @@ impl Default for ScreenStates {
             convoy_panel: Default::default(),
             agent_detail: Default::default(),
             mail_inbox: Default::default(),
+            command_palette: Default::default(),
             screen_errors: vec![None; screens::screen_registry().len()],
             visual_effects_deterministic_tick_ms: None,
         }
@@ -1335,6 +1341,9 @@ impl ScreenStates {
             ScreenId::MailInbox => {
                 self.mail_inbox.update(event);
             }
+            ScreenId::CommandPalette => {
+                self.command_palette.update(event);
+            }
         }
     }
 
@@ -1421,6 +1430,7 @@ impl ScreenStates {
             ScreenId::ConvoyPanel => self.convoy_panel.tick(tick_count),
             ScreenId::AgentDetail => self.agent_detail.tick(tick_count),
             ScreenId::MailInbox => self.mail_inbox.tick(tick_count),
+            ScreenId::CommandPalette => self.command_palette.tick(tick_count),
         }
     }
 
@@ -1510,6 +1520,7 @@ impl ScreenStates {
                 ScreenId::ConvoyPanel => self.convoy_panel.view(frame, area),
                 ScreenId::AgentDetail => self.agent_detail.view(frame, area),
                 ScreenId::MailInbox => self.mail_inbox.view(frame, area),
+                ScreenId::CommandPalette => self.command_palette.view(frame, area),
             }
         }));
 
@@ -4103,6 +4114,7 @@ impl AppModel {
             ScreenId::ConvoyPanel => self.screens.convoy_panel.keybindings(),
             ScreenId::AgentDetail => self.screens.agent_detail.keybindings(),
             ScreenId::MailInbox => self.screens.mail_inbox.keybindings(),
+            ScreenId::CommandPalette => self.screens.command_palette.keybindings(),
         };
         if self.tour.is_active() {
             entries.push(screens::HelpEntry {

@@ -9,6 +9,7 @@ pub mod accessibility_panel;
 pub mod action_timeline;
 pub mod agent_detail;
 pub mod agent_tree;
+pub mod command_palette;
 pub mod convoy_panel;
 pub mod mail_inbox;
 pub mod advanced_features;
@@ -616,6 +617,16 @@ pub const SCREEN_REGISTRY: &[ScreenMeta] = &[
         category: ScreenCategory::Systems,
         palette_tags: &["mail", "inbox", "messages", "notifications"],
         blurb: "Message list with reading pane, priority icons, and read/unread tracking.",
+        default_hotkey: None,
+        tour_step_hint: None,
+    },
+    ScreenMeta {
+        id: ScreenId::CommandPalette,
+        title: "Command Palette",
+        short_label: "Cmd",
+        category: ScreenCategory::Interaction,
+        palette_tags: &["command", "palette", "fuzzy", "search", "launcher"],
+        blurb: "Ctrl+P action launcher with fuzzy search and categorized commands.",
         default_hotkey: None,
         tour_step_hint: None,
     },
