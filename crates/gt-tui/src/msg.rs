@@ -28,6 +28,8 @@ pub enum Msg {
     TmuxrsActionResult(String, Result<String, String>),
     /// Live tmux session names for layout manager.
     TmuxSessionList(Vec<String>),
+    /// Output from docs browser command execution.
+    DocsOutput(String),
     Tick,
     Noop,
 }

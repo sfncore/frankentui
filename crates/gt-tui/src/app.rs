@@ -838,6 +838,10 @@ impl Model for GtApp {
                     }),
                 )
             }
+            Msg::DocsOutput(output) => {
+                self.docs_screen.set_last_output(output);
+                Cmd::None
+            }
             Msg::Tick => {
                 self.spinner_state.tick();
                 self.spinner_tick = self.spinner_tick.wrapping_add(1);

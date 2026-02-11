@@ -197,43 +197,52 @@ impl DocsBrowserScreen {
         self.focus = Focus::ArgsInput;
     }
 
-    /// Execute a command with the given args string.
-    fn run_command_with_args(&mut self, base_cmd: &str, args_str: &str) {
+    /// Execute a command with the given args string (async via Cmd::Task).
+    fn run_command_with_args(&mut self, base_cmd: &str, args_str: &str) -> Cmd<Msg> {
         let parts: Vec<&str> = base_cmd.split_whitespace().collect();
         if parts.is_empty() {
-            return;
+            return Cmd::None;
         }
 
-        let mut args: Vec<&str> = parts[1..].to_vec();
+        let program = parts[0].to_string();
+        let mut args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
         for arg in args_str.split_whitespace() {
-            args.push(arg);
+            args.push(arg.to_string());
         }
 
-        let result = ProcessCommand::new(parts[0])
-            .args(&args)
-            .output();
-
-        match result {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let mut combined = stdout.to_string();
-                if !stderr.is_empty() {
-                    if !combined.is_empty() {
-                        combined.push('\n');
-                    }
-                    combined.push_str(&stderr);
-                }
-                if combined.is_empty() {
-                    combined = "(no output)".to_string();
-                }
-                self.last_run_output = Some(combined);
-            }
-            Err(e) => {
-                self.last_run_output = Some(format!("Error: {}", e));
-            }
-        }
+        self.last_run_output = Some("Running...".to_string());
         self.focus = Focus::Results;
+
+        Cmd::Task(
+            Default::default(),
+            Box::new(move || {
+                let result = ProcessCommand::new(&program).args(&args).output();
+                let output = match result {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let mut combined = stdout.to_string();
+                        if !stderr.is_empty() {
+                            if !combined.is_empty() {
+                                combined.push('\n');
+                            }
+                            combined.push_str(&stderr);
+                        }
+                        if combined.is_empty() {
+                            "(no output)".to_string()
+                        } else {
+                            combined
+                        }
+                    }
+                    Err(e) => format!("Error: {}", e),
+                };
+                Msg::DocsOutput(output)
+            }),
+        )
+    }
+
+    pub fn set_last_output(&mut self, output: String) {
+        self.last_run_output = Some(output);
     }
 
     pub fn consumes_text_input(&self) -> bool {
@@ -242,11 +251,10 @@ impl DocsBrowserScreen {
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> Cmd<Msg> {
         match self.focus {
-            Focus::Search => self.handle_search_key(key),
-            Focus::Results => self.handle_results_key(key),
+            Focus::Search => { self.handle_search_key(key); Cmd::None }
+            Focus::Results => { self.handle_results_key(key); Cmd::None }
             Focus::ArgsInput => self.handle_args_key(key),
         }
-        Cmd::None
     }
 
     fn handle_search_key(&mut self, key: &KeyEvent) {
@@ -325,7 +333,7 @@ impl DocsBrowserScreen {
         }
     }
 
-    fn handle_args_key(&mut self, key: &KeyEvent) {
+    fn handle_args_key(&mut self, key: &KeyEvent) -> Cmd<Msg> {
         match (key.code, key.modifiers) {
             (KeyCode::Escape, _) => {
                 self.focus = Focus::Results;
@@ -333,7 +341,7 @@ impl DocsBrowserScreen {
             (KeyCode::Enter, _) => {
                 let cmd = self.args_command.clone();
                 let args = self.args_input.clone();
-                self.run_command_with_args(&cmd, &args);
+                return self.run_command_with_args(&cmd, &args);
             }
             (KeyCode::Backspace, _) => {
                 self.args_input.pop();
@@ -346,6 +354,7 @@ impl DocsBrowserScreen {
             }
             _ => {}
         }
+        Cmd::None
     }
 
     pub fn tick(&mut self, tick_count: u64) {
