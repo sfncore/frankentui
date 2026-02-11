@@ -202,6 +202,7 @@ impl TmuxPaneControl {
     // ----- Cleanup -----
 
     /// Unlink all windows we manage (peek + permanent). Call on exit.
+    #[allow(dead_code)]
     pub fn unlink_all(&mut self) {
         self.unlink_peek();
         while let Some((idx, _)) = self.linked.pop() {
@@ -210,6 +211,7 @@ impl TmuxPaneControl {
         }
     }
 
+    #[allow(dead_code)]
     pub fn active_session_name(&self) -> Option<&str> {
         self.active_session.as_deref()
     }

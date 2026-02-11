@@ -77,18 +77,11 @@ pub mod mock {
     use super::*;
     use std::sync::Mutex;
 
-    #[derive(Debug, Clone)]
-    pub struct MockCall {
-        pub args: Vec<String>,
-    }
-
     pub struct MockTmuxExecutor {
         /// Canned responses: pop from front on each `run()` call.
         responses: Mutex<Vec<TmuxResult<String>>>,
         /// Canned ok results: pop from front on each `run_ok()` call.
         ok_responses: Mutex<Vec<bool>>,
-        /// All calls recorded.
-        pub calls: Mutex<Vec<MockCall>>,
     }
 
     impl MockTmuxExecutor {
@@ -96,7 +89,6 @@ pub mod mock {
             Self {
                 responses: Mutex::new(Vec::new()),
                 ok_responses: Mutex::new(Vec::new()),
-                calls: Mutex::new(Vec::new()),
             }
         }
 
@@ -112,23 +104,11 @@ pub mod mock {
                 .unwrap()
                 .push(Err(TmuxError(msg.to_string())));
         }
-
-        /// Queue a result for the next `run_ok()` call.
-        pub fn push_ok(&self, ok: bool) {
-            self.ok_responses.lock().unwrap().push(ok);
-        }
-
-        /// Get all recorded calls.
-        pub fn get_calls(&self) -> Vec<MockCall> {
-            self.calls.lock().unwrap().clone()
-        }
     }
 
     impl TmuxExecutor for MockTmuxExecutor {
         fn run(&self, args: &[&str]) -> TmuxResult<String> {
-            self.calls.lock().unwrap().push(MockCall {
-                args: args.iter().map(|s| s.to_string()).collect(),
-            });
+            let _ = args; // recorded if needed in future
             let mut responses = self.responses.lock().unwrap();
             if responses.is_empty() {
                 Err(TmuxError("mock: no response queued".into()))
@@ -138,9 +118,7 @@ pub mod mock {
         }
 
         fn run_ok(&self, args: &[&str]) -> bool {
-            self.calls.lock().unwrap().push(MockCall {
-                args: args.iter().map(|s| s.to_string()).collect(),
-            });
+            let _ = args;
             let mut ok_responses = self.ok_responses.lock().unwrap();
             if ok_responses.is_empty() {
                 false
@@ -160,6 +138,7 @@ pub struct TmuxClient {
     exec: Box<dyn TmuxExecutor>,
 }
 
+#[allow(dead_code)]
 impl TmuxClient {
     pub fn new(exec: Box<dyn TmuxExecutor>) -> Self {
         Self { exec }

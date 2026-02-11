@@ -64,6 +64,7 @@ pub struct PaneConfig {
     pub size: Option<u32>,
 }
 
+#[allow(dead_code)]
 impl PaneConfig {
     /// Create a PaneConfig from a simple command string.
     pub fn from_command(cmd: &str) -> Self {
@@ -108,6 +109,7 @@ impl PaneConfig {
     }
 }
 
+#[allow(dead_code)]
 impl TmuxrsConfig {
     /// Generate skeleton YAML content for a new config.
     pub fn skeleton_yaml(name: &str) -> String {
@@ -130,6 +132,7 @@ windows:
     }
 }
 
+#[allow(dead_code)]
 impl TmuxrsWindow {
     /// Legacy accessor: pane commands as strings (for backward compat).
     pub fn pane_strings(&self) -> Vec<String> {
@@ -163,6 +166,7 @@ pub struct LayoutSlot {
     pub default_commands: Vec<String>,
 }
 
+#[allow(dead_code)]
 impl Layout {
     /// Convert a parsed TmuxrsConfig into a pure-geometry Layout.
     /// Session references in panes are stripped — only commands are kept as defaults.
@@ -197,6 +201,7 @@ impl Layout {
     }
 }
 
+#[allow(dead_code)]
 impl LayoutSlot {
     /// Create a simple slot with just a label and pane count.
     pub fn new(label: impl Into<String>, pane_count: usize) -> Self {
