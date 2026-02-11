@@ -790,6 +790,8 @@ pub enum ScreenId {
     MailInbox,
     /// Command palette with fuzzy search (bd-s8py).
     CommandPalette,
+    /// Toast event notifications (bd-1smd).
+    ToastEvents,
 }
 
 impl ScreenId {
@@ -872,6 +874,7 @@ impl ScreenId {
             Self::AgentDetail => "AgentDetail",
             Self::MailInbox => "MailInbox",
             Self::CommandPalette => "CommandPalette",
+            Self::ToastEvents => "ToastEvents",
         }
     }
 
@@ -1028,6 +1031,8 @@ pub struct ScreenStates {
     pub mail_inbox: screens::mail_inbox::MailInbox,
     /// Command palette screen state (bd-s8py).
     pub command_palette: screens::command_palette::CommandPaletteScreen,
+    /// Toast events screen state (bd-1smd).
+    pub toast_events: screens::toast_events::ToastEventsScreen,
     /// Tracks whether each screen has errored during rendering.
     /// Indexed by `ScreenId::index()`.
     screen_errors: Vec<Option<String>>,
@@ -1086,6 +1091,7 @@ impl Default for ScreenStates {
             agent_detail: Default::default(),
             mail_inbox: Default::default(),
             command_palette: Default::default(),
+            toast_events: Default::default(),
             screen_errors: vec![None; screens::screen_registry().len()],
             visual_effects_deterministic_tick_ms: None,
         }
@@ -1344,6 +1350,9 @@ impl ScreenStates {
             ScreenId::CommandPalette => {
                 self.command_palette.update(event);
             }
+            ScreenId::ToastEvents => {
+                self.toast_events.update(event);
+            }
         }
     }
 
@@ -1431,6 +1440,7 @@ impl ScreenStates {
             ScreenId::AgentDetail => self.agent_detail.tick(tick_count),
             ScreenId::MailInbox => self.mail_inbox.tick(tick_count),
             ScreenId::CommandPalette => self.command_palette.tick(tick_count),
+            ScreenId::ToastEvents => self.toast_events.tick(tick_count),
         }
     }
 
@@ -1521,6 +1531,7 @@ impl ScreenStates {
                 ScreenId::AgentDetail => self.agent_detail.view(frame, area),
                 ScreenId::MailInbox => self.mail_inbox.view(frame, area),
                 ScreenId::CommandPalette => self.command_palette.view(frame, area),
+                ScreenId::ToastEvents => self.toast_events.view(frame, area),
             }
         }));
 
@@ -4115,6 +4126,7 @@ impl AppModel {
             ScreenId::AgentDetail => self.screens.agent_detail.keybindings(),
             ScreenId::MailInbox => self.screens.mail_inbox.keybindings(),
             ScreenId::CommandPalette => self.screens.command_palette.keybindings(),
+            ScreenId::ToastEvents => self.screens.toast_events.keybindings(),
         };
         if self.tour.is_active() {
             entries.push(screens::HelpEntry {

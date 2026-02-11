@@ -12,6 +12,7 @@ pub mod agent_tree;
 pub mod command_palette;
 pub mod convoy_panel;
 pub mod mail_inbox;
+pub mod toast_events;
 pub mod advanced_features;
 pub mod advanced_text_editor;
 pub mod async_tasks;
@@ -627,6 +628,16 @@ pub const SCREEN_REGISTRY: &[ScreenMeta] = &[
         category: ScreenCategory::Interaction,
         palette_tags: &["command", "palette", "fuzzy", "search", "launcher"],
         blurb: "Ctrl+P action launcher with fuzzy search and categorized commands.",
+        default_hotkey: None,
+        tour_step_hint: None,
+    },
+    ScreenMeta {
+        id: ScreenId::ToastEvents,
+        title: "Toast Events",
+        short_label: "Toasts",
+        category: ScreenCategory::Systems,
+        palette_tags: &["toast", "notifications", "events", "alerts"],
+        blurb: "Toast notification overlays for Gas Town event alerts.",
         default_hotkey: None,
         tour_step_hint: None,
     },

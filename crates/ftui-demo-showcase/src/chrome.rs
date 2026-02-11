@@ -1339,6 +1339,7 @@ pub fn accent_for(id: ScreenId) -> theme::ColorToken {
         ScreenId::AgentDetail => theme::screen_accent::ADVANCED,
         ScreenId::MailInbox => theme::screen_accent::ADVANCED,
         ScreenId::CommandPalette => theme::screen_accent::ADVANCED,
+        ScreenId::ToastEvents => theme::screen_accent::ADVANCED,
     }
 }
 
