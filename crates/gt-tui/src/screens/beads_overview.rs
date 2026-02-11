@@ -377,29 +377,58 @@ impl BeadsOverviewScreen {
     }
 
     pub fn handle_mouse(&mut self, mouse: &MouseEvent, beads: &BeadsSnapshot) -> Cmd<Msg> {
-        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-            return Cmd::None;
-        }
         let areas = *self.section_areas.borrow();
-        // Check which section was clicked
-        let clicked_section = if areas[0].contains(mouse.x, mouse.y) {
-            Some((Section::Ready, &areas[0]))
+
+        let hovered_section = if areas[0].contains(mouse.x, mouse.y) {
+            Some(Section::Ready)
         } else if areas[1].contains(mouse.x, mouse.y) {
-            Some((Section::InProgress, &areas[1]))
+            Some(Section::InProgress)
         } else if areas[2].contains(mouse.x, mouse.y) {
-            Some((Section::Blocked, &areas[2]))
+            Some(Section::Blocked)
         } else {
             None
         };
 
-        if let Some((section, area)) = clicked_section {
-            self.active_section = section;
-            // Map click row to item (border=1, header=1 → offset 2)
-            let row = (mouse.y - area.y).saturating_sub(2) as usize;
-            let items = section.items_from(beads);
-            if row < items.len() {
-                self.active_table_state().borrow_mut().select(Some(row));
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(section) = hovered_section {
+                    self.active_section = section;
+                    let area = match section {
+                        Section::Ready => &areas[0],
+                        Section::InProgress => &areas[1],
+                        Section::Blocked => &areas[2],
+                    };
+                    let row = (mouse.y - area.y).saturating_sub(2) as usize;
+                    let items = section.items_from(beads);
+                    if row < items.len() {
+                        self.active_table_state().borrow_mut().select(Some(row));
+                    }
+                }
             }
+            MouseEventKind::ScrollUp => {
+                if hovered_section.is_some() {
+                    let mut state = self.active_table_state().borrow_mut();
+                    if let Some(sel) = state.selected {
+                        if sel > 0 {
+                            state.select(Some(sel - 1));
+                        }
+                    }
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if hovered_section.is_some() {
+                    let row_count = self.active_section.items_from(beads).len();
+                    let mut state = self.active_table_state().borrow_mut();
+                    if let Some(sel) = state.selected {
+                        if sel + 1 < row_count {
+                            state.select(Some(sel + 1));
+                        }
+                    } else if row_count > 0 {
+                        state.select(Some(0));
+                    }
+                }
+            }
+            _ => {}
         }
         Cmd::None
     }

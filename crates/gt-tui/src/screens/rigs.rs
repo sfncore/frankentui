@@ -224,22 +224,41 @@ impl RigsScreen {
     }
 
     pub fn handle_mouse(&mut self, mouse: &MouseEvent, status: &TownStatus) -> Cmd<Msg> {
-        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-            return Cmd::None;
-        }
         let list = *self.list_area.borrow();
         let detail = *self.detail_area.borrow();
 
-        if list.contains(mouse.x, mouse.y) {
-            // Click in rig list — select rig (account for 1-row border)
-            let row = (mouse.y - list.y).saturating_sub(1) as usize;
-            if row < status.rigs.len() {
-                self.selected_rig = row;
-                self.selected_action = 0;
-                self.focus = Focus::List;
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if list.contains(mouse.x, mouse.y) {
+                    let row = (mouse.y - list.y).saturating_sub(1) as usize;
+                    if row < status.rigs.len() {
+                        self.selected_rig = row;
+                        self.selected_action = 0;
+                        self.focus = Focus::List;
+                    }
+                } else if detail.contains(mouse.x, mouse.y) {
+                    self.focus = Focus::Detail;
+                }
             }
-        } else if detail.contains(mouse.x, mouse.y) {
-            self.focus = Focus::Detail;
+            MouseEventKind::ScrollUp => {
+                if list.contains(mouse.x, mouse.y) {
+                    self.selected_rig = self.selected_rig.saturating_sub(1);
+                } else if detail.contains(mouse.x, mouse.y) && self.focus == Focus::Detail {
+                    self.selected_action = self.selected_action.saturating_sub(1);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if list.contains(mouse.x, mouse.y) {
+                    let max = status.rigs.len().saturating_sub(1);
+                    self.selected_rig = (self.selected_rig + 1).min(max);
+                } else if detail.contains(mouse.x, mouse.y) && self.focus == Focus::Detail {
+                    let rig = status.rigs.get(self.selected_rig);
+                    let action_count = rig.map(|r| rig_actions(r).len()).unwrap_or(0);
+                    let max = action_count.saturating_sub(1);
+                    self.selected_action = (self.selected_action + 1).min(max);
+                }
+            }
+            _ => {}
         }
         Cmd::None
     }

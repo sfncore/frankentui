@@ -352,18 +352,33 @@ impl TmuxCommanderScreen {
     }
 
     pub fn handle_mouse(&mut self, mouse: &MouseEvent) -> Cmd<Msg> {
-        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-            return Cmd::None;
-        }
         let tree = *self.tree_area.borrow();
-        if tree.contains(mouse.x, mouse.y) {
-            // Click in tree — select node (border=1 offset)
-            let row = (mouse.y - tree.y).saturating_sub(1) as usize;
-            let total = self.total_visible_rows();
-            if row < total {
-                self.tree_cursor = row;
-                self.focus = Focus::Tree;
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if tree.contains(mouse.x, mouse.y) {
+                    let row = (mouse.y - tree.y).saturating_sub(1) as usize;
+                    let total = self.total_visible_rows();
+                    if row < total {
+                        self.tree_cursor = row;
+                        self.focus = Focus::Tree;
+                    }
+                }
             }
+            MouseEventKind::ScrollUp => {
+                if tree.contains(mouse.x, mouse.y) {
+                    self.tree_cursor = self.tree_cursor.saturating_sub(1);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if tree.contains(mouse.x, mouse.y) {
+                    let total = self.total_visible_rows();
+                    if total > 0 {
+                        self.tree_cursor = (self.tree_cursor + 1).min(total - 1);
+                    }
+                }
+            }
+            _ => {}
         }
         Cmd::None
     }
