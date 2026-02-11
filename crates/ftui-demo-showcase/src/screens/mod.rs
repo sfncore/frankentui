@@ -8,6 +8,7 @@
 pub mod accessibility_panel;
 pub mod action_timeline;
 pub mod agent_tree;
+pub mod convoy_panel;
 pub mod advanced_features;
 pub mod advanced_text_editor;
 pub mod async_tasks;
@@ -572,6 +573,16 @@ pub const SCREEN_REGISTRY: &[ScreenMeta] = &[
         category: ScreenCategory::Systems,
         palette_tags: &["agents", "tree", "hierarchy", "gas-town"],
         blurb: "Gas Town agent hierarchy with Tree widget and status indicators.",
+        default_hotkey: None,
+        tour_step_hint: None,
+    },
+    ScreenMeta {
+        id: ScreenId::ConvoyPanel,
+        title: "Convoy Panel",
+        short_label: "Convoys",
+        category: ScreenCategory::Systems,
+        palette_tags: &["convoy", "table", "progress", "status"],
+        blurb: "Table-based convoy panel with progress columns and detail view.",
         default_hotkey: None,
         tour_step_hint: None,
     },

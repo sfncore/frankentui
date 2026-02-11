@@ -780,6 +780,8 @@ pub enum ScreenId {
     MarkdownLiveEditor,
     /// Agent tree hierarchy display (bd-y8lc).
     AgentTree,
+    /// Convoy panel with table widget and progress columns (bd-y6oc).
+    ConvoyPanel,
 }
 
 impl ScreenId {
@@ -857,6 +859,7 @@ impl ScreenId {
             Self::KanbanBoard => "KanbanBoard",
             Self::MarkdownLiveEditor => "MarkdownLiveEditor",
             Self::AgentTree => "AgentTree",
+            Self::ConvoyPanel => "ConvoyPanel",
         }
     }
 
@@ -1003,6 +1006,8 @@ pub struct ScreenStates {
     pub markdown_live_editor: screens::markdown_live_editor::MarkdownLiveEditor,
     /// Agent tree screen state (bd-y8lc).
     pub agent_tree: screens::agent_tree::AgentTree,
+    /// Convoy panel screen state (bd-y6oc).
+    pub convoy_panel: screens::convoy_panel::ConvoyPanel,
     /// Tracks whether each screen has errored during rendering.
     /// Indexed by `ScreenId::index()`.
     screen_errors: Vec<Option<String>>,
@@ -1056,6 +1061,7 @@ impl Default for ScreenStates {
             kanban_board: Default::default(),
             markdown_live_editor: Default::default(),
             agent_tree: Default::default(),
+            convoy_panel: Default::default(),
             screen_errors: vec![None; screens::screen_registry().len()],
             visual_effects_deterministic_tick_ms: None,
         }
@@ -1299,6 +1305,9 @@ impl ScreenStates {
             ScreenId::AgentTree => {
                 self.agent_tree.update(event);
             }
+            ScreenId::ConvoyPanel => {
+                self.convoy_panel.update(event);
+            }
         }
     }
 
@@ -1380,6 +1389,7 @@ impl ScreenStates {
             ScreenId::KanbanBoard => self.kanban_board.tick(tick_count),
             ScreenId::MarkdownLiveEditor => self.markdown_live_editor.tick(tick_count),
             ScreenId::AgentTree => self.agent_tree.tick(tick_count),
+            ScreenId::ConvoyPanel => self.convoy_panel.tick(tick_count),
         }
     }
 
@@ -1465,6 +1475,7 @@ impl ScreenStates {
                 ScreenId::KanbanBoard => self.kanban_board.view(frame, area),
                 ScreenId::MarkdownLiveEditor => self.markdown_live_editor.view(frame, area),
                 ScreenId::AgentTree => self.agent_tree.view(frame, area),
+                ScreenId::ConvoyPanel => self.convoy_panel.view(frame, area),
             }
         }));
 
@@ -4054,6 +4065,7 @@ impl AppModel {
             ScreenId::KanbanBoard => self.screens.kanban_board.keybindings(),
             ScreenId::MarkdownLiveEditor => self.screens.markdown_live_editor.keybindings(),
             ScreenId::AgentTree => self.screens.agent_tree.keybindings(),
+            ScreenId::ConvoyPanel => self.screens.convoy_panel.keybindings(),
         };
         if self.tour.is_active() {
             entries.push(screens::HelpEntry {
