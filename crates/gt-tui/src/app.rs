@@ -764,7 +764,7 @@ impl Model for GtApp {
                 Cmd::None
             }
             Msg::CommandOutput(cmd, output) => {
-                // Push each line of output to the event viewer
+                // Push to dashboard event viewer
                 for line in output.lines().take(50) {
                     self.event_viewer.push(line);
                 }
@@ -774,6 +774,20 @@ impl Model for GtApp {
                 }
                 self.event_viewer
                     .push(format!("--- {} done ---", cmd));
+
+                // Also push to Event Feed screen as a real event
+                let truncated = if output.len() > 200 {
+                    format!("{}...", &output[..200])
+                } else {
+                    output.clone()
+                };
+                let event = data::GtEvent {
+                    timestamp: String::new(),
+                    event_type: "command".to_string(),
+                    actor: "gt-tui".to_string(),
+                    message: format!("$ {} → {}", cmd, truncated.replace('\n', " ")),
+                };
+                self.event_feed_screen.push_real_event(&event);
                 Cmd::None
             }
             Msg::SwitchScreen(screen) => {
@@ -787,10 +801,18 @@ impl Model for GtApp {
                 Cmd::None
             }
             Msg::TmuxActionResult(action, result) => {
-                match result {
-                    Ok(()) => self.event_viewer.push(format!("tmux: {action} ok")),
-                    Err(ref e) => self.event_viewer.push(format!("tmux: {action} failed: {e}")),
-                }
+                let msg = match &result {
+                    Ok(()) => format!("tmux: {action} ok"),
+                    Err(e) => format!("tmux: {action} failed: {e}"),
+                };
+                self.event_viewer.push(msg.clone());
+                let event = data::GtEvent {
+                    timestamp: String::new(),
+                    event_type: if result.is_ok() { "status" } else { "error" }.to_string(),
+                    actor: "tmux".to_string(),
+                    message: msg,
+                };
+                self.event_feed_screen.push_real_event(&event);
                 // Trigger refresh after action
                 crate::tmux::actions::fetch_snapshot()
             }
