@@ -189,22 +189,52 @@ impl GtApp {
             ]);
         }
 
-        // Run any gt/bd command asynchronously
+        // CLI command selected — pre-fill the query so user can add args.
+        // User hits Enter again to execute (intercepted above).
         if id.starts_with("gt ") || id.starts_with("bd ") {
-            let cmd_str = id.to_string();
-            self.event_viewer.push(format!("$ {cmd_str}"));
-            return Cmd::Task(
-                Default::default(),
-                Box::new(move || {
-                    let output = data::run_cli_command(&cmd_str);
-                    Msg::CommandOutput(cmd_str, output)
-                }),
-            );
+            let prefill = format!("{} ", id);
+            self.palette.set_query(&prefill);
+            self.palette.open();
+            return Cmd::None;
         }
 
         self.event_viewer
             .push(format!("Unknown action: {id}"));
         Cmd::None
+    }
+
+    /// Execute a raw command string from the palette input (with user-supplied args).
+    fn execute_raw_command(&mut self, cmd: &str) -> Cmd<Msg> {
+        let cmd = cmd.trim().to_string();
+        if cmd.is_empty() {
+            return Cmd::None;
+        }
+
+        // Special: gt status triggers the full refresh cycle
+        if cmd == "gt status" || cmd == "gt status --json" {
+            self.last_refresh = Instant::now();
+            self.event_viewer.push("Refreshing status...");
+            return Cmd::Batch(vec![
+                Cmd::Task(
+                    Default::default(),
+                    Box::new(|| Msg::StatusRefresh(data::fetch_status())),
+                ),
+                Cmd::Task(
+                    Default::default(),
+                    Box::new(|| Msg::ConvoyRefresh(data::fetch_convoys())),
+                ),
+            ]);
+        }
+
+        self.event_viewer.push(format!("$ {cmd}"));
+        let cmd_owned = cmd.clone();
+        Cmd::Task(
+            Default::default(),
+            Box::new(move || {
+                let output = data::run_cli_command(&cmd_owned);
+                Msg::CommandOutput(cmd_owned, output)
+            }),
+        )
     }
 
     /// Collect all agents from top-level and per-rig into a flat list.
@@ -232,6 +262,15 @@ impl GtApp {
 
         // When palette is open, route all input through it first
         if self.palette.is_visible() {
+            // Intercept Enter when query is a raw command (user typed args)
+            if key.code == KeyCode::Enter {
+                let q = self.palette.query().to_string();
+                if q.starts_with("gt ") || q.starts_with("bd ") {
+                    self.palette.close();
+                    return self.execute_raw_command(&q);
+                }
+            }
+
             let event = Event::Key(key);
             if let Some(action) = self.palette.handle_event(&event) {
                 return match action {
