@@ -8,3 +8,4 @@ pub mod layout_manager;
 pub mod mail_inbox;
 pub mod rigs;
 pub mod tmux_commander;
+pub mod workflows;

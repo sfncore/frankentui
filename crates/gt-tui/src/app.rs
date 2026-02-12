@@ -16,7 +16,7 @@ use ftui_widgets::spinner::SpinnerState;
 use ftui_widgets::status_line::{StatusItem, StatusLine};
 use ftui_widgets::Widget;
 
-use crate::data::{self, AgentInfo, BeadsSnapshot, CliCommand, ConvoyItem, TownStatus};
+use crate::data::{self, AgentInfo, BeadsSnapshot, CliCommand, ConvoyItem, FormulaItem, TownStatus};
 use crate::msg::Msg;
 use crate::panels;
 use crate::screen::ActiveScreen;
@@ -30,6 +30,7 @@ use crate::screens::layout_manager::LayoutManagerScreen;
 use crate::screens::mail_inbox::MailInboxScreen;
 use crate::screens::rigs::RigsScreen;
 use crate::screens::tmux_commander::TmuxCommanderScreen;
+use crate::screens::workflows::WorkflowsScreen;
 
 /// Build the Gas Town action items for the command palette.
 ///
@@ -73,6 +74,10 @@ fn gas_town_actions(cli_docs: &[CliCommand]) -> Vec<ActionItem> {
         ActionItem::new("screen-formulas", "Layouts")
             .with_description("Manage tmuxrs layouts (F9)")
             .with_tags(&["screen", "formulas", "layouts", "tmuxrs", "config"])
+            .with_category("Navigation"),
+        ActionItem::new("screen-workflows", "Workflows")
+            .with_description("Browse GT workflow formulas")
+            .with_tags(&["screen", "workflows", "formulas", "molecules"])
             .with_category("Navigation"),
         ActionItem::new("screen-docs", "CLI Docs Browser")
             .with_description("Search and browse gt CLI reference (F10/0)")
@@ -316,6 +321,8 @@ pub struct GtApp {
     pub rigs_screen: RigsScreen,
     pub tmux_commander: TmuxCommanderScreen,
     pub layout_manager: LayoutManagerScreen,
+    pub workflows_screen: WorkflowsScreen,
+    pub formulas: Vec<FormulaItem>,
     // Global UI
     pub spinner_state: SpinnerState,
     pub spinner_tick: u32,
@@ -364,6 +371,8 @@ impl GtApp {
             rigs_screen: RigsScreen::new(),
             tmux_commander: TmuxCommanderScreen::new(),
             layout_manager,
+            workflows_screen: WorkflowsScreen::new(),
+            formulas: Vec::new(),
             spinner_state: SpinnerState::default(),
             spinner_tick: 0,
             last_refresh: Instant::now(),
@@ -386,6 +395,7 @@ impl GtApp {
             "screen-rigs" => Some(ActiveScreen::Rigs),
             "screen-tmux" => Some(ActiveScreen::TmuxCommander),
             "screen-formulas" => Some(ActiveScreen::Formulas),
+            "screen-workflows" => Some(ActiveScreen::Workflows),
             "screen-docs" => Some(ActiveScreen::Docs),
             _ => None,
         };
@@ -476,6 +486,7 @@ impl GtApp {
             ActiveScreen::Docs => self.docs_screen.consumes_text_input(),
             ActiveScreen::TmuxCommander => self.tmux_commander.consumes_text_input(),
             ActiveScreen::Formulas => self.layout_manager.consumes_text_input(),
+            ActiveScreen::Workflows => false,
             _ => false,
         }
     }
@@ -597,6 +608,7 @@ impl GtApp {
             ActiveScreen::Rigs => self.rigs_screen.handle_key(&key, &self.status),
             ActiveScreen::TmuxCommander => self.tmux_commander.handle_key(&key),
             ActiveScreen::Formulas => self.layout_manager.handle_key(&key),
+            ActiveScreen::Workflows => self.workflows_screen.handle_key(&key, &self.formulas),
             ActiveScreen::Docs => self.docs_screen.handle_key(&key),
         }
     }
@@ -675,6 +687,7 @@ impl GtApp {
             ActiveScreen::Rigs => self.rigs_screen.handle_mouse(&mouse, &self.status),
             ActiveScreen::TmuxCommander => self.tmux_commander.handle_mouse(&mouse),
             ActiveScreen::Formulas => self.layout_manager.handle_mouse(&mouse),
+            ActiveScreen::Workflows => self.workflows_screen.handle_mouse(&mouse, &self.formulas),
             ActiveScreen::Docs => Cmd::None,
         }
     }
@@ -687,9 +700,13 @@ impl GtApp {
         let mut x = area.x;
         for screen in ActiveScreen::ALL {
             let n = screen.f_key();
-            // Use 0 for F10 (Docs) in the number key display
-            let num_key = if n == 10 { 0 } else { n };
-            let label = format!(" {}/F{}\u{00b7}{} ", num_key, n, screen.label());
+            // Screens with f_key > 10 have no physical key binding
+            let label = if n <= 10 {
+                let num_key = if n == 10 { 0 } else { n };
+                format!(" {}/F{}\u{00b7}{} ", num_key, n, screen.label())
+            } else {
+                format!(" \u{00b7}{} ", screen.label())
+            };
             let is_active = *screen == self.active_screen;
             let fg = if is_active {
                 theme::bg::DEEP.into()
@@ -738,6 +755,10 @@ impl Model for GtApp {
             Cmd::Task(
                 Default::default(),
                 Box::new(|| Msg::BeadsRefresh(data::fetch_beads())),
+            ),
+            Cmd::Task(
+                Default::default(),
+                Box::new(|| Msg::FormulasRefresh(data::fetch_formulas())),
             ),
         ])
     }
@@ -856,6 +877,14 @@ impl Model for GtApp {
                     }),
                 )
             }
+            Msg::FormulasRefresh(f) => {
+                self.formulas = f;
+                Cmd::None
+            }
+            Msg::FormulaDetailLoaded(d) => {
+                self.workflows_screen.set_detail(d);
+                Cmd::None
+            }
             Msg::DocsOutput(output) => {
                 self.docs_screen.set_last_output(output);
                 Cmd::None
@@ -873,6 +902,7 @@ impl Model for GtApp {
                 self.rigs_screen.tick(tick);
                 self.tmux_commander.tick(tick);
                 self.layout_manager.tick(tick);
+                self.workflows_screen.tick(tick);
                 Cmd::None
             }
             Msg::Noop => Cmd::None,
@@ -942,6 +972,9 @@ impl Model for GtApp {
             ActiveScreen::Formulas => {
                 self.layout_manager.view(frame, outer[2]);
             }
+            ActiveScreen::Workflows => {
+                self.workflows_screen.view(frame, outer[2], &self.formulas);
+            }
             ActiveScreen::Docs => {
                 self.docs_screen.view(frame, outer[2]);
             }
@@ -1002,6 +1035,9 @@ impl Model for GtApp {
         ];
 
         // Conditional pollers — only active on their screens
+        if self.active_screen == ActiveScreen::Workflows {
+            subs.push(Box::new(data::FormulaPoller));
+        }
         if self.active_screen == ActiveScreen::TmuxCommander {
             subs.push(Box::new(data::TmuxPoller));
         }

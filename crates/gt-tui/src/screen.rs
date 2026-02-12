@@ -10,6 +10,7 @@ pub enum ActiveScreen {
     Rigs,
     TmuxCommander,
     Formulas,
+    Workflows,
     Docs,
 }
 
@@ -24,6 +25,7 @@ impl ActiveScreen {
         Self::Rigs,
         Self::TmuxCommander,
         Self::Formulas,
+        Self::Workflows,
         Self::Docs,
     ];
 
@@ -38,6 +40,7 @@ impl ActiveScreen {
             Self::Rigs => "Rigs",
             Self::TmuxCommander => "Tmux",
             Self::Formulas => "Layouts",
+            Self::Workflows => "Workflows",
             Self::Docs => "Docs",
         }
     }
@@ -53,6 +56,7 @@ impl ActiveScreen {
             Self::Rigs => 7,
             Self::TmuxCommander => 8,
             Self::Formulas => 9,
+            Self::Workflows => 11,
             Self::Docs => 10,
         }
     }
@@ -69,6 +73,7 @@ impl ActiveScreen {
             8 => Some(Self::TmuxCommander),
             9 => Some(Self::Formulas),
             10 => Some(Self::Docs),
+            // 11 = Workflows (no physical F11 key, accessible via tab/palette)
             _ => None,
         }
     }
@@ -99,7 +104,8 @@ impl ActiveScreen {
             Self::Beads => Self::Rigs,
             Self::Rigs => Self::TmuxCommander,
             Self::TmuxCommander => Self::Formulas,
-            Self::Formulas => Self::Docs,
+            Self::Formulas => Self::Workflows,
+            Self::Workflows => Self::Docs,
             Self::Docs => Self::Dashboard,
         }
     }
@@ -115,7 +121,8 @@ impl ActiveScreen {
             Self::Rigs => Self::Beads,
             Self::TmuxCommander => Self::Rigs,
             Self::Formulas => Self::TmuxCommander,
-            Self::Docs => Self::Formulas,
+            Self::Workflows => Self::Formulas,
+            Self::Docs => Self::Workflows,
         }
     }
 }

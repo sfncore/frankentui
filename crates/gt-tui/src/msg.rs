@@ -1,6 +1,6 @@
 use ftui_core::event::{Event, KeyEvent, MouseEvent};
 
-use crate::data::{BeadsSnapshot, ConvoyItem, GtEvent, MailMessage, TownStatus};
+use crate::data::{BeadsSnapshot, ConvoyItem, FormulaDetail, FormulaItem, GtEvent, MailMessage, TownStatus};
 use crate::screen::ActiveScreen;
 use crate::tmux::TmuxSnapshot;
 use crate::tmuxrs::TmuxrsConfig;
@@ -30,6 +30,10 @@ pub enum Msg {
     TmuxSessionList(Vec<String>),
     /// Output from docs browser command execution.
     DocsOutput(String),
+    /// Formula list refresh from FormulaPoller.
+    FormulasRefresh(Vec<FormulaItem>),
+    /// Formula detail loaded async.
+    FormulaDetailLoaded(FormulaDetail),
     Tick,
     Noop,
 }
