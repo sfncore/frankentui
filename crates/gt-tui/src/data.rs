@@ -326,6 +326,42 @@ fn run_gt(args: &[&str]) -> Option<String> {
     }
 }
 
+/// Query carapace-bin for shell completions.
+///
+/// `cmd_words` is the command line split into words, e.g. `["gt", "sling", ""]`.
+/// The last element is the partial word being completed (empty string = fresh position).
+/// Returns parsed completions, or empty vec if carapace is not available.
+pub fn carapace_complete(cmd_words: &[&str]) -> Vec<CarapaceCompletion> {
+    if cmd_words.is_empty() {
+        return Vec::new();
+    }
+    let tool = cmd_words[0];
+    // carapace <tool> nushell <word0> <word1> ... <current-word>
+    let result = Command::new("carapace")
+        .args(&[tool, "nushell"])
+        .args(cmd_words)
+        .output();
+    match result {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            serde_json::from_str::<Vec<CarapaceCompletion>>(stdout.trim()).unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// A single completion candidate from carapace nushell output.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct CarapaceCompletion {
+    pub value: String,
+    #[serde(default)]
+    pub display: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub style: String,
+}
+
 /// Run a CLI command string like "gt status" or "bd ready".
 /// Returns the output (stdout, or stderr on failure, or error message).
 pub fn run_cli_command(cmd: &str) -> String {

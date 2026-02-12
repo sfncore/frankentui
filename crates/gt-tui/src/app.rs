@@ -16,7 +16,7 @@ use ftui_widgets::spinner::SpinnerState;
 use ftui_widgets::status_line::{StatusItem, StatusLine};
 use ftui_widgets::Widget;
 
-use crate::data::{self, AgentInfo, BeadsSnapshot, CliCommand, ConvoyItem, FormulaItem, TownStatus, parse_positional_args};
+use crate::data::{self, AgentInfo, BeadsSnapshot, CliCommand, ConvoyItem, FormulaItem, TownStatus, parse_positional_args, carapace_complete};
 use crate::msg::Msg;
 use crate::panels;
 use crate::screen::ActiveScreen;
@@ -121,6 +121,9 @@ fn infer_completion_source(arg_name: &str, cmd: &str) -> CompletionSource {
         }
         if cmd.contains("nudge") || cmd.contains("crew") {
             return CompletionSource::Agents;
+        }
+        if cmd.contains("sling") {
+            return CompletionSource::Rigs;
         }
     }
 
@@ -559,7 +562,7 @@ impl GtApp {
                 // Has positional args — enter guided arg-fill mode
                 let first_arg = &args[0];
                 let prompt = format!("Select {}: (1/{})", first_arg.name, args.len());
-                let items = self.generate_completions(&first_arg.source);
+                let items = self.generate_completions(&first_arg.source, id, &[]);
                 let item_count = items.len();
                 self.event_viewer.push(format!(
                     "Arg fill: {} ({} candidates)",
@@ -629,8 +632,17 @@ impl GtApp {
     }
 
     /// Generate completion items from a data source.
-    fn generate_completions(&self, source: &CompletionSource) -> Vec<CompletionItem> {
-        match source {
+    ///
+    /// When the in-memory source is empty (e.g. `FreeText`), falls back to
+    /// carapace-bin for shell completions.  `cmd` is the base command (e.g.
+    /// `"gt sling"`) and `filled` is the args filled so far.
+    fn generate_completions(
+        &self,
+        source: &CompletionSource,
+        cmd: &str,
+        filled: &[String],
+    ) -> Vec<CompletionItem> {
+        let items = match source {
             CompletionSource::ReadyBeads => {
                 self.beads.ready.iter().map(|b| CompletionItem {
                     value: b.id.clone(),
@@ -704,7 +716,46 @@ impl GtApp {
                 }).collect()
             }
             CompletionSource::FreeText => Vec::new(),
+        };
+
+        // If in-memory source returned nothing, try carapace-bin as fallback.
+        if items.is_empty() {
+            return self.carapace_fallback(cmd, filled);
         }
+        items
+    }
+
+    /// Call carapace-bin to get completions for the current arg position.
+    fn carapace_fallback(&self, cmd: &str, filled: &[String]) -> Vec<CompletionItem> {
+        // Build word list: ["gt", "sling", "filled-arg-1", ""]
+        let mut words: Vec<String> = cmd.split_whitespace().map(String::from).collect();
+        words.extend(filled.iter().cloned());
+        words.push(String::new()); // empty = requesting next position
+        let word_refs: Vec<&str> = words.iter().map(|s| s.as_str()).collect();
+
+        let completions = carapace_complete(&word_refs);
+        completions
+            .into_iter()
+            .filter(|c| {
+                // Filter out file completions (carapace default fallback)
+                !c.value.starts_with('/')
+                    && !c.value.starts_with('.')
+                    && !c.value.starts_with('~')
+            })
+            .map(|c| {
+                let value = c.value.trim().to_string();
+                let label = if c.display.is_empty() {
+                    value.clone()
+                } else {
+                    c.display.clone()
+                };
+                CompletionItem {
+                    value,
+                    label,
+                    description: c.description,
+                }
+            })
+            .collect()
     }
 
     /// Handle a completion value being selected in arg-fill mode.
@@ -722,8 +773,10 @@ impl GtApp {
         let state = self.arg_fill.as_ref().unwrap();
         if state.current < state.args.len() {
             // More args to fill — show next completion
+            let cmd = state.command.clone();
+            let filled: Vec<String> = state.filled.clone();
             let prompt = format!("Select {}: ({}/{})", state.args[state.current].name, state.current + 1, state.args.len());
-            let items = self.generate_completions(&state.args[state.current].source);
+            let items = self.generate_completions(&state.args[state.current].source, &cmd, &filled);
             self.palette.enter_completion_mode(&prompt, items);
             Cmd::None
         } else {
@@ -755,8 +808,10 @@ impl GtApp {
                 state.filled.pop();
             }
             let state = self.arg_fill.as_ref().unwrap();
+            let cmd = state.command.clone();
+            let filled: Vec<String> = state.filled.clone();
             let prompt = format!("Select {}: ({}/{})", state.args[state.current].name, state.current + 1, state.args.len());
-            let items = self.generate_completions(&state.args[state.current].source);
+            let items = self.generate_completions(&state.args[state.current].source, &cmd, &filled);
             self.palette.enter_completion_mode(&prompt, items);
         } else {
             // At first arg — exit arg-fill, return to normal palette
