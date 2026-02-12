@@ -63,27 +63,35 @@ SCREENS:
    20  Log Search         Live log search and filter demo
    21  Notifications      Toast notification system demo
    22  Action Timeline    Event timeline with filtering and severity
-   23  Sizing             Content-aware intrinsic sizing demo
-   24  Layout Inspector   Constraint solver visual inspector
-   25  Text Editor        Advanced multi-line text editor with search
-   26  Mouse Playground   Mouse hit-testing and interaction demo
-   27  Form Validation    Comprehensive form validation demo
-   28  Virtualized Search Fuzzy search in 100K+ items demo
-   29  Async Tasks        Async task manager and queue diagnostics
-   30  Theme Studio       Live palette editor and theme inspector
-   31  Time-Travel Studio A/B compare + diff heatmap of recorded snapshots
-   32  Performance Challenge Stress harness for degradation tiers
-   33  Explainability     Diff/resize/budget evidence cockpit
-   34  i18n Stress Lab    Unicode width, RTL, emoji, and truncation
-   35  VOI Overlay        Galaxy-Brain VOI debug overlay
-   36  Inline Mode        Inline scrollback + chrome story
-   37  Accessibility      Accessibility control panel + contrast checks
-   38  Widget Builder     Interactive widget composition sandbox
-   39  Palette Evidence   Command palette evidence lab
-   40  Determinism Lab    Checksum equivalence + determinism proofs
-   41  Links              OSC-8 hyperlink playground + hit regions
-   42  Kanban Board       Interactive Kanban board with drag-drop
-   43  MD Live Editor     Split-pane editor with live Markdown preview
+   23  Event Feed         Live event stream with auto-scroll
+   24  Sizing             Content-aware intrinsic sizing demo
+   25  Layout Inspector   Constraint solver visual inspector
+   26  Text Editor        Advanced multi-line text editor with search
+   27  Mouse Playground   Mouse hit-testing and interaction demo
+   28  Form Validation    Comprehensive form validation demo
+   29  Virtualized Search Fuzzy search in 100K+ items demo
+   30  Async Tasks        Async task manager and queue diagnostics
+   31  Theme Studio       Live palette editor and theme inspector
+   32  Time-Travel Studio A/B compare + diff heatmap of recorded snapshots
+   33  Performance Challenge Stress harness for degradation tiers
+   34  Explainability     Diff/resize/budget evidence cockpit
+   35  i18n Stress Lab    Unicode width, RTL, emoji, and truncation
+   36  VOI Overlay        Galaxy-Brain VOI debug overlay
+   37  Inline Mode        Inline scrollback + chrome story
+   38  Accessibility      Accessibility control panel + contrast checks
+   39  Widget Builder     Interactive widget composition sandbox
+   40  Palette Evidence   Command palette evidence lab
+   41  Determinism Lab    Checksum equivalence + determinism proofs
+   42  Links              OSC-8 hyperlink playground + hit regions
+   43  Kanban Board       Interactive Kanban board with drag-drop
+   44  MD Live Editor     Split-pane editor with live Markdown preview
+   45  Agent Tree         Hierarchical agent tree visualization
+   46  Convoy Panel       Convoy progress tracking dashboard
+   47  Agent Detail       Individual agent status and metrics
+   48  Mail Inbox         Agent mail inbox viewer
+   49  Command Palette    Command palette with arg completions
+   50  Toast Events       Toast notification event stream
+   51  Beads Overview     Issue/bead tracking overview
 
 KEYBINDINGS:
     1-9, 0                Switch to screens 1-10 by number

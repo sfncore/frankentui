@@ -301,6 +301,8 @@ impl Screen for CommandPaletteScreen {
                     // Re-open immediately in demo mode so palette stays visible
                     self.palette.open();
                 }
+                // Completion mode actions — not used in palette demo
+                PaletteAction::Complete(_) | PaletteAction::CompleteBack => {}
             }
         }
 

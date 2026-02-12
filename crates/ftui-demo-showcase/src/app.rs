@@ -4858,6 +4858,8 @@ impl AppModel {
                 }
                 Cmd::None
             }
+            // Completion mode actions — not used in demo showcase
+            PaletteAction::Complete(_) | PaletteAction::CompleteBack => Cmd::None,
         }
     }
 
@@ -6452,7 +6454,7 @@ mod tests {
     /// Verify all screens have the expected count.
     #[test]
     fn all_screens_count() {
-        assert_eq!(screens::screen_registry().len(), 43);
+        assert_eq!(screens::screen_registry().len(), 51);
     }
 
     // -----------------------------------------------------------------------
