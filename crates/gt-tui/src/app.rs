@@ -157,22 +157,23 @@ fn gas_town_actions(cli_docs: &[CliCommand]) -> Vec<ActionItem> {
     ];
 
     // Quick-action commands — pre-built entries for common GT operations.
-    // These pre-fill the palette with the command prefix so users can add args.
+    // Commands with structured arg completions get "\u{25b6}" (▶) prefix in description
+    // and category "Guided" so the badge distinguishes them from plain pre-fill commands.
     let quick_actions = [
-        ("gt sling", "<bead> <rig> \u{2014} Sling work to a polecat", &["sling", "dispatch", "polecat", "work"][..], "Quick Actions"),
-        ("gt crew start", "<rig> <agent> \u{2014} Start a crew member", &["crew", "start", "agent"], "Quick Actions"),
-        ("gt crew stop", "<rig> <agent> \u{2014} Stop a crew member", &["crew", "stop", "agent"], "Quick Actions"),
-        ("gt polecat nuke", "<target> \u{2014} Kill polecat session + remove worktree", &["polecat", "nuke", "kill"], "Quick Actions"),
-        ("gt nudge", "<target> \u{2014} Send message to agent session", &["nudge", "message", "agent"], "Quick Actions"),
+        ("gt sling", "\u{25b6} <bead> <rig> \u{2014} Sling work to a polecat", &["sling", "dispatch", "polecat", "work"][..], "Guided"),
+        ("gt crew start", "\u{25b6} <rig> <agent> \u{2014} Start a crew member", &["crew", "start", "agent"], "Guided"),
+        ("gt crew stop", "\u{25b6} <rig> <agent> \u{2014} Stop a crew member", &["crew", "stop", "agent"], "Guided"),
+        ("gt polecat nuke", "\u{25b6} <target> \u{2014} Kill polecat + remove worktree", &["polecat", "nuke", "kill"], "Guided"),
+        ("gt nudge", "\u{25b6} <target> \u{2014} Send message to agent session", &["nudge", "message", "agent"], "Guided"),
+        ("bd close", "\u{25b6} <id> \u{2014} Close a bead/issue", &["bead", "close", "done"], "Guided"),
+        ("gt formula run", "\u{25b6} <name> \u{2014} Run a formula", &["formula", "run", "workflow"], "Guided"),
         ("gt mail send", "Send mail to an agent", &["mail", "send", "message"], "Quick Actions"),
         ("bd create --title=", "Create a new bead/issue", &["bead", "create", "issue", "task"], "Quick Actions"),
-        ("bd close", "<id> \u{2014} Close a bead/issue", &["bead", "close", "done"], "Quick Actions"),
         ("bd ready", "Show issues ready to work", &["bead", "ready", "available"], "Quick Actions"),
         ("bd list --status=open", "List all open issues", &["bead", "list", "open"], "Quick Actions"),
         ("gt status", "Refresh town status", &["status", "refresh", "overview"], "Quick Actions"),
         ("gt rig list", "List all rigs", &["rig", "list"], "Quick Actions"),
         ("gt convoy list", "List active convoys", &["convoy", "list", "batch"], "Quick Actions"),
-        ("gt formula run", "<name> \u{2014} Run a formula", &["formula", "run", "workflow"], "Quick Actions"),
     ];
     for (cmd, desc, tags, category) in quick_actions {
         items.push(
