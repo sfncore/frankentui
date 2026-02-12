@@ -321,6 +321,7 @@ pub struct GtApp {
     pub spinner_tick: u32,
     pub last_refresh: Instant,
     pub palette_btn_area: RefCell<Rect>,
+    pub tab_areas: RefCell<Vec<(Rect, ActiveScreen)>>,
     pub palette: CommandPalette,
 }
 
@@ -367,6 +368,7 @@ impl GtApp {
             spinner_tick: 0,
             last_refresh: Instant::now(),
             palette_btn_area: RefCell::new(Rect::default()),
+            tab_areas: RefCell::new(Vec::new()),
             palette,
         }
     }
@@ -638,19 +640,28 @@ impl GtApp {
             return Cmd::None;
         }
 
-        // Only handle left clicks on global elements
-        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-            return Cmd::None;
+        // Left clicks: check global elements first (tab bar, command button),
+        // then delegate to screen. Scroll events go straight to screen.
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            // Check if click is on a tab bar item
+            for (tab_rect, screen) in self.tab_areas.borrow().iter() {
+                if tab_rect.contains(mouse.x, mouse.y) {
+                    self.active_screen = *screen;
+                    self.event_viewer
+                        .push(format!("Screen: {}", screen.label()));
+                    return Cmd::None;
+                }
+            }
+
+            // Check if click is on the Commands button
+            let btn_area = *self.palette_btn_area.borrow();
+            if btn_area.contains(mouse.x, mouse.y) {
+                self.palette.open();
+                return Cmd::None;
+            }
         }
 
-        // Check if click is on the Commands button
-        let btn_area = *self.palette_btn_area.borrow();
-        if btn_area.contains(mouse.x, mouse.y) {
-            self.palette.open();
-            return Cmd::None;
-        }
-
-        // Delegate to active screen
+        // Delegate to active screen (clicks, scroll, etc.)
         match self.active_screen {
             ActiveScreen::Dashboard => {
                 self.dashboard
@@ -672,6 +683,7 @@ impl GtApp {
         let bg = ftui_render::cell::PackedRgba::rgb(30, 30, 45);
         frame.buffer.fill(area, Cell::default().with_bg(bg));
 
+        let mut tabs = Vec::new();
         let mut x = area.x;
         for screen in ActiveScreen::ALL {
             let n = screen.f_key();
@@ -690,6 +702,7 @@ impl GtApp {
                 bg
             };
 
+            let tab_start = x;
             for ch in label.chars() {
                 if x >= area.right() {
                     break;
@@ -699,7 +712,12 @@ impl GtApp {
                 }
                 x += 1;
             }
+            let tab_width = x - tab_start;
+            if tab_width > 0 {
+                tabs.push((Rect::new(tab_start, area.y, tab_width, 1), *screen));
+            }
         }
+        *self.tab_areas.borrow_mut() = tabs;
     }
 
 }
