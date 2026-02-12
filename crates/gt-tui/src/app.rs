@@ -38,12 +38,14 @@ use crate::screens::workflows::WorkflowsScreen;
 
 /// Defines a positional argument for a CLI command.
 struct ArgDef {
-    name: &'static str,
+    name: String,
     source: CompletionSource,
 }
 
 /// Where to pull completion candidates from.
 enum CompletionSource {
+    /// All beads (ready + in_progress + blocked)
+    AllBeads,
     /// `self.beads.ready`
     ReadyBeads,
     /// `self.beads.in_progress`
@@ -56,6 +58,8 @@ enum CompletionSource {
     Formulas,
     /// Rig polecats (agents with role "polecat")
     Polecats,
+    /// `self.convoys`
+    Convoys,
     /// No completions — user types freely.
     FreeText,
 }
@@ -72,35 +76,74 @@ struct ArgFillState {
     current: usize,
 }
 
-/// Map command IDs to their arg definitions (if any).
-fn command_args(id: &str) -> Option<Vec<ArgDef>> {
-    match id {
-        "gt sling" => Some(vec![
-            ArgDef { name: "bead", source: CompletionSource::ReadyBeads },
-            ArgDef { name: "rig", source: CompletionSource::Rigs },
-        ]),
-        "gt crew start" => Some(vec![
-            ArgDef { name: "rig", source: CompletionSource::Rigs },
-            ArgDef { name: "agent", source: CompletionSource::Agents },
-        ]),
-        "gt crew stop" => Some(vec![
-            ArgDef { name: "rig", source: CompletionSource::Rigs },
-            ArgDef { name: "agent", source: CompletionSource::Agents },
-        ]),
-        "gt polecat nuke" => Some(vec![
-            ArgDef { name: "target", source: CompletionSource::Polecats },
-        ]),
-        "gt nudge" => Some(vec![
-            ArgDef { name: "target", source: CompletionSource::Agents },
-        ]),
-        "bd close" => Some(vec![
-            ArgDef { name: "id", source: CompletionSource::InProgressBeads },
-        ]),
-        "gt formula run" => Some(vec![
-            ArgDef { name: "name", source: CompletionSource::Formulas },
-        ]),
-        _ => None,
+/// Infer a CompletionSource from a docs arg name and command context.
+fn infer_completion_source(arg_name: &str, cmd: &str) -> CompletionSource {
+    // Exact arg name matches
+    match arg_name {
+        "rig" | "target-prefix" => return CompletionSource::Rigs,
+        "polecat" | "rig/polecat" => return CompletionSource::Polecats,
+        "agent" | "agent-bead" | "member" | "role" => return CompletionSource::Agents,
+        "convoy-id" => return CompletionSource::Convoys,
+        "bead-or-formula" => return CompletionSource::ReadyBeads,
+        _ => {}
     }
+
+    // Bead-like IDs
+    if arg_name.contains("bead") || arg_name.contains("issue") || arg_name.contains("epic") || arg_name.contains("mr-id") || arg_name == "id" {
+        // "close" commands → in-progress, else ready/all
+        if cmd.contains("close") || cmd.contains("ack") {
+            return CompletionSource::InProgressBeads;
+        }
+        return CompletionSource::AllBeads;
+    }
+
+    // "name" depends on command context
+    if arg_name == "name" || arg_name == "name..." {
+        if cmd.contains("formula") {
+            return CompletionSource::Formulas;
+        }
+        if cmd.contains("crew") || cmd.contains("dog") {
+            return CompletionSource::Agents;
+        }
+        if cmd.contains("convoy") {
+            return CompletionSource::FreeText;
+        }
+        // config agent → Agents
+        if cmd.contains("agent") {
+            return CompletionSource::Agents;
+        }
+    }
+
+    // "target" depends on command context
+    if arg_name == "target" {
+        if cmd.contains("polecat") {
+            return CompletionSource::Polecats;
+        }
+        if cmd.contains("nudge") || cmd.contains("crew") {
+            return CompletionSource::Agents;
+        }
+    }
+
+    CompletionSource::FreeText
+}
+
+/// Build arg definitions for a command from its docs usage string.
+fn command_args_from_docs(cmd: &CliCommand) -> Option<Vec<ArgDef>> {
+    let positional = parse_positional_args(&cmd.usage);
+    if positional.is_empty() {
+        return None;
+    }
+    Some(positional.into_iter().map(|name| {
+        let source = infer_completion_source(&name, &cmd.cmd);
+        ArgDef { name, source }
+    }).collect())
+}
+
+/// Look up arg definitions for a command ID, using the docs.
+fn command_args(id: &str, cli_docs: &[CliCommand]) -> Option<Vec<ArgDef>> {
+    cli_docs.iter()
+        .find(|c| c.cmd == id)
+        .and_then(command_args_from_docs)
 }
 
 /// Build the Gas Town action items for the command palette.
@@ -156,63 +199,60 @@ fn gas_town_actions(cli_docs: &[CliCommand]) -> Vec<ActionItem> {
             .with_category("Navigation"),
     ];
 
-    // Quick-action commands — pre-built entries for common GT operations.
-    // Commands with structured arg completions get "\u{25b6}" (▶) prefix in description
-    // and category "Guided" so the badge distinguishes them from plain pre-fill commands.
-    let quick_actions = [
-        ("gt sling", "\u{25b6} <bead> <rig> \u{2014} Sling work to a polecat", &["sling", "dispatch", "polecat", "work"][..], "Guided"),
-        ("gt crew start", "\u{25b6} <rig> <agent> \u{2014} Start a crew member", &["crew", "start", "agent"], "Guided"),
-        ("gt crew stop", "\u{25b6} <rig> <agent> \u{2014} Stop a crew member", &["crew", "stop", "agent"], "Guided"),
-        ("gt polecat nuke", "\u{25b6} <target> \u{2014} Kill polecat + remove worktree", &["polecat", "nuke", "kill"], "Guided"),
-        ("gt nudge", "\u{25b6} <target> \u{2014} Send message to agent session", &["nudge", "message", "agent"], "Guided"),
-        ("bd close", "\u{25b6} <id> \u{2014} Close a bead/issue", &["bead", "close", "done"], "Guided"),
-        ("gt formula run", "\u{25b6} <name> \u{2014} Run a formula", &["formula", "run", "workflow"], "Guided"),
-        ("gt mail send", "Send mail to an agent", &["mail", "send", "message"], "Quick Actions"),
-        ("bd create --title=", "Create a new bead/issue", &["bead", "create", "issue", "task"], "Quick Actions"),
-        ("bd ready", "Show issues ready to work", &["bead", "ready", "available"], "Quick Actions"),
-        ("bd list --status=open", "List all open issues", &["bead", "list", "open"], "Quick Actions"),
-        ("gt status", "Refresh town status", &["status", "refresh", "overview"], "Quick Actions"),
-        ("gt rig list", "List all rigs", &["rig", "list"], "Quick Actions"),
-        ("gt convoy list", "List active convoys", &["convoy", "list", "batch"], "Quick Actions"),
+    // Pinned quick-access shortcuts for common no-arg operations.
+    let quick_pins = [
+        ("bd ready", "Show issues ready to work", &["bead", "ready", "available"][..]),
+        ("bd list --status=open", "List all open issues", &["bead", "list", "open"]),
+        ("bd create --title=", "Create a new bead/issue", &["bead", "create", "issue", "task"]),
+        ("gt status", "Refresh town status", &["status", "refresh", "overview"]),
+        ("gt rig list", "List all rigs", &["rig", "list"]),
+        ("gt convoy list", "List active convoys", &["convoy", "list", "batch"]),
     ];
-    for (cmd, desc, tags, category) in quick_actions {
+    for (cmd, desc, tags) in quick_pins {
         items.push(
             ActionItem::new(cmd, cmd)
                 .with_description(desc)
                 .with_tags(tags)
-                .with_category(category),
+                .with_category("Quick Actions"),
         );
     }
 
-    // Add all runnable CLI commands from docs
+    // Add all runnable CLI commands from docs.
+    // Commands with positional args show them + get "Guided" badge.
     for cmd in cli_docs {
         if cmd.is_parent || cmd.cmd.is_empty() {
             continue;
         }
 
         // Derive category from second word: "gt mail send" → "mail"
-        let category = cmd.cmd.split_whitespace().nth(1).unwrap_or("gt");
+        let base_category = cmd.cmd.split_whitespace().nth(1).unwrap_or("gt");
 
         // Use all words as tags for fuzzy matching
         let words: Vec<&str> = cmd.cmd.split_whitespace().collect();
 
-        // Build description: include positional args from usage if any
+        // Build description and category from usage args
         let pos_args = parse_positional_args(&cmd.usage);
-        let description = if pos_args.is_empty() {
-            cmd.short.clone()
+        let (description, category) = if pos_args.is_empty() {
+            (cmd.short.clone(), base_category.to_string())
         } else {
             let args_str = pos_args.iter()
                 .map(|a| format!("<{a}>"))
                 .collect::<Vec<_>>()
                 .join(" ");
-            format!("{args_str} \u{2014} {}", cmd.short)
+            let has_completions = pos_args.iter()
+                .any(|a| !matches!(infer_completion_source(a, &cmd.cmd), CompletionSource::FreeText));
+            if has_completions {
+                (format!("\u{25b6} {args_str} \u{2014} {}", cmd.short), "Guided".to_string())
+            } else {
+                (format!("{args_str} \u{2014} {}", cmd.short), base_category.to_string())
+            }
         };
 
         items.push(
             ActionItem::new(&cmd.cmd, &cmd.cmd)
                 .with_description(&description)
                 .with_tags(&words)
-                .with_category(category),
+                .with_category(&category),
         );
     }
 
@@ -513,11 +553,10 @@ impl GtApp {
             ]);
         }
 
-        // CLI command selected — check for args from docs.
+        // CLI command selected — derive args from docs.
         if id.starts_with("gt ") || id.starts_with("bd ") {
-            // Check if we have guided completions for this command
-            if let Some(args) = command_args(id) {
-                // Enter structured arg-fill mode
+            if let Some(args) = command_args(id, &self.cli_docs) {
+                // Has positional args — enter guided arg-fill mode
                 let first_arg = &args[0];
                 let prompt = format!("Select {}: (1/{})", first_arg.name, args.len());
                 let items = self.generate_completions(&first_arg.source);
@@ -533,20 +572,6 @@ impl GtApp {
                     current: 0,
                 });
                 self.palette.enter_completion_mode(&prompt, items);
-                return Cmd::None;
-            }
-
-            // Look up the command in docs to check for positional args
-            let has_positional_args = self.cli_docs.iter()
-                .find(|c| c.cmd == id)
-                .map(|c| !parse_positional_args(&c.usage).is_empty())
-                .unwrap_or(false);
-
-            if has_positional_args {
-                // Command needs args but no guided completions — pre-fill
-                let prefill = format!("{} ", id);
-                self.palette.open();
-                self.palette.set_query(&prefill);
                 return Cmd::None;
             }
 
@@ -641,6 +666,20 @@ impl GtApp {
                     description: f.description.clone(),
                 }).collect()
             }
+            CompletionSource::AllBeads => {
+                let mut items: Vec<CompletionItem> = Vec::new();
+                for b in self.beads.ready.iter()
+                    .chain(self.beads.in_progress.iter())
+                    .chain(self.beads.blocked.iter())
+                {
+                    items.push(CompletionItem {
+                        value: b.id.clone(),
+                        label: b.id.clone(),
+                        description: format!("[{}] {}", b.status, b.title),
+                    });
+                }
+                items
+            }
             CompletionSource::Polecats => {
                 let mut items = Vec::new();
                 for rig in &self.status.rigs {
@@ -656,6 +695,13 @@ impl GtApp {
                     }
                 }
                 items
+            }
+            CompletionSource::Convoys => {
+                self.convoys.iter().map(|c| CompletionItem {
+                    value: c.id.clone(),
+                    label: c.id.clone(),
+                    description: format!("{} ({}/{})", c.title, c.done, c.total),
+                }).collect()
             }
             CompletionSource::FreeText => Vec::new(),
         }
