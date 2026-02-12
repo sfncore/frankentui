@@ -1209,6 +1209,15 @@ impl Model for GtApp {
                 self.event_viewer
                     .push(format!("--- {} done ---", cmd));
 
+                // Show notification in palette
+                let first_line = output.lines().next().unwrap_or("(no output)");
+                let notif = if first_line.len() > 60 {
+                    format!("\u{2714} {} \u{2192} {}...", cmd, &first_line[..57])
+                } else {
+                    format!("\u{2714} {} \u{2192} {}", cmd, first_line)
+                };
+                self.palette.set_notification(Some(notif));
+
                 // Also push to Event Feed screen as a real event
                 let truncated = if output.len() > 200 {
                     format!("{}...", &output[..200])

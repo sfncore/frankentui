@@ -2,7 +2,9 @@
 //!
 //! Loads the auto-generated CLI docs index (from Cobra docgen) and provides:
 //! - Fuzzy search over all gt commands
-//! - Full docs view (synopsis, flags, subcommands)
+//! - Filter chips (leaf-only, has-args, has-completions)
+//! - Full docs view (synopsis, flags, subcommands, carapace completion info)
+//! - Command builder panel (side pane for filling positional args)
 //! - Execute selected command directly
 
 use std::cell::RefCell;
@@ -22,7 +24,7 @@ use ftui_widgets::paragraph::Paragraph;
 use ftui_widgets::table::{Row, Table, TableState};
 use ftui_widgets::{StatefulWidget, Widget};
 
-use crate::data::{self, CliCommand};
+use crate::data::{self, carapace_complete, CliCommand};
 use crate::msg::Msg;
 
 // ---------------------------------------------------------------------------
@@ -82,6 +84,54 @@ fn fuzzy_score(query: &str, haystack: &str) -> Option<u32> {
 }
 
 // ---------------------------------------------------------------------------
+// Completion source inference (mirrors app.rs logic for display)
+// ---------------------------------------------------------------------------
+
+/// Human-readable description of where completions come from for an arg.
+fn completion_source_label(arg_name: &str, cmd: &str) -> &'static str {
+    match arg_name {
+        "rig" | "target-prefix" => return "rigs",
+        "polecat" | "rig/polecat" => return "polecats",
+        "agent" | "agent-bead" | "member" | "role" => return "agents",
+        "convoy-id" => return "convoys",
+        "bead-or-formula" => return "ready beads",
+        _ => {}
+    }
+    if arg_name.contains("bead") || arg_name.contains("issue")
+        || arg_name.contains("epic") || arg_name.contains("mr-id")
+        || arg_name == "id"
+    {
+        if cmd.contains("close") || cmd.contains("ack") {
+            return "in-progress beads";
+        }
+        return "all beads";
+    }
+    if arg_name == "name" || arg_name == "name..." {
+        if cmd.contains("formula") { return "formulas"; }
+        if cmd.contains("crew") || cmd.contains("dog") || cmd.contains("agent") {
+            return "agents";
+        }
+    }
+    if arg_name == "target" {
+        if cmd.contains("polecat") { return "polecats"; }
+        if cmd.contains("nudge") || cmd.contains("crew") { return "agents"; }
+        if cmd.contains("sling") { return "rigs"; }
+    }
+    if arg_name.contains("message-id") || arg_name == "mail-id" {
+        return "mail messages";
+    }
+    if arg_name == "thread-id" {
+        return "mail threads";
+    }
+    "free text"
+}
+
+/// Whether an arg has dynamic completions (not free text).
+fn has_dynamic_completions(arg_name: &str, cmd: &str) -> bool {
+    completion_source_label(arg_name, cmd) != "free text"
+}
+
+// ---------------------------------------------------------------------------
 // Screen state
 // ---------------------------------------------------------------------------
 
@@ -92,12 +142,37 @@ enum Focus {
     Builder,
 }
 
+/// Filter toggles for the command list.
+#[derive(Debug, Clone, Copy)]
+struct Filters {
+    /// Only show leaf commands (not groups).
+    leaf_only: bool,
+    /// Only show commands with positional args.
+    with_args: bool,
+    /// Only show commands with carapace dynamic completions.
+    with_completions: bool,
+}
+
+impl Default for Filters {
+    fn default() -> Self {
+        Self {
+            leaf_only: false,
+            with_args: false,
+            with_completions: false,
+        }
+    }
+}
+
 /// Tracks one positional arg slot in the command builder.
 struct BuilderArg {
     /// Name from usage (e.g. "bead-id").
     name: String,
     /// User-supplied value (empty until filled).
     value: String,
+    /// Human-readable completion source.
+    source_label: &'static str,
+    /// Carapace suggestions loaded async.
+    suggestions: Vec<(String, String)>, // (value, description)
 }
 
 /// State for the step-by-step command builder panel.
@@ -117,7 +192,15 @@ impl CommandBuilder {
         let positional = data::parse_positional_args(&cmd.usage);
         let args = positional
             .into_iter()
-            .map(|name| BuilderArg { name, value: String::new() })
+            .map(|name| {
+                let source_label = completion_source_label(&name, &cmd.cmd);
+                BuilderArg {
+                    name,
+                    value: String::new(),
+                    source_label,
+                    suggestions: Vec::new(),
+                }
+            })
             .collect();
         Self {
             base_cmd: cmd.cmd.clone(),
@@ -152,6 +235,32 @@ impl CommandBuilder {
     fn check_ready(&mut self) {
         self.ready = self.args.iter().all(|a| !a.value.is_empty());
     }
+
+    /// Load carapace suggestions for the current arg position.
+    fn load_carapace_suggestions(&mut self) {
+        let mut words: Vec<String> = self.base_cmd.split_whitespace().map(String::from).collect();
+        for (i, arg) in self.args.iter().enumerate() {
+            if i < self.current {
+                words.push(arg.value.clone());
+            }
+        }
+        words.push(String::new()); // empty = next position
+
+        let word_refs: Vec<&str> = words.iter().map(|s| s.as_str()).collect();
+        let completions = carapace_complete(&word_refs);
+        if let Some(arg) = self.args.get_mut(self.current) {
+            arg.suggestions = completions
+                .into_iter()
+                .filter(|c| {
+                    !c.value.starts_with('/')
+                        && !c.value.starts_with('.')
+                        && !c.value.starts_with('~')
+                })
+                .take(15)
+                .map(|c| (c.value.trim().to_string(), c.description))
+                .collect();
+        }
+    }
 }
 
 pub struct DocsBrowserScreen {
@@ -164,6 +273,8 @@ pub struct DocsBrowserScreen {
     last_run_output: Option<String>,
     /// Command builder state (active when user hits Enter on a command with args).
     builder: Option<CommandBuilder>,
+    /// Filter toggles.
+    filters: Filters,
     tick_count: u64,
 }
 
@@ -179,6 +290,7 @@ impl DocsBrowserScreen {
             selected_detail: None,
             last_run_output: None,
             builder: None,
+            filters: Filters::default(),
             tick_count: 0,
         };
         s.refilter();
@@ -186,26 +298,33 @@ impl DocsBrowserScreen {
     }
 
     fn refilter(&mut self) {
-        if self.query.is_empty() {
-            // Show leaf commands first, then parents
-            let mut scored: Vec<(usize, u32)> = self
-                .all_commands
-                .iter()
-                .enumerate()
-                .map(|(i, c)| {
+        let mut scored: Vec<(usize, u32)> = self
+            .all_commands
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| {
+                // Apply filters
+                if self.filters.leaf_only && c.is_parent {
+                    return None;
+                }
+                if self.filters.with_args {
+                    let args = data::parse_positional_args(&c.usage);
+                    if args.is_empty() {
+                        return None;
+                    }
+                }
+                if self.filters.with_completions {
+                    let args = data::parse_positional_args(&c.usage);
+                    let has_dynamic = args.iter().any(|a| has_dynamic_completions(a, &c.cmd));
+                    if !has_dynamic {
+                        return None;
+                    }
+                }
+
+                if self.query.is_empty() {
                     let base = if c.is_parent { 0 } else { 1 };
-                    (i, base)
-                })
-                .collect();
-            scored.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-            self.filtered = scored.into_iter().map(|(i, _)| i).collect();
-        } else {
-            let mut scored: Vec<(usize, u32)> = self
-                .all_commands
-                .iter()
-                .enumerate()
-                .filter_map(|(i, c)| {
-                    // Score against cmd path, short desc, and synopsis
+                    Some((i, base))
+                } else {
                     let cmd_score = fuzzy_score(&self.query, &c.cmd);
                     let short_score = fuzzy_score(&self.query, &c.short);
                     let synopsis_score =
@@ -215,11 +334,12 @@ impl DocsBrowserScreen {
                         .filter_map(|s| *s)
                         .max()?;
                     Some((i, best))
-                })
-                .collect();
-            scored.sort_by(|a, b| b.1.cmp(&a.1));
-            self.filtered = scored.into_iter().map(|(i, _)| i).collect();
-        }
+                }
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        self.filtered = scored.into_iter().map(|(i, _)| i).collect();
 
         // Reset selection
         self.table_state.borrow_mut().select(if self.filtered.is_empty() {
@@ -252,11 +372,13 @@ impl DocsBrowserScreen {
             return;
         }
 
-        let builder = CommandBuilder::from_command(&cmd);
+        let mut builder = CommandBuilder::from_command(&cmd);
         if builder.args.is_empty() {
             // No positional args — execute immediately
             return;
         }
+        // Pre-load carapace suggestions for the first arg
+        builder.load_carapace_suggestions();
         self.builder = Some(builder);
         self.focus = Focus::Builder;
     }
@@ -326,6 +448,26 @@ impl DocsBrowserScreen {
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> Cmd<Msg> {
+        // Global filter toggles: Ctrl+1/2/3
+        match (key.code, key.modifiers) {
+            (KeyCode::Char('1'), m) if m.contains(Modifiers::ALT) => {
+                self.filters.leaf_only = !self.filters.leaf_only;
+                self.refilter();
+                return Cmd::None;
+            }
+            (KeyCode::Char('2'), m) if m.contains(Modifiers::ALT) => {
+                self.filters.with_args = !self.filters.with_args;
+                self.refilter();
+                return Cmd::None;
+            }
+            (KeyCode::Char('3'), m) if m.contains(Modifiers::ALT) => {
+                self.filters.with_completions = !self.filters.with_completions;
+                self.refilter();
+                return Cmd::None;
+            }
+            _ => {}
+        }
+
         match self.focus {
             Focus::Search => { self.handle_search_key(key); Cmd::None }
             Focus::Results => self.handle_results_key(key),
@@ -370,7 +512,11 @@ impl DocsBrowserScreen {
                 self.focus = Focus::Search;
             }
             (KeyCode::Tab, _) => {
-                self.focus = Focus::Search;
+                if self.builder.is_some() {
+                    self.focus = Focus::Builder;
+                } else {
+                    self.focus = Focus::Search;
+                }
             }
             (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
                 let mut state = self.table_state.borrow_mut();
@@ -444,13 +590,30 @@ impl DocsBrowserScreen {
                             builder.current = builder.args.len() - 1;
                         }
                         builder.check_ready();
+                        // Load suggestions for the new arg
+                        if !builder.ready {
+                            builder.load_carapace_suggestions();
+                        }
                     }
                 }
             }
             (KeyCode::Tab, _) => {
-                // Cycle to next arg
-                if !builder.args.is_empty() {
-                    builder.current = (builder.current + 1) % builder.args.len();
+                // Accept first suggestion if input is empty
+                let should_accept = builder.args.get(builder.current)
+                    .map(|a| a.value.is_empty() && !a.suggestions.is_empty())
+                    .unwrap_or(false);
+                if should_accept {
+                    let suggestion = builder.args[builder.current].suggestions[0].0.clone();
+                    if let Some(input) = builder.current_input_mut() {
+                        *input = suggestion;
+                    }
+                    builder.check_ready();
+                } else {
+                    // Cycle to next arg
+                    if !builder.args.is_empty() {
+                        builder.current = (builder.current + 1) % builder.args.len();
+                        builder.load_carapace_suggestions();
+                    }
                 }
             }
             (KeyCode::BackTab, _) => {
@@ -461,6 +624,7 @@ impl DocsBrowserScreen {
                     } else {
                         builder.current = builder.args.len() - 1;
                     }
+                    builder.load_carapace_suggestions();
                 }
             }
             (KeyCode::Backspace, _) => {
@@ -543,6 +707,54 @@ impl DocsBrowserScreen {
         Paragraph::new(Text::styled(display, style)).render(inner, frame);
     }
 
+    fn render_filter_bar(&self, frame: &mut Frame, area: Rect) {
+        if area.is_empty() {
+            return;
+        }
+
+        let mut spans: Vec<Span> = Vec::new();
+        spans.push(Span::styled(" Filters: ", Style::new().fg(theme::fg::MUTED)));
+
+        let on = Style::new().fg(theme::bg::DEEP).bg(theme::accent::PRIMARY).bold();
+        let off = Style::new().fg(theme::fg::MUTED);
+
+        // Alt+1: Leaf only
+        spans.push(Span::styled(
+            " Alt+1 ",
+            Style::new().fg(theme::accent::INFO),
+        ));
+        spans.push(Span::styled(
+            if self.filters.leaf_only { " Leaf Only " } else { " Leaf Only " },
+            if self.filters.leaf_only { on } else { off },
+        ));
+        spans.push(Span::raw("  "));
+
+        // Alt+2: Has Args
+        spans.push(Span::styled(
+            " Alt+2 ",
+            Style::new().fg(theme::accent::INFO),
+        ));
+        spans.push(Span::styled(
+            if self.filters.with_args { " Has Args " } else { " Has Args " },
+            if self.filters.with_args { on } else { off },
+        ));
+        spans.push(Span::raw("  "));
+
+        // Alt+3: Has Completions
+        spans.push(Span::styled(
+            " Alt+3 ",
+            Style::new().fg(theme::accent::INFO),
+        ));
+        spans.push(Span::styled(
+            if self.filters.with_completions { " Completions " } else { " Completions " },
+            if self.filters.with_completions { on } else { off },
+        ));
+
+        Paragraph::new(Line::from_spans(spans))
+            .style(Style::new().bg(theme::bg::DEEP))
+            .render(area, frame);
+    }
+
     fn render_results_table(&self, frame: &mut Frame, area: Rect) {
         let is_active = self.focus == Focus::Results;
 
@@ -552,12 +764,20 @@ impl DocsBrowserScreen {
             .take(200) // cap for performance
             .map(|&idx| {
                 let cmd = &self.all_commands[idx];
-                let type_label = if cmd.is_parent { "grp" } else { "cmd" };
-                let type_color = if cmd.is_parent {
-                    theme::fg::MUTED
+                let args = data::parse_positional_args(&cmd.usage);
+                let has_dynamic = args.iter().any(|a| has_dynamic_completions(a, &cmd.cmd));
+
+                // Type badge
+                let badge = if cmd.is_parent {
+                    ("grp", theme::fg::MUTED)
+                } else if has_dynamic {
+                    ("\u{25b6}", theme::accent::SUCCESS)  // ▶ guided
+                } else if !args.is_empty() {
+                    ("arg", theme::accent::WARNING)
                 } else {
-                    theme::accent::SUCCESS
+                    ("cmd", theme::accent::INFO)
                 };
+
                 Row::new([
                     Text::from(Line::from_spans([Span::styled(
                         &cmd.cmd,
@@ -565,8 +785,8 @@ impl DocsBrowserScreen {
                     )])),
                     Text::raw(&cmd.short),
                     Text::from(Line::from_spans([Span::styled(
-                        type_label,
-                        Style::new().fg(type_color),
+                        badge.0,
+                        Style::new().fg(badge.1),
                     )])),
                 ])
             })
@@ -695,19 +915,49 @@ impl DocsBrowserScreen {
             lines.push(Line::raw(""));
         }
 
+        // Positional args with completion info
+        let pos_args = data::parse_positional_args(&cmd.usage);
+        if !pos_args.is_empty() {
+            lines.push(Line::styled(
+                "ARGUMENTS:",
+                Style::new().fg(theme::accent::PRIMARY).bold(),
+            ));
+            for arg_name in &pos_args {
+                let source = completion_source_label(arg_name, &cmd.cmd);
+                let has_dynamic = source != "free text";
+                let icon = if has_dynamic { "\u{25b6}" } else { "\u{25cb}" };
+                let source_style = if has_dynamic {
+                    Style::new().fg(theme::accent::SUCCESS)
+                } else {
+                    Style::new().fg(theme::fg::DISABLED)
+                };
+                lines.push(Line::from_spans([
+                    Span::styled(
+                        format!("  {icon} <{arg_name}>"),
+                        Style::new().fg(theme::accent::INFO),
+                    ),
+                    Span::styled(
+                        format!("  \u{2192} {source}"),
+                        source_style,
+                    ),
+                ]));
+            }
+            lines.push(Line::raw(""));
+        }
+
         // Synopsis
         if !cmd.synopsis.is_empty() {
             lines.push(Line::styled(
                 "SYNOPSIS:",
                 Style::new().fg(theme::accent::PRIMARY).bold(),
             ));
-            for line in cmd.synopsis.lines().take(15) {
+            for line in cmd.synopsis.lines().take(10) {
                 lines.push(Line::styled(
                     format!("  {}", line),
                     Style::new().fg(theme::fg::SECONDARY),
                 ));
             }
-            if cmd.synopsis.lines().count() > 15 {
+            if cmd.synopsis.lines().count() > 10 {
                 lines.push(Line::styled(
                     "  ...(truncated)",
                     Style::new().fg(theme::fg::DISABLED),
@@ -716,13 +966,13 @@ impl DocsBrowserScreen {
             lines.push(Line::raw(""));
         }
 
-        // Options
+        // Options (compact)
         if !cmd.options.is_empty() {
             lines.push(Line::styled(
                 "OPTIONS:",
                 Style::new().fg(theme::accent::PRIMARY).bold(),
             ));
-            for line in cmd.options.lines().take(20) {
+            for line in cmd.options.lines().take(15) {
                 let style = if line.trim_start().starts_with('-') {
                     Style::new().fg(theme::accent::INFO)
                 } else {
@@ -730,7 +980,7 @@ impl DocsBrowserScreen {
                 };
                 lines.push(Line::styled(format!("  {}", line), style));
             }
-            if cmd.options.lines().count() > 20 {
+            if cmd.options.lines().count() > 15 {
                 lines.push(Line::styled(
                     "  ...(truncated)",
                     Style::new().fg(theme::fg::DISABLED),
@@ -745,7 +995,7 @@ impl DocsBrowserScreen {
                 "SUBCOMMANDS:",
                 Style::new().fg(theme::accent::PRIMARY).bold(),
             ));
-            for sub in &cmd.subcommands {
+            for sub in cmd.subcommands.iter().take(15) {
                 lines.push(Line::from_spans([
                     Span::styled(
                         format!("  {:<24}", sub.cmd),
@@ -757,11 +1007,17 @@ impl DocsBrowserScreen {
                     ),
                 ]));
             }
+            if cmd.subcommands.len() > 15 {
+                lines.push(Line::styled(
+                    format!("  ...({} more)", cmd.subcommands.len() - 15),
+                    Style::new().fg(theme::fg::DISABLED),
+                ));
+            }
             lines.push(Line::raw(""));
         }
 
         // Help hint — varies based on whether command has args
-        let has_args = !data::parse_positional_args(&cmd.usage).is_empty();
+        let has_args = !pos_args.is_empty();
         let enter_hint = if has_args { "build command" } else { "run" };
         lines.push(Line::from_spans([
             Span::styled(
@@ -803,36 +1059,45 @@ impl DocsBrowserScreen {
             return;
         }
 
-        let has_builder = self.builder.is_some();
-        let constraints = if has_builder {
-            vec![
+        // Top: search bar + filter bar.  Middle: content.
+        let main = Flex::vertical()
+            .constraints([
                 Constraint::Fixed(3),  // Search bar
+                Constraint::Fixed(1),  // Filter bar
                 Constraint::Fill,      // Content
-                Constraint::Fixed(7),  // Command builder
-            ]
-        } else {
-            vec![
-                Constraint::Fixed(3),  // Search bar
-                Constraint::Fill,      // Content
-            ]
-        };
-
-        let main = Flex::vertical().constraints(constraints).split(area);
+            ])
+            .split(area);
 
         self.render_search_bar(frame, main[0]);
+        self.render_filter_bar(frame, main[1]);
 
-        let content = Flex::horizontal()
-            .constraints([
-                Constraint::Percentage(40.0),
-                Constraint::Percentage(60.0),
-            ])
-            .split(main[1]);
+        // Content: commands list on left, detail + builder on right
+        let has_builder = self.builder.is_some();
 
-        self.render_results_table(frame, content[0]);
-        self.render_detail(frame, content[1]);
+        if has_builder {
+            // Three columns: commands | detail | builder
+            let content = Flex::horizontal()
+                .constraints([
+                    Constraint::Percentage(30.0),
+                    Constraint::Percentage(35.0),
+                    Constraint::Percentage(35.0),
+                ])
+                .split(main[2]);
 
-        if has_builder && main.len() > 2 {
-            self.render_builder(frame, main[2]);
+            self.render_results_table(frame, content[0]);
+            self.render_detail(frame, content[1]);
+            self.render_builder(frame, content[2]);
+        } else {
+            // Two columns: commands | detail
+            let content = Flex::horizontal()
+                .constraints([
+                    Constraint::Percentage(40.0),
+                    Constraint::Percentage(60.0),
+                ])
+                .split(main[2]);
+
+            self.render_results_table(frame, content[0]);
+            self.render_detail(frame, content[1]);
         }
     }
 
@@ -850,7 +1115,7 @@ impl DocsBrowserScreen {
         };
 
         let title = if builder.ready {
-            " Command Builder \u{2714} Ready "
+            " Builder \u{2714} Ready "
         } else {
             " Command Builder "
         };
@@ -898,11 +1163,9 @@ impl DocsBrowserScreen {
             }
         }
         lines.push(Line::from_spans(cmd_spans));
-
-        // Line 2: blank
         lines.push(Line::raw(""));
 
-        // Line 3: Arg slots with status indicators
+        // Arg slots with status indicators
         let mut slot_spans: Vec<Span> = vec![Span::styled("Args: ", muted)];
         for (i, arg) in builder.args.iter().enumerate() {
             if i > 0 {
@@ -929,22 +1192,72 @@ impl DocsBrowserScreen {
         }
         lines.push(Line::from_spans(slot_spans));
 
-        // Line 4: Current input
-        let current_label = builder.args.get(builder.current)
-            .map(|a| a.name.as_str())
-            .unwrap_or("?");
+        // Current input
+        let current_arg = builder.args.get(builder.current);
+        let current_label = current_arg.map(|a| a.name.as_str()).unwrap_or("?");
+        let source_label = current_arg.map(|a| a.source_label).unwrap_or("?");
         let current_val = builder.current_input();
         let cursor = if is_active { "\u{2588}" } else { "" };
         lines.push(Line::from_spans([
             Span::styled(format!("{current_label}: "), active_style),
-            Span::styled(format!("{current_val}{cursor}"), Style::new().fg(theme::fg::PRIMARY).bold()),
+            Span::styled(
+                format!("{current_val}{cursor}"),
+                Style::new().fg(theme::fg::PRIMARY).bold(),
+            ),
+            Span::styled(
+                format!("  ({source_label})"),
+                Style::new().fg(theme::fg::DISABLED),
+            ),
         ]));
+        lines.push(Line::raw(""));
 
-        // Line 5: Hints
+        // Carapace suggestions
+        if let Some(arg) = current_arg {
+            if !arg.suggestions.is_empty() {
+                lines.push(Line::styled(
+                    "Suggestions:",
+                    Style::new().fg(theme::accent::PRIMARY).bold(),
+                ));
+                for (i, (val, desc)) in arg.suggestions.iter().enumerate() {
+                    if lines.len() as u16 >= inner.height.saturating_sub(2) {
+                        let remaining = arg.suggestions.len() - i;
+                        lines.push(Line::styled(
+                            format!("  ...({remaining} more)"),
+                            Style::new().fg(theme::fg::DISABLED),
+                        ));
+                        break;
+                    }
+                    let mut spans = vec![
+                        Span::styled(
+                            format!("  {val}"),
+                            Style::new().fg(theme::accent::INFO),
+                        ),
+                    ];
+                    if !desc.is_empty() {
+                        spans.push(Span::styled(
+                            format!("  {desc}"),
+                            Style::new().fg(theme::fg::MUTED),
+                        ));
+                    }
+                    lines.push(Line::from_spans(spans));
+                }
+            } else if arg.source_label != "free text" {
+                lines.push(Line::styled(
+                    "Loading suggestions...",
+                    Style::new().fg(theme::fg::DISABLED),
+                ));
+            }
+        }
+
+        // Pad to fill, then hints at bottom
+        while (lines.len() as u16) < inner.height.saturating_sub(1) {
+            lines.push(Line::raw(""));
+        }
+
         let hint = if builder.ready {
-            "[Enter] run  [Tab] edit args  [Esc] cancel"
+            "[Enter] run  [Tab] accept/cycle  [Esc] cancel"
         } else {
-            "[Enter] next arg  [Tab/Shift+Tab] switch  [Esc] cancel"
+            "[Enter] next  [Tab] accept/cycle  [Esc] cancel"
         };
         lines.push(Line::styled(hint, muted));
 

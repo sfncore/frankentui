@@ -402,6 +402,8 @@ pub struct CommandPalette {
     completion_labels_word_starts: Vec<Vec<usize>>,
     /// Filtered completion results (action_index = index into completion_items).
     completion_filtered: Vec<ScoredItem>,
+    /// Temporary notification message shown in the palette footer.
+    notification: Option<String>,
 }
 
 impl Default for CommandPalette {
@@ -437,6 +439,7 @@ impl CommandPalette {
             completion_labels_cache: Vec::new(),
             completion_labels_lower: Vec::new(),
             completion_labels_word_starts: Vec::new(),
+            notification: None,
             completion_filtered: Vec::new(),
         }
     }
@@ -708,6 +711,12 @@ impl CommandPalette {
     #[inline]
     pub fn is_in_completion_mode(&self) -> bool {
         self.in_completion_mode
+    }
+
+    /// Set a notification message shown in the palette footer.
+    /// Pass `None` to clear.
+    pub fn set_notification(&mut self, msg: Option<String>) {
+        self.notification = msg;
     }
 
     /// Get the currently selected completion item, if any.
@@ -1127,9 +1136,9 @@ impl Widget for CommandPalette {
             self.filtered.len()
         };
         let result_rows = active_count.min(self.max_visible);
-        // +3 for: border top, query line, border bottom. +1 if empty hint.
-        let palette_height = (result_rows as u16 + 3)
-            .max(5)
+        // +4 for: border top, query line, help footer, border bottom.
+        let palette_height = (result_rows as u16 + 4)
+            .max(6)
             .min(area.height.saturating_sub(2));
         let palette_x = area.x + (area.width.saturating_sub(palette_width)) / 2;
         let palette_y = area.y + area.height / 6; // ~1/6 from top
@@ -1151,9 +1160,9 @@ impl Widget for CommandPalette {
         );
         self.draw_query_input(input_area, frame);
 
-        // Draw results list.
+        // Draw results list (leave 1 row for help footer before bottom border).
         let results_y = palette_area.y + 2;
-        let results_height = palette_area.height.saturating_sub(3);
+        let results_height = palette_area.height.saturating_sub(4);
         let results_area = Rect::new(
             palette_area.x + 1,
             results_y,
@@ -1162,9 +1171,19 @@ impl Widget for CommandPalette {
         );
         self.draw_results(results_area, frame);
 
+        // Draw help footer (above bottom border).
+        let footer_y = palette_area.bottom().saturating_sub(2);
+        if footer_y > results_y {
+            let footer_area = Rect::new(
+                palette_area.x + 2,
+                footer_y,
+                palette_area.width.saturating_sub(4),
+                1,
+            );
+            self.draw_help_footer(footer_area, frame);
+        }
+
         // Position cursor in query input.
-        // Calculate visual cursor position from byte offset by computing display width
-        // of the text up to the cursor position.
         let cursor_visual_pos = display_width(&self.query[..self.cursor.min(self.query.len())]);
         let cursor_x = input_area.x + cursor_visual_pos.min(input_area.width as usize) as u16;
         frame.cursor_position = Some((cursor_x, input_area.y));
@@ -1271,6 +1290,52 @@ impl CommandPalette {
                 cell.fg = border_fg;
                 cell.bg = bg;
             }
+        }
+    }
+
+    /// Draw a contextual help footer at the bottom of the palette.
+    fn draw_help_footer(&self, area: Rect, frame: &mut Frame) {
+        if area.is_empty() {
+            return;
+        }
+
+        let bg = PackedRgba::rgb(30, 30, 40);
+        let text_fg = PackedRgba::rgb(100, 100, 120);
+
+        // If there's a notification, show it instead of help text
+        let (help, fg) = if let Some(ref notif) = self.notification {
+            (notif.clone(), PackedRgba::rgb(100, 220, 100)) // green for notifications
+        } else if self.in_completion_mode {
+            let count = self.completion_filtered.len();
+            let text = if count > 0 {
+                format!(
+                    "\u{2191}\u{2193}navigate  Enter select  Esc cancel  Bksp back  ({count})"
+                )
+            } else {
+                "Enter=free text  Esc=cancel  Bksp=back".to_string()
+            };
+            (text, text_fg)
+        } else {
+            let count = self.filtered.len();
+            (
+                format!(
+                    "\u{2191}\u{2193}navigate  Enter=run  Esc=close  ({count} commands)"
+                ),
+                text_fg,
+            )
+        };
+
+        let mut col = area.x;
+        for ch in help.chars() {
+            if col >= area.right() {
+                break;
+            }
+            if let Some(cell) = frame.buffer.get_mut(col, area.y) {
+                cell.content = CellContent::from_char(ch);
+                cell.fg = fg;
+                cell.bg = bg;
+            }
+            col += 1;
         }
     }
 
