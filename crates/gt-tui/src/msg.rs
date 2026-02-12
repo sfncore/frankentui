@@ -1,5 +1,7 @@
 use ftui_core::event::{Event, KeyEvent, MouseEvent};
 
+use ftui_widgets::command_palette::CompletionItem;
+
 use crate::data::{BeadsSnapshot, ConvoyItem, FormulaDetail, FormulaItem, GtEvent, MailMessage, TownStatus};
 use crate::screen::ActiveScreen;
 use crate::tmux::TmuxSnapshot;
@@ -34,6 +36,8 @@ pub enum Msg {
     FormulasRefresh(Vec<FormulaItem>),
     /// Formula detail loaded async.
     FormulaDetailLoaded(FormulaDetail),
+    /// Async carapace completions arrived for the current arg-fill step.
+    CarapaceCompletions(Vec<CompletionItem>),
     Tick,
     Noop,
 }

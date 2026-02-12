@@ -568,6 +568,8 @@ impl GtApp {
                     "Arg fill: {} ({} candidates)",
                     prompt, item_count
                 ));
+                // Spawn async carapace task to enrich completions
+                let carapace_cmd = self.spawn_carapace_task(id, &[]);
                 self.arg_fill = Some(ArgFillState {
                     command: id.to_string(),
                     args,
@@ -575,7 +577,7 @@ impl GtApp {
                     current: 0,
                 });
                 self.palette.enter_completion_mode(&prompt, items);
-                return Cmd::None;
+                return carapace_cmd;
             }
 
             // No positional args — execute immediately
@@ -758,6 +760,47 @@ impl GtApp {
             .collect()
     }
 
+    /// Spawn an async carapace-bin task for the current arg position.
+    ///
+    /// Returns a `Cmd::Task` that calls carapace and sends the results back
+    /// via `Msg::CarapaceCompletions`.  The palette is already showing
+    /// in-memory results; when the carapace results arrive, they replace them.
+    fn spawn_carapace_task(&self, cmd: &str, filled: &[String]) -> Cmd<Msg> {
+        let mut words: Vec<String> = cmd.split_whitespace().map(String::from).collect();
+        words.extend(filled.iter().cloned());
+        words.push(String::new()); // empty = requesting next position
+
+        Cmd::Task(
+            Default::default(),
+            Box::new(move || {
+                let word_refs: Vec<&str> = words.iter().map(|s| s.as_str()).collect();
+                let completions = carapace_complete(&word_refs);
+                let items: Vec<CompletionItem> = completions
+                    .into_iter()
+                    .filter(|c| {
+                        !c.value.starts_with('/')
+                            && !c.value.starts_with('.')
+                            && !c.value.starts_with('~')
+                    })
+                    .map(|c| {
+                        let value = c.value.trim().to_string();
+                        let label = if c.display.is_empty() {
+                            value.clone()
+                        } else {
+                            c.display.clone()
+                        };
+                        CompletionItem {
+                            value,
+                            label,
+                            description: c.description,
+                        }
+                    })
+                    .collect();
+                Msg::CarapaceCompletions(items)
+            }),
+        )
+    }
+
     /// Handle a completion value being selected in arg-fill mode.
     fn handle_arg_complete(&mut self, value: String) -> Cmd<Msg> {
         if self.arg_fill.is_none() {
@@ -772,13 +815,14 @@ impl GtApp {
 
         let state = self.arg_fill.as_ref().unwrap();
         if state.current < state.args.len() {
-            // More args to fill — show next completion
+            // More args to fill — show next completion (in-memory instant + async carapace)
             let cmd = state.command.clone();
             let filled: Vec<String> = state.filled.clone();
             let prompt = format!("Select {}: ({}/{})", state.args[state.current].name, state.current + 1, state.args.len());
             let items = self.generate_completions(&state.args[state.current].source, &cmd, &filled);
+            let carapace_cmd = self.spawn_carapace_task(&cmd, &filled);
             self.palette.enter_completion_mode(&prompt, items);
-            Cmd::None
+            carapace_cmd
         } else {
             // All args filled — build and execute the command
             let state = self.arg_fill.take().unwrap();
@@ -812,7 +856,9 @@ impl GtApp {
             let filled: Vec<String> = state.filled.clone();
             let prompt = format!("Select {}: ({}/{})", state.args[state.current].name, state.current + 1, state.args.len());
             let items = self.generate_completions(&state.args[state.current].source, &cmd, &filled);
+            let carapace_cmd = self.spawn_carapace_task(&cmd, &filled);
             self.palette.enter_completion_mode(&prompt, items);
+            return carapace_cmd;
         } else {
             // At first arg — exit arg-fill, return to normal palette
             self.arg_fill = None;
@@ -1176,6 +1222,17 @@ impl Model for GtApp {
                     message: format!("$ {} → {}", cmd, truncated.replace('\n', " ")),
                 };
                 self.event_feed_screen.push_real_event(&event);
+                Cmd::None
+            }
+            Msg::CarapaceCompletions(items) => {
+                // Async carapace results arrived — update palette if still in completion mode
+                if self.palette.is_in_completion_mode() && !items.is_empty() {
+                    self.event_viewer.push(format!(
+                        "Carapace: {} completions",
+                        items.len()
+                    ));
+                    self.palette.update_completion_items(items);
+                }
                 Cmd::None
             }
             Msg::SwitchScreen(screen) => {

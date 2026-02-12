@@ -660,6 +660,34 @@ impl CommandPalette {
         self.update_completion_filtered();
     }
 
+    /// Replace completion items while staying in completion mode.
+    ///
+    /// Preserves the current query and re-filters against the new items.
+    /// Use this for async updates (e.g. carapace results arriving).
+    pub fn update_completion_items(&mut self, items: Vec<CompletionItem>) {
+        if !self.in_completion_mode {
+            return;
+        }
+
+        // Rebuild label caches
+        self.completion_labels_cache.clear();
+        self.completion_labels_lower.clear();
+        self.completion_labels_word_starts.clear();
+        for item in &items {
+            self.completion_labels_cache.push(item.label.clone());
+            let lower = item.label.to_lowercase();
+            self.completion_labels_word_starts.push(compute_word_starts(&lower));
+            self.completion_labels_lower.push(lower);
+        }
+        self.completion_items = items;
+
+        // Re-filter with current query (preserves user's typing)
+        self.scorer.invalidate();
+        self.selected = 0;
+        self.scroll_offset = 0;
+        self.update_completion_filtered();
+    }
+
     /// Exit completion mode, returning to normal action mode. Palette stays open.
     pub fn exit_completion_mode(&mut self) {
         self.in_completion_mode = false;
