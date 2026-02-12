@@ -37,7 +37,7 @@ impl ActiveScreen {
             Self::Beads => "Beads",
             Self::Rigs => "Rigs",
             Self::TmuxCommander => "Tmux",
-            Self::Formulas => "Formulas",
+            Self::Formulas => "Layouts",
             Self::Docs => "Docs",
         }
     }

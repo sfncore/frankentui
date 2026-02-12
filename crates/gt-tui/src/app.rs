@@ -70,8 +70,8 @@ fn gas_town_actions(cli_docs: &[CliCommand]) -> Vec<ActionItem> {
             .with_description("Full tmux session/window/pane control (F8)")
             .with_tags(&["screen", "tmux", "sessions", "windows", "panes"])
             .with_category("Navigation"),
-        ActionItem::new("screen-formulas", "Formulas")
-            .with_description("Manage tmuxrs layout formulas (F9)")
+        ActionItem::new("screen-formulas", "Layouts")
+            .with_description("Manage tmuxrs layouts (F9)")
             .with_tags(&["screen", "formulas", "layouts", "tmuxrs", "config"])
             .with_category("Navigation"),
         ActionItem::new("screen-docs", "CLI Docs Browser")
