@@ -22,7 +22,7 @@ use ftui_widgets::paragraph::Paragraph;
 use ftui_widgets::table::{Row, Table, TableState};
 use ftui_widgets::{StatefulWidget, Widget};
 
-use crate::data::CliCommand;
+use crate::data::{self, CliCommand};
 use crate::msg::Msg;
 
 // ---------------------------------------------------------------------------
@@ -89,7 +89,69 @@ fn fuzzy_score(query: &str, haystack: &str) -> Option<u32> {
 enum Focus {
     Search,
     Results,
-    ArgsInput,
+    Builder,
+}
+
+/// Tracks one positional arg slot in the command builder.
+struct BuilderArg {
+    /// Name from usage (e.g. "bead-id").
+    name: String,
+    /// User-supplied value (empty until filled).
+    value: String,
+}
+
+/// State for the step-by-step command builder panel.
+struct CommandBuilder {
+    /// Base command path (e.g. "gt sling").
+    base_cmd: String,
+    /// Positional args parsed from usage.
+    args: Vec<BuilderArg>,
+    /// Index of the arg currently being filled.
+    current: usize,
+    /// Set to true once all args are filled and command is ready.
+    ready: bool,
+}
+
+impl CommandBuilder {
+    fn from_command(cmd: &CliCommand) -> Self {
+        let positional = data::parse_positional_args(&cmd.usage);
+        let args = positional
+            .into_iter()
+            .map(|name| BuilderArg { name, value: String::new() })
+            .collect();
+        Self {
+            base_cmd: cmd.cmd.clone(),
+            args,
+            current: 0,
+            ready: false,
+        }
+    }
+
+    /// Build the full command string with filled args.
+    fn full_command(&self) -> String {
+        let mut parts = vec![self.base_cmd.clone()];
+        for arg in &self.args {
+            if !arg.value.is_empty() {
+                parts.push(arg.value.clone());
+            }
+        }
+        parts.join(" ")
+    }
+
+    /// Current arg being edited.
+    fn current_input(&self) -> &str {
+        self.args.get(self.current).map(|a| a.value.as_str()).unwrap_or("")
+    }
+
+    /// Current arg being edited (mutable).
+    fn current_input_mut(&mut self) -> Option<&mut String> {
+        self.args.get_mut(self.current).map(|a| &mut a.value)
+    }
+
+    /// Check whether all args are filled and mark ready.
+    fn check_ready(&mut self) {
+        self.ready = self.args.iter().all(|a| !a.value.is_empty());
+    }
 }
 
 pub struct DocsBrowserScreen {
@@ -100,10 +162,8 @@ pub struct DocsBrowserScreen {
     table_state: RefCell<TableState>,
     selected_detail: Option<usize>, // index into filtered
     last_run_output: Option<String>,
-    /// Pre-filled command for args input mode.
-    args_command: String,
-    /// User-typed arguments in args input mode.
-    args_input: String,
+    /// Command builder state (active when user hits Enter on a command with args).
+    builder: Option<CommandBuilder>,
     tick_count: u64,
 }
 
@@ -118,8 +178,7 @@ impl DocsBrowserScreen {
             table_state: RefCell::new(TableState::default()),
             selected_detail: None,
             last_run_output: None,
-            args_command: String::new(),
-            args_input: String::new(),
+            builder: None,
             tick_count: 0,
         };
         s.refilter();
@@ -181,8 +240,8 @@ impl DocsBrowserScreen {
         self.all_commands.get(cmd_idx)
     }
 
-    /// Enter args input mode for the selected command.
-    fn enter_args_mode(&mut self) {
+    /// Enter command builder mode for the selected command.
+    fn enter_builder_mode(&mut self) {
         let cmd = match self.selected_command() {
             Some(c) => c.clone(),
             None => return,
@@ -192,9 +251,26 @@ impl DocsBrowserScreen {
             self.run_command_with_args(&cmd.cmd, "--help");
             return;
         }
-        self.args_command = cmd.cmd.clone();
-        self.args_input.clear();
-        self.focus = Focus::ArgsInput;
+
+        let builder = CommandBuilder::from_command(&cmd);
+        if builder.args.is_empty() {
+            // No positional args — execute immediately
+            return;
+        }
+        self.builder = Some(builder);
+        self.focus = Focus::Builder;
+    }
+
+    /// Execute the selected command directly (no args needed).
+    fn execute_no_args(&mut self) -> Cmd<Msg> {
+        let cmd = match self.selected_command() {
+            Some(c) => c.clone(),
+            None => return Cmd::None,
+        };
+        if cmd.is_parent {
+            return self.run_command_with_args(&cmd.cmd, "--help");
+        }
+        self.run_command_with_args(&cmd.cmd, "")
     }
 
     /// Execute a command with the given args string (async via Cmd::Task).
@@ -246,14 +322,14 @@ impl DocsBrowserScreen {
     }
 
     pub fn consumes_text_input(&self) -> bool {
-        matches!(self.focus, Focus::Search | Focus::ArgsInput)
+        matches!(self.focus, Focus::Search | Focus::Builder)
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> Cmd<Msg> {
         match self.focus {
             Focus::Search => { self.handle_search_key(key); Cmd::None }
-            Focus::Results => { self.handle_results_key(key); Cmd::None }
-            Focus::ArgsInput => self.handle_args_key(key),
+            Focus::Results => self.handle_results_key(key),
+            Focus::Builder => self.handle_builder_key(key),
         }
     }
 
@@ -287,7 +363,7 @@ impl DocsBrowserScreen {
         }
     }
 
-    fn handle_results_key(&mut self, key: &KeyEvent) {
+    fn handle_results_key(&mut self, key: &KeyEvent) -> Cmd<Msg> {
         let count = self.filtered.len();
         match (key.code, key.modifiers) {
             (KeyCode::Escape, _) | (KeyCode::BackTab, _) => {
@@ -324,33 +400,83 @@ impl DocsBrowserScreen {
                 }
             }
             (KeyCode::Enter, _) => {
-                self.enter_args_mode();
+                // If command has positional args → open builder, else execute directly
+                let has_args = self.selected_command()
+                    .map(|c| !data::parse_positional_args(&c.usage).is_empty())
+                    .unwrap_or(false);
+                if has_args {
+                    self.enter_builder_mode();
+                } else {
+                    return self.execute_no_args();
+                }
             }
             (KeyCode::Char('/'), _) => {
                 self.focus = Focus::Search;
             }
             _ => {}
         }
+        Cmd::None
     }
 
-    fn handle_args_key(&mut self, key: &KeyEvent) -> Cmd<Msg> {
+    fn handle_builder_key(&mut self, key: &KeyEvent) -> Cmd<Msg> {
+        let builder = match self.builder.as_mut() {
+            Some(b) => b,
+            None => { self.focus = Focus::Results; return Cmd::None; }
+        };
+
         match (key.code, key.modifiers) {
             (KeyCode::Escape, _) => {
+                self.builder = None;
                 self.focus = Focus::Results;
             }
             (KeyCode::Enter, _) => {
-                let cmd = self.args_command.clone();
-                let args = self.args_input.clone();
-                return self.run_command_with_args(&cmd, &args);
+                if builder.ready {
+                    // All args filled — execute
+                    let full = builder.full_command();
+                    self.builder = None;
+                    return self.run_command_with_args(&full, "");
+                }
+                // Current arg entered — advance to next
+                if let Some(input) = builder.current_input_mut() {
+                    if !input.is_empty() {
+                        builder.current += 1;
+                        if builder.current >= builder.args.len() {
+                            builder.current = builder.args.len() - 1;
+                        }
+                        builder.check_ready();
+                    }
+                }
+            }
+            (KeyCode::Tab, _) => {
+                // Cycle to next arg
+                if !builder.args.is_empty() {
+                    builder.current = (builder.current + 1) % builder.args.len();
+                }
+            }
+            (KeyCode::BackTab, _) => {
+                // Cycle to previous arg
+                if !builder.args.is_empty() {
+                    if builder.current > 0 {
+                        builder.current -= 1;
+                    } else {
+                        builder.current = builder.args.len() - 1;
+                    }
+                }
             }
             (KeyCode::Backspace, _) => {
-                self.args_input.pop();
+                if let Some(input) = builder.current_input_mut() {
+                    input.pop();
+                    builder.check_ready();
+                }
             }
             (KeyCode::Char('c'), m) if m.contains(Modifiers::CTRL) => {
                 // Let global handler deal with Ctrl+C
             }
             (KeyCode::Char(c), _) => {
-                self.args_input.push(c);
+                if let Some(input) = builder.current_input_mut() {
+                    input.push(c);
+                    builder.check_ready();
+                }
             }
             _ => {}
         }
@@ -634,14 +760,16 @@ impl DocsBrowserScreen {
             lines.push(Line::raw(""));
         }
 
-        // Help hint
+        // Help hint — varies based on whether command has args
+        let has_args = !data::parse_positional_args(&cmd.usage).is_empty();
+        let enter_hint = if has_args { "build command" } else { "run" };
         lines.push(Line::from_spans([
             Span::styled(
                 "[Enter] ",
                 Style::new().fg(theme::accent::PRIMARY).bold(),
             ),
             Span::styled(
-                "run with args",
+                enter_hint,
                 Style::new().fg(theme::fg::MUTED),
             ),
             Span::styled(
@@ -675,12 +803,12 @@ impl DocsBrowserScreen {
             return;
         }
 
-        let has_args_bar = self.focus == Focus::ArgsInput;
-        let constraints = if has_args_bar {
+        let has_builder = self.builder.is_some();
+        let constraints = if has_builder {
             vec![
                 Constraint::Fixed(3),  // Search bar
                 Constraint::Fill,      // Content
-                Constraint::Fixed(3),  // Args input bar
+                Constraint::Fixed(7),  // Command builder
             ]
         } else {
             vec![
@@ -703,19 +831,35 @@ impl DocsBrowserScreen {
         self.render_results_table(frame, content[0]);
         self.render_detail(frame, content[1]);
 
-        if has_args_bar && main.len() > 2 {
-            self.render_args_bar(frame, main[2]);
+        if has_builder && main.len() > 2 {
+            self.render_builder(frame, main[2]);
         }
     }
 
-    fn render_args_bar(&self, frame: &mut Frame, area: Rect) {
-        let title = format!(" {} ", self.args_command);
+    fn render_builder(&self, frame: &mut Frame, area: Rect) {
+        let builder = match &self.builder {
+            Some(b) => b,
+            None => return,
+        };
+
+        let is_active = self.focus == Focus::Builder;
+        let border_style = if is_active {
+            Style::new().fg(theme::accent::PRIMARY).bg(theme::bg::DEEP)
+        } else {
+            Style::new().fg(theme::fg::MUTED)
+        };
+
+        let title = if builder.ready {
+            " Command Builder \u{2714} Ready "
+        } else {
+            " Command Builder "
+        };
         let block = Block::new()
-            .title(title.as_str())
+            .title(title)
             .title_alignment(Alignment::Left)
             .borders(Borders::ALL)
-            .border_type(BorderType::Double)
-            .style(Style::new().fg(theme::accent::PRIMARY));
+            .border_type(if is_active { BorderType::Double } else { BorderType::Rounded })
+            .style(border_style);
 
         let inner = block.inner(area);
         block.render(area, frame);
@@ -724,9 +868,92 @@ impl DocsBrowserScreen {
             return;
         }
 
-        let display = format!("{}\u{2588}", self.args_input);
-        Paragraph::new(display.as_str())
-            .style(Style::new().fg(theme::fg::PRIMARY).bold())
-            .render(inner, frame);
+        let accent = Style::new().fg(theme::accent::PRIMARY).bold();
+        let muted = Style::new().fg(theme::fg::MUTED);
+        let filled_style = Style::new().fg(theme::accent::SUCCESS).bold();
+        let active_style = Style::new().fg(theme::accent::INFO).bold();
+        let placeholder_style = Style::new().fg(theme::fg::DISABLED);
+
+        let mut lines: Vec<Line> = Vec::new();
+
+        // Line 1: Command preview — show full command being built
+        let mut cmd_spans: Vec<Span> = vec![
+            Span::styled("$ ", muted),
+            Span::styled(&builder.base_cmd, accent),
+        ];
+        for (i, arg) in builder.args.iter().enumerate() {
+            cmd_spans.push(Span::raw(" "));
+            if !arg.value.is_empty() {
+                cmd_spans.push(Span::styled(&arg.value, filled_style));
+            } else if i == builder.current {
+                cmd_spans.push(Span::styled(
+                    format!("<{}>", arg.name),
+                    active_style,
+                ));
+            } else {
+                cmd_spans.push(Span::styled(
+                    format!("<{}>", arg.name),
+                    placeholder_style,
+                ));
+            }
+        }
+        lines.push(Line::from_spans(cmd_spans));
+
+        // Line 2: blank
+        lines.push(Line::raw(""));
+
+        // Line 3: Arg slots with status indicators
+        let mut slot_spans: Vec<Span> = vec![Span::styled("Args: ", muted)];
+        for (i, arg) in builder.args.iter().enumerate() {
+            if i > 0 {
+                slot_spans.push(Span::styled("  ", muted));
+            }
+            let indicator = if !arg.value.is_empty() {
+                "\u{2714}" // ✔
+            } else if i == builder.current {
+                "\u{25b6}" // ▶
+            } else {
+                "\u{25cb}" // ○
+            };
+            let style = if i == builder.current {
+                active_style
+            } else if !arg.value.is_empty() {
+                filled_style
+            } else {
+                placeholder_style
+            };
+            slot_spans.push(Span::styled(
+                format!("{indicator} {}", arg.name),
+                style,
+            ));
+        }
+        lines.push(Line::from_spans(slot_spans));
+
+        // Line 4: Current input
+        let current_label = builder.args.get(builder.current)
+            .map(|a| a.name.as_str())
+            .unwrap_or("?");
+        let current_val = builder.current_input();
+        let cursor = if is_active { "\u{2588}" } else { "" };
+        lines.push(Line::from_spans([
+            Span::styled(format!("{current_label}: "), active_style),
+            Span::styled(format!("{current_val}{cursor}"), Style::new().fg(theme::fg::PRIMARY).bold()),
+        ]));
+
+        // Line 5: Hints
+        let hint = if builder.ready {
+            "[Enter] run  [Tab] edit args  [Esc] cancel"
+        } else {
+            "[Enter] next arg  [Tab/Shift+Tab] switch  [Esc] cancel"
+        };
+        lines.push(Line::styled(hint, muted));
+
+        for (i, line) in lines.iter().enumerate() {
+            if i as u16 >= inner.height {
+                break;
+            }
+            let row = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
+            Paragraph::new(line.clone()).render(row, frame);
+        }
     }
 }

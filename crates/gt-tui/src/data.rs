@@ -270,6 +270,28 @@ pub fn load_cli_docs() -> Vec<CliCommand> {
     }
 }
 
+/// Extract positional arg names from a usage string.
+///
+/// E.g. `"gt sling <bead-or-formula> [target] [flags]"` → `["bead-or-formula"]`
+///
+/// Only returns required `<angle-bracket>` args.
+pub fn parse_positional_args(usage: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut rest = usage;
+    while let Some(start) = rest.find('<') {
+        if let Some(end) = rest[start..].find('>') {
+            let name = &rest[start + 1..start + end];
+            if !name.is_empty() {
+                args.push(name.to_string());
+            }
+            rest = &rest[start + end + 1..];
+        } else {
+            break;
+        }
+    }
+    args
+}
+
 // --- CLI helpers ---
 
 fn run_bd(args: &[&str]) -> Option<String> {

@@ -16,7 +16,7 @@ use ftui_widgets::spinner::SpinnerState;
 use ftui_widgets::status_line::{StatusItem, StatusLine};
 use ftui_widgets::Widget;
 
-use crate::data::{self, AgentInfo, BeadsSnapshot, CliCommand, ConvoyItem, FormulaItem, TownStatus};
+use crate::data::{self, AgentInfo, BeadsSnapshot, CliCommand, ConvoyItem, FormulaItem, TownStatus, parse_positional_args};
 use crate::msg::Msg;
 use crate::panels;
 use crate::screen::ActiveScreen;
@@ -196,9 +196,21 @@ fn gas_town_actions(cli_docs: &[CliCommand]) -> Vec<ActionItem> {
         // Use all words as tags for fuzzy matching
         let words: Vec<&str> = cmd.cmd.split_whitespace().collect();
 
+        // Build description: include positional args from usage if any
+        let pos_args = parse_positional_args(&cmd.usage);
+        let description = if pos_args.is_empty() {
+            cmd.short.clone()
+        } else {
+            let args_str = pos_args.iter()
+                .map(|a| format!("<{a}>"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("{args_str} \u{2014} {}", cmd.short)
+        };
+
         items.push(
             ActionItem::new(&cmd.cmd, &cmd.cmd)
-                .with_description(&cmd.short)
+                .with_description(&description)
                 .with_tags(&words)
                 .with_category(category),
         );
@@ -396,6 +408,8 @@ pub struct GtApp {
     pub layout_manager: LayoutManagerScreen,
     pub workflows_screen: WorkflowsScreen,
     pub formulas: Vec<FormulaItem>,
+    /// CLI docs for looking up usage/args at runtime.
+    cli_docs: Vec<CliCommand>,
     // Arg-fill state for command palette completions
     arg_fill: Option<ArgFillState>,
     // Global UI
@@ -442,7 +456,8 @@ impl GtApp {
             agent_screen: AgentDetailScreen::new(),
             mail_screen: MailInboxScreen::new(),
             beads_screen: BeadsOverviewScreen::new(),
-            docs_screen: DocsBrowserScreen::new(cli_docs),
+            docs_screen: DocsBrowserScreen::new(cli_docs.clone()),
+            cli_docs,
             rigs_screen: RigsScreen::new(),
             tmux_commander: TmuxCommanderScreen::new(),
             layout_manager,
@@ -498,8 +513,9 @@ impl GtApp {
             ]);
         }
 
-        // CLI command selected — try arg-fill mode if we know the args.
+        // CLI command selected — check for args from docs.
         if id.starts_with("gt ") || id.starts_with("bd ") {
+            // Check if we have guided completions for this command
             if let Some(args) = command_args(id) {
                 // Enter structured arg-fill mode
                 let first_arg = &args[0];
@@ -519,13 +535,24 @@ impl GtApp {
                 self.palette.enter_completion_mode(&prompt, items);
                 return Cmd::None;
             }
-            // No arg defs — fall back to pre-fill behavior.
-            // open() first (resets state + makes visible), THEN set_query
-            // (open() clears the query, so set_query must come after).
-            let prefill = format!("{} ", id);
-            self.palette.open();
-            self.palette.set_query(&prefill);
-            return Cmd::None;
+
+            // Look up the command in docs to check for positional args
+            let has_positional_args = self.cli_docs.iter()
+                .find(|c| c.cmd == id)
+                .map(|c| !parse_positional_args(&c.usage).is_empty())
+                .unwrap_or(false);
+
+            if has_positional_args {
+                // Command needs args but no guided completions — pre-fill
+                let prefill = format!("{} ", id);
+                self.palette.open();
+                self.palette.set_query(&prefill);
+                return Cmd::None;
+            }
+
+            // No positional args — execute immediately
+            self.palette.close();
+            return self.execute_raw_command(id);
         }
 
         self.event_viewer
