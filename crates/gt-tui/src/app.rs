@@ -504,6 +504,11 @@ impl GtApp {
                 let first_arg = &args[0];
                 let prompt = format!("Select {}: (1/{})", first_arg.name, args.len());
                 let items = self.generate_completions(&first_arg.source);
+                let item_count = items.len();
+                self.event_viewer.push(format!(
+                    "Arg fill: {} ({} candidates)",
+                    prompt, item_count
+                ));
                 self.arg_fill = Some(ArgFillState {
                     command: id.to_string(),
                     args,
@@ -513,10 +518,12 @@ impl GtApp {
                 self.palette.enter_completion_mode(&prompt, items);
                 return Cmd::None;
             }
-            // No arg defs — fall back to pre-fill behavior
+            // No arg defs — fall back to pre-fill behavior.
+            // open() first (resets state + makes visible), THEN set_query
+            // (open() clears the query, so set_query must come after).
             let prefill = format!("{} ", id);
-            self.palette.set_query(&prefill);
             self.palette.open();
+            self.palette.set_query(&prefill);
             return Cmd::None;
         }
 
