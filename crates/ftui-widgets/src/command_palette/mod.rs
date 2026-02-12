@@ -170,6 +170,17 @@ impl ActionItem {
 // Palette Action
 // ---------------------------------------------------------------------------
 
+/// A completion candidate for arg-fill mode.
+#[derive(Debug, Clone)]
+pub struct CompletionItem {
+    /// Actual value inserted when selected.
+    pub value: String,
+    /// Display text (scored by fuzzy matcher).
+    pub label: String,
+    /// Detail shown right of label.
+    pub description: String,
+}
+
 /// Action returned from event handling.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaletteAction {
@@ -177,6 +188,10 @@ pub enum PaletteAction {
     Execute(String),
     /// User dismissed the palette (Esc).
     Dismiss,
+    /// Completion selected in arg-fill mode (contains the value).
+    Complete(String),
+    /// Backspace on empty query in completion mode — go back one arg.
+    CompleteBack,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -371,6 +386,22 @@ pub struct CommandPalette {
     /// Telemetry timing anchor (only when tracing feature is enabled).
     #[cfg(feature = "tracing")]
     opened_at: Option<Instant>,
+
+    // --- Completion mode state ---
+    /// Whether we're in completion mode (arg-fill).
+    in_completion_mode: bool,
+    /// Title prompt for completion mode (e.g. "Select bead: (1/2)").
+    completion_prompt: Option<String>,
+    /// Completion candidates.
+    completion_items: Vec<CompletionItem>,
+    /// Cached labels for scoring.
+    completion_labels_cache: Vec<String>,
+    /// Cached lowercased labels.
+    completion_labels_lower: Vec<String>,
+    /// Cached word-start positions for each label.
+    completion_labels_word_starts: Vec<Vec<usize>>,
+    /// Filtered completion results (action_index = index into completion_items).
+    completion_filtered: Vec<ScoredItem>,
 }
 
 impl Default for CommandPalette {
@@ -400,6 +431,13 @@ impl CommandPalette {
             max_visible: 10,
             #[cfg(feature = "tracing")]
             opened_at: None,
+            in_completion_mode: false,
+            completion_prompt: None,
+            completion_items: Vec::new(),
+            completion_labels_cache: Vec::new(),
+            completion_labels_lower: Vec::new(),
+            completion_labels_word_starts: Vec::new(),
+            completion_filtered: Vec::new(),
         }
     }
 
@@ -582,9 +620,73 @@ impl CommandPalette {
         self.update_filtered(false);
     }
 
-    /// Number of filtered results.
+    /// Number of filtered results (completion or action mode).
     pub fn result_count(&self) -> usize {
-        self.filtered.len()
+        if self.in_completion_mode {
+            self.completion_filtered.len()
+        } else {
+            self.filtered.len()
+        }
+    }
+
+    // --- Completion Mode ---
+
+    /// Enter completion mode: show completion candidates with a prompt.
+    ///
+    /// The palette stays open. Query is cleared. The title changes to `prompt`.
+    pub fn enter_completion_mode(&mut self, prompt: &str, items: Vec<CompletionItem>) {
+        self.in_completion_mode = true;
+        self.completion_prompt = Some(prompt.to_string());
+
+        // Build label caches for scoring
+        self.completion_labels_cache.clear();
+        self.completion_labels_lower.clear();
+        self.completion_labels_word_starts.clear();
+        for item in &items {
+            self.completion_labels_cache.push(item.label.clone());
+            let lower = item.label.to_lowercase();
+            self.completion_labels_word_starts.push(compute_word_starts(&lower));
+            self.completion_labels_lower.push(lower);
+        }
+        self.completion_items = items;
+
+        // Reset query and selection
+        self.query.clear();
+        self.cursor = 0;
+        self.selected = 0;
+        self.scroll_offset = 0;
+        self.scorer.invalidate();
+        self.visible = true;
+        self.update_completion_filtered();
+    }
+
+    /// Exit completion mode, returning to normal action mode. Palette stays open.
+    pub fn exit_completion_mode(&mut self) {
+        self.in_completion_mode = false;
+        self.completion_prompt = None;
+        self.completion_items.clear();
+        self.completion_labels_cache.clear();
+        self.completion_labels_lower.clear();
+        self.completion_labels_word_starts.clear();
+        self.completion_filtered.clear();
+        self.query.clear();
+        self.cursor = 0;
+        self.selected = 0;
+        self.scroll_offset = 0;
+        self.scorer.invalidate();
+    }
+
+    /// Whether the palette is currently in completion mode.
+    #[inline]
+    pub fn is_in_completion_mode(&self) -> bool {
+        self.in_completion_mode
+    }
+
+    /// Get the currently selected completion item, if any.
+    pub fn selected_completion(&self) -> Option<&CompletionItem> {
+        self.completion_filtered
+            .get(self.selected)
+            .map(|si| &self.completion_items[si.action_index])
     }
 
     /// Currently selected index.
@@ -669,6 +771,10 @@ impl CommandPalette {
 
     /// Handle a key press while the palette is open.
     fn handle_key(&mut self, code: KeyCode, modifiers: Modifiers) -> Option<PaletteAction> {
+        if self.in_completion_mode {
+            return self.handle_completion_key(code, modifiers);
+        }
+
         match code {
             KeyCode::Escape => {
                 self.close_with_reason(PaletteCloseReason::Dismiss);
@@ -819,11 +925,143 @@ impl CommandPalette {
         }
     }
 
+    /// Re-score completion items against the current query.
+    fn update_completion_filtered(&mut self) {
+        // Use a separate generation so the scorer doesn't confuse action corpus with completion corpus.
+        let completion_gen = self.generation.wrapping_add(1_000_000);
+
+        let results = self.scorer.score_corpus_with_lowered_and_words(
+            &self.query,
+            &self.completion_labels_cache,
+            &self.completion_labels_lower,
+            &self.completion_labels_word_starts,
+            Some(completion_gen),
+        );
+
+        self.completion_filtered = results
+            .into_iter()
+            .map(|(idx, result)| ScoredItem {
+                action_index: idx,
+                result,
+            })
+            .collect();
+
+        if !self.completion_filtered.is_empty() {
+            self.selected = self.selected.min(self.completion_filtered.len() - 1);
+        } else {
+            self.selected = 0;
+        }
+    }
+
+    /// Handle a key press in completion mode.
+    fn handle_completion_key(&mut self, code: KeyCode, modifiers: Modifiers) -> Option<PaletteAction> {
+        match code {
+            KeyCode::Escape => {
+                self.exit_completion_mode();
+                self.close_with_reason(PaletteCloseReason::Dismiss);
+                return Some(PaletteAction::Dismiss);
+            }
+
+            KeyCode::Enter => {
+                if let Some(si) = self.completion_filtered.get(self.selected) {
+                    let value = self.completion_items[si.action_index].value.clone();
+                    return Some(PaletteAction::Complete(value));
+                }
+                // No matches but non-empty query: free text
+                if !self.query.is_empty() {
+                    let value = self.query.clone();
+                    return Some(PaletteAction::Complete(value));
+                }
+            }
+
+            KeyCode::Backspace => {
+                if self.query.is_empty() {
+                    return Some(PaletteAction::CompleteBack);
+                }
+                self.query.pop();
+                self.cursor = self.query.len();
+                self.selected = 0;
+                self.scroll_offset = 0;
+                self.update_completion_filtered();
+            }
+
+            KeyCode::Up => {
+                if self.selected > 0 {
+                    self.selected -= 1;
+                    self.adjust_scroll();
+                }
+            }
+
+            KeyCode::Down => {
+                if !self.completion_filtered.is_empty() && self.selected < self.completion_filtered.len() - 1 {
+                    self.selected += 1;
+                    self.adjust_scroll();
+                }
+            }
+
+            KeyCode::PageUp => {
+                self.selected = self.selected.saturating_sub(self.max_visible);
+                self.adjust_scroll();
+            }
+
+            KeyCode::PageDown => {
+                if !self.completion_filtered.is_empty() {
+                    self.selected = (self.selected + self.max_visible).min(self.completion_filtered.len() - 1);
+                    self.adjust_scroll();
+                }
+            }
+
+            KeyCode::Home => {
+                self.selected = 0;
+                self.scroll_offset = 0;
+            }
+
+            KeyCode::End => {
+                if !self.completion_filtered.is_empty() {
+                    self.selected = self.completion_filtered.len() - 1;
+                    self.adjust_scroll();
+                }
+            }
+
+            KeyCode::Char(c) => {
+                if modifiers.contains(Modifiers::CTRL) {
+                    if c == 'u' {
+                        self.query.clear();
+                        self.cursor = 0;
+                        self.selected = 0;
+                        self.scroll_offset = 0;
+                        self.update_completion_filtered();
+                    }
+                } else {
+                    self.query.push(c);
+                    self.cursor = self.query.len();
+                    self.selected = 0;
+                    self.scroll_offset = 0;
+                    self.update_completion_filtered();
+                }
+            }
+
+            _ => {}
+        }
+
+        None
+    }
+
     fn close_with_reason(&mut self, _reason: PaletteCloseReason) {
         self.visible = false;
         self.query.clear();
         self.cursor = 0;
         self.filtered.clear();
+        // Also clear completion state
+        if self.in_completion_mode {
+            self.in_completion_mode = false;
+            self.completion_prompt = None;
+            self.completion_items.clear();
+            self.completion_labels_cache.clear();
+            self.completion_labels_lower.clear();
+            self.completion_labels_word_starts.clear();
+            self.completion_filtered.clear();
+        }
         #[cfg(feature = "tracing")]
         {
             self.opened_at = None;
@@ -855,7 +1093,12 @@ impl Widget for CommandPalette {
 
         // Calculate palette dimensions: centered, ~60% width, height based on results.
         let palette_width = (area.width * 3 / 5).max(30).min(area.width - 2);
-        let result_rows = self.filtered.len().min(self.max_visible);
+        let active_count = if self.in_completion_mode {
+            self.completion_filtered.len()
+        } else {
+            self.filtered.len()
+        };
+        let result_rows = active_count.min(self.max_visible);
         // +3 for: border top, query line, border bottom. +1 if empty hint.
         let palette_height = (result_rows as u16 + 3)
             .max(5)
@@ -949,8 +1192,14 @@ impl CommandPalette {
             cell.bg = bg;
         }
 
-        // Title "Command Palette" in top border.
-        let title = " Command Palette ";
+        // Title: completion prompt if set, else "Command Palette".
+        let title_owned;
+        let title = if let Some(ref prompt) = self.completion_prompt {
+            title_owned = format!(" {} ", prompt);
+            title_owned.as_str()
+        } else {
+            " Command Palette "
+        };
         let title_width = display_width(title).min(area.width as usize);
         let title_x = area.x + (area.width.saturating_sub(title_width as u16)) / 2;
         let title_style = Style::new().fg(PackedRgba::rgb(200, 200, 220)).bg(bg);
@@ -1017,7 +1266,11 @@ impl CommandPalette {
         // Draw query text.
         if self.query.is_empty() {
             // Placeholder.
-            let hint = "Type to search...";
+            let hint = if self.in_completion_mode {
+                "Type to filter..."
+            } else {
+                "Type to search..."
+            };
             let hint_fg = self.style.hint.fg.unwrap_or(PackedRgba::rgb(100, 100, 120));
             for (i, ch) in hint.chars().enumerate() {
                 let x = area.x + i as u16;
@@ -1062,8 +1315,13 @@ impl CommandPalette {
         }
     }
 
-    /// Draw the filtered results list.
+    /// Draw the filtered results list (dispatches to completion or action mode).
     fn draw_results(&self, area: Rect, frame: &mut Frame) {
+        if self.in_completion_mode {
+            self.draw_completion_results(area, frame);
+            return;
+        }
+
         if self.filtered.is_empty() {
             // Empty state.
             let msg = if self.query.is_empty() {
@@ -1306,6 +1564,160 @@ impl CommandPalette {
                         cell.fg = desc_fg;
                         cell.bg = row_bg;
                         cell.attrs = row_attrs;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Draw completion results (no category badge, simpler layout).
+    fn draw_completion_results(&self, area: Rect, frame: &mut Frame) {
+        if self.completion_filtered.is_empty() {
+            let msg = if self.query.is_empty() {
+                "No completions available"
+            } else {
+                "No matches (Enter to use as-is)"
+            };
+            let hint_fg = self.style.hint.fg.unwrap_or(PackedRgba::rgb(100, 100, 120));
+            let bg = PackedRgba::rgb(30, 30, 40);
+            for (i, ch) in msg.chars().enumerate() {
+                let x = area.x + 1 + i as u16;
+                if x >= area.right() {
+                    break;
+                }
+                if let Some(cell) = frame.buffer.get_mut(x, area.y) {
+                    cell.content = CellContent::from_char(ch);
+                    cell.fg = hint_fg;
+                    cell.bg = bg;
+                }
+            }
+            return;
+        }
+
+        let item_fg = self.style.item.fg.unwrap_or(PackedRgba::rgb(180, 180, 190));
+        let selected_fg = self.style.item_selected.fg.unwrap_or(PackedRgba::rgb(255, 255, 255));
+        let selected_bg = self.style.item_selected.bg.unwrap_or(PackedRgba::rgb(60, 60, 80));
+        let highlight_fg = self.style.match_highlight.fg.unwrap_or(PackedRgba::rgb(255, 200, 50));
+        let desc_fg = self.style.description.fg.unwrap_or(PackedRgba::rgb(120, 120, 140));
+        let bg = PackedRgba::rgb(30, 30, 40);
+
+        let visible_end = (self.scroll_offset + area.height as usize).min(self.completion_filtered.len());
+
+        for (row_idx, si) in self.completion_filtered[self.scroll_offset..visible_end]
+            .iter()
+            .enumerate()
+        {
+            let y = area.y + row_idx as u16;
+            if y >= area.bottom() {
+                break;
+            }
+
+            let item = &self.completion_items[si.action_index];
+            let is_selected = (self.scroll_offset + row_idx) == self.selected;
+
+            let row_fg = if is_selected { selected_fg } else { item_fg };
+            let row_bg = if is_selected { selected_bg } else { bg };
+            let row_attrs = if is_selected {
+                CellAttrs::new(CellStyleFlags::BOLD, 0)
+            } else {
+                CellAttrs::default()
+            };
+
+            // Clear row
+            for x in area.x..area.right() {
+                if let Some(cell) = frame.buffer.get_mut(x, y) {
+                    cell.content = CellContent::from_char(' ');
+                    cell.fg = row_fg;
+                    cell.bg = row_bg;
+                    cell.attrs = row_attrs;
+                }
+            }
+
+            // Selection marker
+            let mut col = area.x;
+            if is_selected
+                && let Some(cell) = frame.buffer.get_mut(col, y)
+            {
+                cell.content = CellContent::from_char('>');
+                cell.fg = highlight_fg;
+                cell.bg = row_bg;
+                cell.attrs = CellAttrs::new(CellStyleFlags::BOLD, 0);
+            }
+            col += 2;
+
+            // Label with match highlighting
+            let match_positions = &si.result.match_positions;
+            let mut char_idx = 0usize;
+            let mut match_cursor = 0usize;
+            for grapheme in graphemes(&item.label) {
+                let g_chars = grapheme.chars().count();
+                let char_end = char_idx + g_chars;
+                while match_cursor < match_positions.len()
+                    && match_positions[match_cursor] < char_idx
+                {
+                    match_cursor += 1;
+                }
+                let is_match = match_cursor < match_positions.len()
+                    && match_positions[match_cursor] < char_end;
+
+                let w = grapheme_width(grapheme);
+                if w == 0 {
+                    char_idx = char_end;
+                    continue;
+                }
+                if col >= area.right() || col.saturating_add(w as u16) > area.right() {
+                    break;
+                }
+
+                let content = if w > 1 || grapheme.chars().count() > 1 {
+                    let id = frame.intern_with_width(grapheme, w as u8);
+                    CellContent::from_grapheme(id)
+                } else if let Some(ch) = grapheme.chars().next() {
+                    CellContent::from_char(ch)
+                } else {
+                    char_idx = char_end;
+                    continue;
+                };
+
+                let mut cell = Cell::new(content);
+                cell.fg = if is_match { highlight_fg } else { row_fg };
+                cell.bg = row_bg;
+                cell.attrs = row_attrs;
+                frame.buffer.set_fast(col, y, cell);
+
+                col = col.saturating_add(w as u16);
+                char_idx = char_end;
+            }
+
+            // Description
+            if !item.description.is_empty() {
+                col += 2;
+                let max_desc_width = area.right().saturating_sub(col) as usize;
+                if max_desc_width > 5 {
+                    let mut desc_used = 0usize;
+                    for grapheme in graphemes(&item.description) {
+                        let w = grapheme_width(grapheme);
+                        if w == 0 {
+                            continue;
+                        }
+                        if desc_used + w > max_desc_width || col >= area.right() {
+                            break;
+                        }
+                        let content = if w > 1 || grapheme.chars().count() > 1 {
+                            let id = frame.intern_with_width(grapheme, w as u8);
+                            CellContent::from_grapheme(id)
+                        } else if let Some(ch) = grapheme.chars().next() {
+                            CellContent::from_char(ch)
+                        } else {
+                            continue;
+                        };
+                        let mut cell = Cell::new(content);
+                        cell.fg = desc_fg;
+                        cell.bg = row_bg;
+                        cell.attrs = row_attrs;
+                        frame.buffer.set_fast(col, y, cell);
+                        col = col.saturating_add(w as u16);
+                        desc_used += w;
                     }
                 }
             }
@@ -2906,6 +3318,292 @@ mod widget_tests {
         // Should render without panic even when scrolled
         palette.render(area, &mut frame);
         assert!(frame.cursor_position.is_some());
+    }
+
+    // -----------------------------------------------------------------------
+    // Completion mode tests
+    // -----------------------------------------------------------------------
+
+    fn make_completions() -> Vec<CompletionItem> {
+        vec![
+            CompletionItem {
+                value: "st-abc".into(),
+                label: "st-abc".into(),
+                description: "Fix auth bug".into(),
+            },
+            CompletionItem {
+                value: "st-def".into(),
+                label: "st-def".into(),
+                description: "Add feature X".into(),
+            },
+            CompletionItem {
+                value: "st-ghi".into(),
+                label: "st-ghi".into(),
+                description: "Refactor Y".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn enter_completion_mode_shows_items() {
+        let mut palette = CommandPalette::new();
+        palette.register("Alpha", None, &[]);
+        palette.open();
+
+        palette.enter_completion_mode("Select bead: (1/2)", make_completions());
+        assert!(palette.is_visible());
+        assert!(palette.is_in_completion_mode());
+        assert_eq!(palette.result_count(), 3);
+        assert_eq!(palette.query(), "");
+    }
+
+    #[test]
+    fn completion_mode_typing_filters() {
+        let mut palette = CommandPalette::new();
+        palette.open();
+        palette.enter_completion_mode("Select bead: (1/2)", make_completions());
+
+        for ch in "def".chars() {
+            let event = Event::Key(KeyEvent {
+                code: KeyCode::Char(ch),
+                modifiers: Modifiers::empty(),
+                kind: KeyEventKind::Press,
+            });
+            let _ = palette.handle_event(&event);
+        }
+
+        assert_eq!(palette.query(), "def");
+        assert!(palette.result_count() >= 1);
+    }
+
+    #[test]
+    fn completion_enter_returns_complete_action() {
+        let mut palette = CommandPalette::new();
+        palette.open();
+        palette.enter_completion_mode("Select bead: (1/2)", make_completions());
+
+        let enter = Event::Key(KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: Modifiers::empty(),
+            kind: KeyEventKind::Press,
+        });
+        let result = palette.handle_event(&enter);
+        assert!(matches!(result, Some(PaletteAction::Complete(_))));
+    }
+
+    #[test]
+    fn completion_backspace_on_empty_returns_back() {
+        let mut palette = CommandPalette::new();
+        palette.open();
+        palette.enter_completion_mode("Select rig: (2/2)", make_completions());
+
+        let bs = Event::Key(KeyEvent {
+            code: KeyCode::Backspace,
+            modifiers: Modifiers::empty(),
+            kind: KeyEventKind::Press,
+        });
+        let result = palette.handle_event(&bs);
+        assert_eq!(result, Some(PaletteAction::CompleteBack));
+    }
+
+    #[test]
+    fn completion_backspace_on_nonempty_filters() {
+        let mut palette = CommandPalette::new();
+        palette.open();
+        palette.enter_completion_mode("Select bead:", make_completions());
+
+        let a = Event::Key(KeyEvent {
+            code: KeyCode::Char('a'),
+            modifiers: Modifiers::empty(),
+            kind: KeyEventKind::Press,
+        });
+        let _ = palette.handle_event(&a);
+        assert_eq!(palette.query(), "a");
+
+        let bs = Event::Key(KeyEvent {
+            code: KeyCode::Backspace,
+            modifiers: Modifiers::empty(),
+            kind: KeyEventKind::Press,
+        });
+        let result = palette.handle_event(&bs);
+        assert!(result.is_none()); // consumed, not CompleteBack
+        assert_eq!(palette.query(), "");
+    }
+
+    #[test]
+    fn completion_escape_dismisses() {
+        let mut palette = CommandPalette::new();
+        palette.open();
+        palette.enter_completion_mode("Select bead:", make_completions());
+
+        let esc = Event::Key(KeyEvent {
+            code: KeyCode::Escape,
+            modifiers: Modifiers::empty(),
+            kind: KeyEventKind::Press,
+        });
+        let result = palette.handle_event(&esc);
+        assert_eq!(result, Some(PaletteAction::Dismiss));
+        assert!(!palette.is_visible());
+        assert!(!palette.is_in_completion_mode());
+    }
+
+    #[test]
+    fn exit_completion_mode_returns_to_actions() {
+        let mut palette = CommandPalette::new();
+        palette.register("Alpha", None, &[]);
+        palette.open();
+
+        palette.enter_completion_mode("Select bead:", make_completions());
+        assert!(palette.is_in_completion_mode());
+
+        palette.exit_completion_mode();
+        assert!(!palette.is_in_completion_mode());
+        assert!(palette.is_visible()); // palette stays open
+    }
+
+    #[test]
+    fn completion_navigation() {
+        let mut palette = CommandPalette::new();
+        palette.open();
+        palette.enter_completion_mode("Select:", make_completions());
+
+        assert_eq!(palette.selected_index(), 0);
+
+        let down = Event::Key(KeyEvent {
+            code: KeyCode::Down,
+            modifiers: Modifiers::empty(),
+            kind: KeyEventKind::Press,
+        });
+        let _ = palette.handle_event(&down);
+        assert_eq!(palette.selected_index(), 1);
+
+        let up = Event::Key(KeyEvent {
+            code: KeyCode::Up,
+            modifiers: Modifiers::empty(),
+            kind: KeyEventKind::Press,
+        });
+        let _ = palette.handle_event(&up);
+        assert_eq!(palette.selected_index(), 0);
+    }
+
+    #[test]
+    fn completion_free_text_on_no_match() {
+        let mut palette = CommandPalette::new();
+        palette.open();
+        palette.enter_completion_mode("Select:", make_completions());
+
+        // Type something that won't match
+        for ch in "zzz".chars() {
+            let event = Event::Key(KeyEvent {
+                code: KeyCode::Char(ch),
+                modifiers: Modifiers::empty(),
+                kind: KeyEventKind::Press,
+            });
+            let _ = palette.handle_event(&event);
+        }
+        assert_eq!(palette.result_count(), 0);
+
+        // Enter should return the query as free text
+        let enter = Event::Key(KeyEvent {
+            code: KeyCode::Enter,
+            modifiers: Modifiers::empty(),
+            kind: KeyEventKind::Press,
+        });
+        let result = palette.handle_event(&enter);
+        assert_eq!(result, Some(PaletteAction::Complete("zzz".into())));
+    }
+
+    #[test]
+    fn completion_selected_returns_item() {
+        let mut palette = CommandPalette::new();
+        palette.open();
+        palette.enter_completion_mode("Select:", make_completions());
+
+        let item = palette.selected_completion();
+        assert!(item.is_some());
+        assert_eq!(item.unwrap().value, "st-abc");
+    }
+
+    #[test]
+    fn completion_render_shows_title() {
+        use ftui_render::grapheme_pool::GraphemePool;
+
+        let mut palette = CommandPalette::new();
+        palette.open();
+        palette.enter_completion_mode("Select bead: (1/2)", make_completions());
+
+        let area = Rect::from_size(80, 15);
+        let mut pool = GraphemePool::new();
+        let mut frame = Frame::new(80, 15, &mut pool);
+        palette.render(area, &mut frame);
+
+        // The title should contain "Select bead"
+        let palette_y = area.y + area.height / 6;
+        let mut title_chars = String::new();
+        for x in 0..80u16 {
+            if let Some(cell) = frame.buffer.get(x, palette_y) {
+                if let Some(ch) = cell.content.as_char() {
+                    title_chars.push(ch);
+                }
+            }
+        }
+        assert!(
+            title_chars.contains("Select bead"),
+            "Title should contain completion prompt, got: {title_chars}"
+        );
+    }
+
+    #[test]
+    fn completion_ctrl_u_clears_query() {
+        let mut palette = CommandPalette::new();
+        palette.open();
+        palette.enter_completion_mode("Select:", make_completions());
+
+        // Type something
+        for ch in "abc".chars() {
+            let event = Event::Key(KeyEvent {
+                code: KeyCode::Char(ch),
+                modifiers: Modifiers::empty(),
+                kind: KeyEventKind::Press,
+            });
+            let _ = palette.handle_event(&event);
+        }
+        assert_eq!(palette.query(), "abc");
+
+        let ctrl_u = Event::Key(KeyEvent {
+            code: KeyCode::Char('u'),
+            modifiers: Modifiers::CTRL,
+            kind: KeyEventKind::Press,
+        });
+        let _ = palette.handle_event(&ctrl_u);
+        assert_eq!(palette.query(), "");
+    }
+
+    #[test]
+    fn palette_action_complete_equality() {
+        assert_eq!(
+            PaletteAction::Complete("x".into()),
+            PaletteAction::Complete("x".into())
+        );
+        assert_ne!(
+            PaletteAction::Complete("x".into()),
+            PaletteAction::Complete("y".into())
+        );
+        assert_eq!(PaletteAction::CompleteBack, PaletteAction::CompleteBack);
+        assert_ne!(PaletteAction::CompleteBack, PaletteAction::Dismiss);
+    }
+
+    #[test]
+    fn completion_item_clone_and_debug() {
+        let item = CompletionItem {
+            value: "val".into(),
+            label: "lbl".into(),
+            description: "desc".into(),
+        };
+        let cloned = item.clone();
+        assert_eq!(cloned.value, "val");
+        let debug = format!("{:?}", item);
+        assert!(debug.contains("CompletionItem"));
     }
 }
 mod property_tests;

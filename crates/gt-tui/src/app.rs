@@ -10,7 +10,7 @@ use ftui_layout::{Constraint, Flex};
 use ftui_render::cell::Cell;
 use ftui_render::frame::Frame;
 use ftui_runtime::{Cmd, Every, Model, Subscription};
-use ftui_widgets::command_palette::{ActionItem, CommandPalette, PaletteAction};
+use ftui_widgets::command_palette::{ActionItem, CommandPalette, CompletionItem, PaletteAction};
 use ftui_widgets::log_viewer::{LogViewer, LogViewerState};
 use ftui_widgets::spinner::SpinnerState;
 use ftui_widgets::status_line::{StatusItem, StatusLine};
@@ -31,6 +31,77 @@ use crate::screens::mail_inbox::MailInboxScreen;
 use crate::screens::rigs::RigsScreen;
 use crate::screens::tmux_commander::TmuxCommanderScreen;
 use crate::screens::workflows::WorkflowsScreen;
+
+// ---------------------------------------------------------------------------
+// Arg completion types
+// ---------------------------------------------------------------------------
+
+/// Defines a positional argument for a CLI command.
+struct ArgDef {
+    name: &'static str,
+    source: CompletionSource,
+}
+
+/// Where to pull completion candidates from.
+enum CompletionSource {
+    /// `self.beads.ready`
+    ReadyBeads,
+    /// `self.beads.in_progress`
+    InProgressBeads,
+    /// `self.status.rigs`
+    Rigs,
+    /// `self.all_agents`
+    Agents,
+    /// `self.formulas`
+    Formulas,
+    /// Rig polecats (agents with role "polecat")
+    Polecats,
+    /// No completions — user types freely.
+    FreeText,
+}
+
+/// Tracks the multi-step arg-fill process for a command.
+struct ArgFillState {
+    /// Base command (e.g. "gt sling").
+    command: String,
+    /// Argument definitions.
+    args: Vec<ArgDef>,
+    /// Values filled so far.
+    filled: Vec<String>,
+    /// Index of the arg currently being filled.
+    current: usize,
+}
+
+/// Map command IDs to their arg definitions (if any).
+fn command_args(id: &str) -> Option<Vec<ArgDef>> {
+    match id {
+        "gt sling" => Some(vec![
+            ArgDef { name: "bead", source: CompletionSource::ReadyBeads },
+            ArgDef { name: "rig", source: CompletionSource::Rigs },
+        ]),
+        "gt crew start" => Some(vec![
+            ArgDef { name: "rig", source: CompletionSource::Rigs },
+            ArgDef { name: "agent", source: CompletionSource::Agents },
+        ]),
+        "gt crew stop" => Some(vec![
+            ArgDef { name: "rig", source: CompletionSource::Rigs },
+            ArgDef { name: "agent", source: CompletionSource::Agents },
+        ]),
+        "gt polecat nuke" => Some(vec![
+            ArgDef { name: "target", source: CompletionSource::Polecats },
+        ]),
+        "gt nudge" => Some(vec![
+            ArgDef { name: "target", source: CompletionSource::Agents },
+        ]),
+        "bd close" => Some(vec![
+            ArgDef { name: "id", source: CompletionSource::InProgressBeads },
+        ]),
+        "gt formula run" => Some(vec![
+            ArgDef { name: "name", source: CompletionSource::Formulas },
+        ]),
+        _ => None,
+    }
+}
 
 /// Build the Gas Town action items for the command palette.
 ///
@@ -88,19 +159,20 @@ fn gas_town_actions(cli_docs: &[CliCommand]) -> Vec<ActionItem> {
     // Quick-action commands — pre-built entries for common GT operations.
     // These pre-fill the palette with the command prefix so users can add args.
     let quick_actions = [
-        ("gt sling", "Sling work to a polecat", &["sling", "dispatch", "polecat", "work"][..], "Quick Actions"),
-        ("gt crew start", "Start a crew member", &["crew", "start", "agent"], "Quick Actions"),
-        ("gt crew stop", "Stop a crew member", &["crew", "stop", "agent"], "Quick Actions"),
-        ("gt polecat nuke", "Kill polecat session + remove worktree", &["polecat", "nuke", "kill"], "Quick Actions"),
-        ("gt nudge", "Send message to agent session", &["nudge", "message", "agent"], "Quick Actions"),
+        ("gt sling", "<bead> <rig> \u{2014} Sling work to a polecat", &["sling", "dispatch", "polecat", "work"][..], "Quick Actions"),
+        ("gt crew start", "<rig> <agent> \u{2014} Start a crew member", &["crew", "start", "agent"], "Quick Actions"),
+        ("gt crew stop", "<rig> <agent> \u{2014} Stop a crew member", &["crew", "stop", "agent"], "Quick Actions"),
+        ("gt polecat nuke", "<target> \u{2014} Kill polecat session + remove worktree", &["polecat", "nuke", "kill"], "Quick Actions"),
+        ("gt nudge", "<target> \u{2014} Send message to agent session", &["nudge", "message", "agent"], "Quick Actions"),
         ("gt mail send", "Send mail to an agent", &["mail", "send", "message"], "Quick Actions"),
         ("bd create --title=", "Create a new bead/issue", &["bead", "create", "issue", "task"], "Quick Actions"),
-        ("bd close", "Close a bead/issue", &["bead", "close", "done"], "Quick Actions"),
+        ("bd close", "<id> \u{2014} Close a bead/issue", &["bead", "close", "done"], "Quick Actions"),
         ("bd ready", "Show issues ready to work", &["bead", "ready", "available"], "Quick Actions"),
         ("bd list --status=open", "List all open issues", &["bead", "list", "open"], "Quick Actions"),
         ("gt status", "Refresh town status", &["status", "refresh", "overview"], "Quick Actions"),
         ("gt rig list", "List all rigs", &["rig", "list"], "Quick Actions"),
         ("gt convoy list", "List active convoys", &["convoy", "list", "batch"], "Quick Actions"),
+        ("gt formula run", "<name> \u{2014} Run a formula", &["formula", "run", "workflow"], "Quick Actions"),
     ];
     for (cmd, desc, tags, category) in quick_actions {
         items.push(
@@ -323,6 +395,8 @@ pub struct GtApp {
     pub layout_manager: LayoutManagerScreen,
     pub workflows_screen: WorkflowsScreen,
     pub formulas: Vec<FormulaItem>,
+    // Arg-fill state for command palette completions
+    arg_fill: Option<ArgFillState>,
     // Global UI
     pub spinner_state: SpinnerState,
     pub spinner_tick: u32,
@@ -373,6 +447,7 @@ impl GtApp {
             layout_manager,
             workflows_screen: WorkflowsScreen::new(),
             formulas: Vec::new(),
+            arg_fill: None,
             spinner_state: SpinnerState::default(),
             spinner_tick: 0,
             last_refresh: Instant::now(),
@@ -422,9 +497,23 @@ impl GtApp {
             ]);
         }
 
-        // CLI command selected — pre-fill the query so user can add args.
-        // User hits Enter again to execute (intercepted above).
+        // CLI command selected — try arg-fill mode if we know the args.
         if id.starts_with("gt ") || id.starts_with("bd ") {
+            if let Some(args) = command_args(id) {
+                // Enter structured arg-fill mode
+                let first_arg = &args[0];
+                let prompt = format!("Select {}: (1/{})", first_arg.name, args.len());
+                let items = self.generate_completions(&first_arg.source);
+                self.arg_fill = Some(ArgFillState {
+                    command: id.to_string(),
+                    args,
+                    filled: Vec::new(),
+                    current: 0,
+                });
+                self.palette.enter_completion_mode(&prompt, items);
+                return Cmd::None;
+            }
+            // No arg defs — fall back to pre-fill behavior
             let prefill = format!("{} ", id);
             self.palette.set_query(&prefill);
             self.palette.open();
@@ -479,6 +568,124 @@ impl GtApp {
         agents
     }
 
+    /// Generate completion items from a data source.
+    fn generate_completions(&self, source: &CompletionSource) -> Vec<CompletionItem> {
+        match source {
+            CompletionSource::ReadyBeads => {
+                self.beads.ready.iter().map(|b| CompletionItem {
+                    value: b.id.clone(),
+                    label: b.id.clone(),
+                    description: b.title.clone(),
+                }).collect()
+            }
+            CompletionSource::InProgressBeads => {
+                self.beads.in_progress.iter().map(|b| CompletionItem {
+                    value: b.id.clone(),
+                    label: b.id.clone(),
+                    description: b.title.clone(),
+                }).collect()
+            }
+            CompletionSource::Rigs => {
+                self.status.rigs.iter().map(|r| CompletionItem {
+                    value: r.name.clone(),
+                    label: r.name.clone(),
+                    description: format!("{} polecats, {} crew", r.polecat_count, r.crew_count),
+                }).collect()
+            }
+            CompletionSource::Agents => {
+                self.all_agents.iter().map(|a| CompletionItem {
+                    value: a.address.clone(),
+                    label: if a.address.is_empty() { a.name.clone() } else { a.address.clone() },
+                    description: format!("{} ({})", a.role, if a.running { "running" } else { "stopped" }),
+                }).collect()
+            }
+            CompletionSource::Formulas => {
+                self.formulas.iter().map(|f| CompletionItem {
+                    value: f.name.clone(),
+                    label: f.name.clone(),
+                    description: f.description.clone(),
+                }).collect()
+            }
+            CompletionSource::Polecats => {
+                let mut items = Vec::new();
+                for rig in &self.status.rigs {
+                    for agent in &rig.agents {
+                        if agent.role == "polecat" {
+                            let target = format!("{}/{}", rig.name, agent.name);
+                            items.push(CompletionItem {
+                                value: target.clone(),
+                                label: target,
+                                description: if agent.running { "running".to_string() } else { "stopped".to_string() },
+                            });
+                        }
+                    }
+                }
+                items
+            }
+            CompletionSource::FreeText => Vec::new(),
+        }
+    }
+
+    /// Handle a completion value being selected in arg-fill mode.
+    fn handle_arg_complete(&mut self, value: String) -> Cmd<Msg> {
+        if self.arg_fill.is_none() {
+            return Cmd::None;
+        }
+
+        {
+            let state = self.arg_fill.as_mut().unwrap();
+            state.filled.push(value);
+            state.current += 1;
+        }
+
+        let state = self.arg_fill.as_ref().unwrap();
+        if state.current < state.args.len() {
+            // More args to fill — show next completion
+            let prompt = format!("Select {}: ({}/{})", state.args[state.current].name, state.current + 1, state.args.len());
+            let items = self.generate_completions(&state.args[state.current].source);
+            self.palette.enter_completion_mode(&prompt, items);
+            Cmd::None
+        } else {
+            // All args filled — build and execute the command
+            let state = self.arg_fill.take().unwrap();
+            let mut parts = vec![state.command];
+            parts.extend(state.filled);
+            let cmd = parts.join(" ");
+            self.palette.close();
+            self.execute_raw_command(&cmd)
+        }
+    }
+
+    /// Handle backspace in arg-fill mode — go back to previous arg or exit.
+    fn handle_arg_back(&mut self) -> Cmd<Msg> {
+        if self.arg_fill.is_none() {
+            return Cmd::None;
+        }
+
+        let go_back = {
+            let state = self.arg_fill.as_ref().unwrap();
+            state.current > 0
+        };
+
+        if go_back {
+            {
+                let state = self.arg_fill.as_mut().unwrap();
+                state.current -= 1;
+                state.filled.pop();
+            }
+            let state = self.arg_fill.as_ref().unwrap();
+            let prompt = format!("Select {}: ({}/{})", state.args[state.current].name, state.current + 1, state.args.len());
+            let items = self.generate_completions(&state.args[state.current].source);
+            self.palette.enter_completion_mode(&prompt, items);
+        } else {
+            // At first arg — exit arg-fill, return to normal palette
+            self.arg_fill = None;
+            self.palette.exit_completion_mode();
+            self.palette.open();
+        }
+        Cmd::None
+    }
+
     /// Returns true if the active screen is in a text-input mode (e.g. search bar).
     fn consumes_text_input(&self) -> bool {
         match self.active_screen {
@@ -499,7 +706,8 @@ impl GtApp {
         // When palette is open, route all input through it first
         if self.palette.is_visible() {
             // Intercept Enter when query is a raw command (user typed args)
-            if key.code == KeyCode::Enter {
+            // but NOT in completion mode (completion mode handles its own Enter)
+            if key.code == KeyCode::Enter && !self.palette.is_in_completion_mode() {
                 let q = self.palette.query().to_string();
                 if q.starts_with("gt ") || q.starts_with("bd ") {
                     self.palette.close();
@@ -511,7 +719,12 @@ impl GtApp {
             if let Some(action) = self.palette.handle_event(&event) {
                 return match action {
                     PaletteAction::Execute(id) => self.execute_palette_action(&id),
-                    PaletteAction::Dismiss => Cmd::None,
+                    PaletteAction::Complete(value) => self.handle_arg_complete(value),
+                    PaletteAction::CompleteBack => self.handle_arg_back(),
+                    PaletteAction::Dismiss => {
+                        self.arg_fill = None;
+                        Cmd::None
+                    }
                 };
             }
             // Palette consumed the event
